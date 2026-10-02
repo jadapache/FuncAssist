@@ -139,11 +139,6 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
                   Audio o video (MP3, WAV, M4A, MP4, WebM, FLAC) hasta 2 GB
                 </p>
               </div>
-              <div className="pt-2 flex flex-wrap items-center justify-center gap-1.5 text-[11px] text-slate-500">
-                <span className="px-2 py-0.5 rounded-md bg-slate-200/70 font-medium">Auto-diarización</span>
-                <span className="px-2 py-0.5 rounded-md bg-slate-200/70 font-medium">Resumen IA</span>
-                <span className="px-2 py-0.5 rounded-md bg-slate-200/70 font-medium">Inventario & Levantamiento</span>
-              </div>
             </div>
           ) : (
             <div className="w-full flex items-center justify-between gap-4 p-2">
