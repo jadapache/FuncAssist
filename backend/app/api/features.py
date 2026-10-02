@@ -109,6 +109,7 @@ async def ai_models_catalog(
 
 @router.get("/ai/settings")
 async def ai_settings() -> dict[str, Any]:
+  """Get current AI configuration"""
   import os
   from app.ai.providers.registry import find_provider_spec
 
@@ -148,11 +149,18 @@ async def ai_settings() -> dict[str, Any]:
 
 @router.put("/ai/settings")
 async def update_ai_settings(body: AISettingsUpdate) -> dict[str, Any]:
+  """Update AI settings - merges new values with existing ones"""
   current = load_app_settings()
   ai = dict(current.get("ai") or {})
+  
+  # Merge new values into existing AI settings
   for key, value in body.model_dump(exclude_none=True).items():
-    ai[key] = value
+    if value is not None:  # Only update non-None values
+      ai[key] = value
+  
+  # Save merged settings
   save_app_settings({"ai": ai})
+  
   return await ai_settings()
 
 
