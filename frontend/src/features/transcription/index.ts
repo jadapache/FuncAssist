@@ -30,7 +30,6 @@ export { ActiveTranscriptionItem } from './components/ActiveTranscriptionItem'
 export { RecentTranscriptionItem } from './components/RecentTranscriptionItem'
 export { TranscriptionProgressModal } from './components/TranscriptionProgressModal'
 export { FloatingTranscriptionToast } from './components/FloatingTranscriptionToast'
-export { ProgressModal } from './components/ProgressModal'
 export { SummaryModal } from './components/SummaryModal'
 export { GenerateModal } from './components/GenerateModal'
 
