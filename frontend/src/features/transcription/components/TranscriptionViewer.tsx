@@ -125,6 +125,8 @@ export const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
           segments={transcriptionResult?.segments}
           plainText={transcriptionResult?.text}
           importantSegments={importantSegments}
+          activeProgressMessage={activeProgressMessage}
+          isJobActive={isJobActive}
           onToggleImportance={onToggleSegmentImportance}
         />
       </div>

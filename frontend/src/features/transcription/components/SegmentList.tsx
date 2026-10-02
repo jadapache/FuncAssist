@@ -1,5 +1,5 @@
 import React from 'react'
-import { Loader2, Star } from 'lucide-react'
+import { Loader2, Star, VolumeX } from 'lucide-react'
 import type { TranscriptionSegment } from '../api/transcriptionApi'
 import { formatTimestamp, getSpeakerColor } from '../hooks/useTranscriptionActions'
 
@@ -8,6 +8,7 @@ interface SegmentListProps {
   plainText: string | undefined
   importantSegments: Set<number>
   activeProgressMessage?: string
+  isJobActive?: boolean
   onToggleImportance: (index: number) => void
 }
 
@@ -16,18 +17,35 @@ export const SegmentList: React.FC<SegmentListProps> = ({
   plainText,
   importantSegments,
   activeProgressMessage,
+  isJobActive,
   onToggleImportance,
 }) => {
   // Empty state / Loading
   if (!segments?.length && !plainText) {
+    if (isJobActive) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
+          <Loader2 className="h-8 w-8 animate-spin text-[#002777]" />
+          <p className="text-xs font-semibold text-slate-600">
+            {activeProgressMessage || 'Procesando transcripción de audio...'}
+          </p>
+          <p className="text-[11px] text-slate-400 max-w-xs">
+            Los segmentos y la identificación de interlocutores aparecerán aquí al completarse la transcripción y diarización.
+          </p>
+        </div>
+      )
+    }
+
     return (
       <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
-        <Loader2 className="h-8 w-8 animate-spin text-[#002777]" />
-        <p className="text-xs font-semibold text-slate-600">
-          {activeProgressMessage || 'Procesando transcripción de audio...'}
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+          <VolumeX className="h-6 w-6" />
+        </div>
+        <p className="text-xs font-bold text-slate-700">
+          No se detectaron diálogos en la grabación.
         </p>
         <p className="text-[11px] text-slate-400 max-w-xs">
-          Los segmentos y la identificación de interlocutores aparecerán aquí al completarse la transcripción y diarización.
+          El archivo procesado no contiene voz audible o segmentos de audio para transcribir.
         </p>
       </div>
     )
