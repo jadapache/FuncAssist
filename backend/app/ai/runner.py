@@ -9,10 +9,16 @@ from app.ai.artifacts import artifacts_to_dict, extract_artifacts
 from app.ai.logging import log_ai_call
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import resolve_provider
+from app.ai.request_types import (
+    DocumentFeatureRequest,
+    GroundedFeatureRequest,
+    SimpleFeatureRequest,
+)
 from app.ai.templates import get_prompt, get_rubric, rubric_to_text
 from app.context.models import ContextChunk
 from app.context.retrieval import chunks_from_documents
 from app.context.service import assemble_context
+
 
 
 @dataclass
@@ -243,4 +249,39 @@ async def run_grounded_feature_stream(
         "output": full_output,
         "streamed": True,
     })
+
+
+async def run_simple_feature(request: SimpleFeatureRequest) -> dict[str, Any]:
+    """Run feature with only query (no external context sources)."""
+    return await run_grounded_feature(
+        feature=request.feature,
+        query=request.query,
+        sources=[],
+        document_ids=None,
+        chat_context=None,
+    )
+
+
+async def run_document_feature(request: DocumentFeatureRequest) -> dict[str, Any]:
+    """Run feature with document analysis."""
+    return await run_grounded_feature(
+        feature=request.feature,
+        query=request.query,
+        sources=request.sources or ["knowledge"],
+        document_ids=request.document_ids,
+        chat_context=None,
+    )
+
+
+async def run_grounded_request(request: GroundedFeatureRequest) -> dict[str, Any]:
+    """Run feature with full grounded request."""
+    return await run_grounded_feature(
+        feature=request.feature,
+        query=request.query,
+        sources=request.sources,
+        document_ids=request.document_ids,
+        chat_context=request.chat_context,
+        template_content=request.template_content,
+    )
+
 
