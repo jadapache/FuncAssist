@@ -153,7 +153,7 @@ export function useTranscriptionActions(
       const res = await transcriptionApi.generateSummary(transcriptionId)
       if (res.transcription) {
         setTranscriptionResult(res.transcription)
-        toast.success('¡Resumen ejecutivo generado con éxito!')
+        toast.success('¡Resumen generado con éxito!')
         onRefreshData?.()
       }
     } catch (err: any) {
