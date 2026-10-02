@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { api, type KnowledgeDocument } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
+import { ConfirmationModal } from '../../components/common'
 
 const ACCEPTED_TYPES = '.pdf,.docx,.md,.txt,.json,.html,.htm'
 
@@ -17,6 +18,8 @@ export const KnowledgePage = () => {
   const [, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [loadingDocs, setLoadingDocs] = useState(true)
+  const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const load = useCallback(async () => {
     setLoadingDocs(true)
@@ -64,26 +67,26 @@ export const KnowledgePage = () => {
     }
   }
 
-  const handleDelete = async (doc: KnowledgeDocument) => {
-    const confirmed = window.confirm(`¿Eliminar "${doc.filename}" de la biblioteca?`)
-    if (!confirmed) {
-      return
-    }
+  const confirmDeleteDoc = async () => {
+    if (!docToDelete) return
+    setIsDeleting(true)
     setBusy(true)
     setError(null)
     setMessage(null)
     try {
-      await api.deleteDocument(doc.id)
+      await api.deleteDocument(docToDelete.id)
       await load()
-      const successMsg = `Se eliminó "${doc.filename}".`
+      const successMsg = `Se eliminó "${docToDelete.filename}".`
       setMessage(successMsg)
       toast.success(successMsg)
+      setDocToDelete(null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Falló la eliminación'
       setError(msg)
       toast.error(msg)
     } finally {
       setBusy(false)
+      setIsDeleting(false)
     }
   }
 
@@ -190,8 +193,8 @@ export const KnowledgePage = () => {
                 <button
                   type="button"
                   disabled={busy}
-                  className="text-sm text-[var(--color-bad)] disabled:opacity-50"
-                  onClick={() => void handleDelete(doc)}
+                  className="text-sm text-[var(--color-bad)] hover:underline cursor-pointer disabled:opacity-50"
+                  onClick={() => setDocToDelete(doc)}
                   aria-label={`Eliminar ${doc.filename}`}
                 >
                   Eliminar
@@ -252,6 +255,19 @@ export const KnowledgePage = () => {
           </div>
         </section>
       ) : null}
+
+      <ConfirmationModal
+        isOpen={Boolean(docToDelete)}
+        title="Eliminar Documento de la Biblioteca"
+        message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" de la biblioteca de conocimiento? Esta acción no se puede deshacer.`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        isDestructive
+        isLoading={isDeleting}
+        onConfirm={confirmDeleteDoc}
+        onClose={() => setDocToDelete(null)}
+      />
     </div>
   )
 }

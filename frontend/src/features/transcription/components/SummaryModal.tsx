@@ -40,7 +40,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
     requirements: [],
     action_items: [],
   })
-  const [saveToKb, setSaveToKb] = useState(true)
+  const [saveToKb, setSaveToKb] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript'>('summary')
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null)

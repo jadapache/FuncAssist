@@ -493,32 +493,36 @@ class TranscriptionService:
     summary = record.get("summary") or {}
     segments = record.get("segments", [])
 
-    lines = [f"# Transcripción de Reunión: {title}\n"]
+    lines = [f"Transcripción de Reunión: {title}\n"]
     if summary:
-      lines.append("## Resumen Ejecutivo\n")
+      lines.append("Resumen Ejecutivo")
+      lines.append("-" * 60)
       if summary.get("participants"):
-        lines.append(f"**Participantes:** {', '.join(summary['participants'])}\n")
+        lines.append(f"Participantes: {', '.join(summary['participants'])}")
       if summary.get("topics"):
-        lines.append(f"**Temas:** {', '.join(summary['topics'])}\n")
+        lines.append(f"Temas: {', '.join(summary['topics'])}")
       if summary.get("decisions"):
-        lines.append(f"**Decisiones:** {', '.join(summary['decisions'])}\n")
+        lines.append(f"Decisiones: {', '.join(summary['decisions'])}")
       if summary.get("requirements"):
-        lines.append(f"**Requerimientos:** {', '.join(summary['requirements'])}\n")
+        lines.append(f"Requerimientos: {', '.join(summary['requirements'])}")
       if summary.get("action_items"):
-        lines.append(f"**Compromisos:** {', '.join(summary['action_items'])}\n")
+        lines.append(f"Compromisos: {', '.join(summary['action_items'])}")
+      lines.append("")
 
-    lines.append("## Diálogo Completo Transcrito\n")
+    lines.append("Diálogo Completo Transcrito")
+    lines.append("-" * 60)
     for s in segments:
       mins = int(s.get("start", 0) // 60)
       secs = int(s.get("start", 0) % 60)
       lines.append(f"[{mins:02d}:{secs:02d}] {s.get('speaker', 'Participante')}: {s.get('text', '')}")
 
-    full_md = "\n".join(lines)
-    tags = ["reunion", "transcripcion", "minuta"] + (custom_tags or [])
-    safe_title = re.sub(r"[^a-zA-Z0-9_\-]", "_", title) or "Reunion"
+    full_txt = "\n".join(lines)
+    tags = ["reunion", "transcripcion"] + (custom_tags or [])
+    clean_filename = title if title.lower().endswith(".txt") else f"{title}.txt"
+
     doc_entry = ingest_document(
-      filename=f"Minuta_{safe_title}.md",
-      raw=full_md.encode("utf-8"),
+      filename=clean_filename,
+      raw=full_txt.encode("utf-8"),
       tags=list(set(tags)),
     )
 
