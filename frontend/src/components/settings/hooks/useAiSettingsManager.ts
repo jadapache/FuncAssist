@@ -124,12 +124,22 @@ export function useAiSettingsManager() {
         if (!isMounted) return
         setAi(settings)
 
+        const isFirstTimeSetup = !settings.provider && !settings.transcription_provider
+
         const prov = settings.provider || 'builtin'
         setProvider(prov)
 
-        if (settings.model && settings.model.trim()) {
+        if (settings.model) {
           setModel(settings.model)
+        } else if (isFirstTimeSetup) {
+          if (prov === 'groq') setModel('llama-3.3-70b-versatile')
+          else if (prov === 'builtin') setModel('qwen3.5:2b')
+          else if (prov === 'gemini') setModel('gemini-1.5-flash')
+          else if (prov === 'openai') setModel('gpt-4o-mini')
+          else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
+          else setModel('qwen3.5:2b')
         } else {
+          // Provider exists but model is unset, assign sensible default for that provider
           if (prov === 'groq') setModel('llama-3.3-70b-versatile')
           else if (prov === 'builtin') setModel('qwen3.5:2b')
           else if (prov === 'gemini') setModel('gemini-1.5-flash')
@@ -137,16 +147,26 @@ export function useAiSettingsManager() {
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
         }
 
-        const unifiedProvider = settings.transcription_provider || settings.voice_command_provider || 'groq'
-        const defaultTransModel =
-          unifiedProvider === 'groq'
-            ? 'whisper-large-v3'
-            : unifiedProvider === 'openai'
-            ? 'whisper-1'
-            : 'base'
-        const unifiedModel = settings.transcription_model || settings.voice_command_model || defaultTransModel
-        setVoiceAudioProvider(unifiedProvider)
-        setVoiceAudioModel(unifiedModel)
+        if (settings.transcription_provider || settings.voice_command_provider) {
+          const savedProvider = (settings.transcription_provider || settings.voice_command_provider)!
+          setVoiceAudioProvider(savedProvider)
+
+          const savedModel = settings.transcription_model || settings.voice_command_model
+          if (savedModel) {
+            setVoiceAudioModel(savedModel)
+          } else {
+            const defaultTransModel =
+              savedProvider === 'groq'
+                ? 'whisper-large-v3'
+                : savedProvider === 'openai'
+                ? 'whisper-1'
+                : 'base'
+            setVoiceAudioModel(defaultTransModel)
+          }
+        } else if (isFirstTimeSetup) {
+          setVoiceAudioProvider('groq')
+          setVoiceAudioModel('whisper-large-v3')
+        }
 
         if (
           settings.ollama_base_url &&

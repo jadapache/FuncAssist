@@ -124,12 +124,12 @@ async def ai_settings() -> dict[str, Any]:
       active_key_set = bool(os.getenv(spec.env_key))
 
   return {
-    "provider": config.get("provider") or "",
-    "model": config.get("model") or "",
-    "transcription_provider": config.get("transcription_provider") or "groq",
-    "transcription_model": config.get("transcription_model") or "whisper-large-v3",
-    "voice_command_provider": config.get("voice_command_provider") or "groq",
-    "voice_command_model": config.get("voice_command_model") or "whisper-large-v3",
+    "provider": config.get("provider") or None,
+    "model": config.get("model") or None,
+    "transcription_provider": config.get("transcription_provider") or None,
+    "transcription_model": config.get("transcription_model") or None,
+    "voice_command_provider": config.get("voice_command_provider") or None,
+    "voice_command_model": config.get("voice_command_model") or None,
     "openai_api_key_set": bool(config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")),
     "claude_api_key_set": bool(config.get("claude_api_key") or os.getenv("ANTHROPIC_API_KEY")),
     "groq_api_key_set": bool(config.get("groq_api_key") or os.getenv("GROQ_API_KEY")),

@@ -134,11 +134,17 @@ export const VoiceAudioSection = ({
                 const newP = e.target.value
                 setVoiceAudioProvider(newP)
                 if (newP === 'builtin' || newP === 'local') {
-                  setVoiceAudioModel('base')
+                  if (!voiceAudioModel || voiceAudioModel.startsWith('whisper-')) {
+                    setVoiceAudioModel('base')
+                  }
                 } else if (newP === 'groq') {
-                  setVoiceAudioModel('whisper-large-v3')
+                  if (!voiceAudioModel || !voiceAudioModel.startsWith('whisper-')) {
+                    setVoiceAudioModel('whisper-large-v3')
+                  }
                 } else if (newP === 'openai') {
-                  setVoiceAudioModel('whisper-1')
+                  if (!voiceAudioModel || voiceAudioModel !== 'whisper-1') {
+                    setVoiceAudioModel('whisper-1')
+                  }
                 }
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"

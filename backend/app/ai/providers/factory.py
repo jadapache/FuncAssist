@@ -15,15 +15,16 @@ def get_ai_settings() -> dict[str, Any]:
   settings = load_app_settings()
   ai = settings.get("ai") or {}
   return {
-    "provider": ai.get("provider") or os.getenv("AI_PROVIDER", ""),
-    "model": ai.get("model") or os.getenv("AI_MODEL", ""),
-    "transcription_provider": ai.get("transcription_provider") or os.getenv("AI_TRANSCRIPTION_PROVIDER", "groq"),
-    "transcription_model": ai.get("transcription_model") or os.getenv("AI_TRANSCRIPTION_MODEL", "whisper-large-v3"),
-    "voice_command_provider": ai.get("voice_command_provider") or os.getenv("AI_VOICE_COMMAND_PROVIDER", "groq"),
-    "voice_command_model": ai.get("voice_command_model") or os.getenv("AI_VOICE_COMMAND_MODEL", "whisper-large-v3"),
+    "provider": ai.get("provider") or os.getenv("AI_PROVIDER") or None,
+    "model": ai.get("model") or os.getenv("AI_MODEL") or None,
+    "transcription_provider": ai.get("transcription_provider") or os.getenv("AI_TRANSCRIPTION_PROVIDER") or None,
+    "transcription_model": ai.get("transcription_model") or os.getenv("AI_TRANSCRIPTION_MODEL") or None,
+    "voice_command_provider": ai.get("voice_command_provider") or os.getenv("AI_VOICE_COMMAND_PROVIDER") or None,
+    "voice_command_model": ai.get("voice_command_model") or os.getenv("AI_VOICE_COMMAND_MODEL") or None,
     "openai_api_key": ai.get("openai_api_key") or os.getenv("OPENAI_API_KEY", ""),
     "claude_api_key": ai.get("claude_api_key") or os.getenv("ANTHROPIC_API_KEY", ""),
     "groq_api_key": ai.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
+    "gemini_api_key": ai.get("gemini_api_key") or os.getenv("GEMINI_API_KEY", ""),
     "transcription_groq_api_key": ai.get("transcription_groq_api_key") or ai.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
     "transcription_openai_api_key": ai.get("transcription_openai_api_key") or ai.get("openai_api_key") or os.getenv("OPENAI_API_KEY", ""),
     "ollama_base_url": ai.get("ollama_base_url") or os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),

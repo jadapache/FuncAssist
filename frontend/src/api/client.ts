@@ -122,12 +122,12 @@ export type AgenticPromptResponse = {
 }
 
 export type AISettings = {
-  provider: string
-  model: string
-  transcription_provider?: string
-  transcription_model?: string
-  voice_command_provider?: string
-  voice_command_model?: string
+  provider: string | null
+  model: string | null
+  transcription_provider?: string | null
+  transcription_model?: string | null
+  voice_command_provider?: string | null
+  voice_command_model?: string | null
   openai_api_key_set: boolean
   claude_api_key_set: boolean
   groq_api_key_set: boolean
