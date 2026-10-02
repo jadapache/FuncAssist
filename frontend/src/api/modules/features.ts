@@ -65,3 +65,4 @@ export const featuresApi = {
   resetAiRubric: (feature: string) =>
     apiClient.post<AIRubric>(`/api/ai/rubrics/${feature}/reset`),
 }
+
