@@ -319,7 +319,7 @@ export const VoiceAudioSection = ({
             <div className="space-y-5 pt-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-800 block">
-                  Modelo en la Nube
+                  Modelo de frontera
                 </label>
                 <select
                   value={voiceAudioModel}

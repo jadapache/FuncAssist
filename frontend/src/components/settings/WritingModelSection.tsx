@@ -157,7 +157,7 @@ export const WritingModelSection = ({
           {/* Selector de Proveedor / Tipo de Modelo */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-800 block">
-              Modelo de Inferencia / Resumen
+              Proveedor del Modelo de Inferencia
             </label>
 
             <select
@@ -340,7 +340,7 @@ export const WritingModelSection = ({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-800 block">
-                    Modelo Recomendado
+                    Modelo de frontera
                   </label>
                   <select
                     value={
@@ -496,7 +496,7 @@ export const WritingModelSection = ({
                     ) : (
                       <Download className="h-3.5 w-3.5" />
                     )}
-                    <span>Descargar gemma3:1b (Recomendado, ~800MB)</span>
+                    <span>Descargar gemma3:1b (Recomendado)</span>
                   </button>
                 </div>
 
@@ -522,17 +522,11 @@ export const WritingModelSection = ({
 
             return (
               <div className="space-y-4 pt-2">
-                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-950">
-                  <FileText className="h-4 w-4 text-[#002777] shrink-0" />
-                  <span className="font-medium">
-                    Modelo empleado para redacción y comprensión de peticiones desde el chat realizadas por el usuario
-                  </span>
-                </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-800 block">
-                      Modelo Recomendado (Redacción y Chat)
+                      Modelo de frontera
                     </label>
                     <select
                       value={dropdownModels.some((m) => m.id === model) ? model : 'custom'}
@@ -579,9 +573,6 @@ export const WritingModelSection = ({
                         <code className="text-[11px] font-mono text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">
                           {currentModelDetails.id}
                         </code>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
-                          <FileText className="h-2.5 w-2.5" /> {currentModelDetails.task_label}
-                        </span>
                       </div>
                       {currentModelDetails.is_free ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
