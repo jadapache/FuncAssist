@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import get_ai_settings, resolve_provider
+from app.api.middleware.error_handlers import handle_grounded_errors
 from app.features.transcription.whisper_local import (
     delete_model_file,
     download_model_file,
@@ -30,6 +31,7 @@ class OllamaPullRequest(BaseModel):
 
 
 @router.post("/test-connection")
+@handle_grounded_errors
 async def test_ai_connection(body: AITestConnectionRequest = Body(...)) -> dict[str, Any]:
     config = get_ai_settings()
     provider_name = (body.provider or config.get("provider") or "").lower()
@@ -73,6 +75,7 @@ async def test_ai_connection(body: AITestConnectionRequest = Body(...)) -> dict[
 
 
 @router.get("/ollama/models")
+@handle_grounded_errors
 async def list_ollama_models(base_url: str | None = None) -> dict[str, Any]:
     config = get_ai_settings()
     target_url = (base_url or config.get("ollama_base_url") or "http://127.0.0.1:11434").rstrip("/")
@@ -88,6 +91,7 @@ async def list_ollama_models(base_url: str | None = None) -> dict[str, Any]:
 
 
 @router.post("/ollama/pull")
+@handle_grounded_errors
 async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, Any]:
     config = get_ai_settings()
     target_url = (body.base_url or config.get("ollama_base_url") or "http://127.0.0.1:11434").rstrip("/")
@@ -101,6 +105,7 @@ async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, An
 
 
 @router.delete("/ollama/{model_name:path}")
+@handle_grounded_errors
 async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = None) -> dict[str, Any]:
     """Delete a local Ollama model to free disk space."""
     config = get_ai_settings()
@@ -116,6 +121,7 @@ async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = N
 
 
 @router.get("/whisper/models")
+@handle_grounded_errors
 async def list_whisper_models() -> dict[str, Any]:
     """List all local Whisper built-in models and their download status on disk."""
     models = get_local_models_info()
@@ -123,6 +129,7 @@ async def list_whisper_models() -> dict[str, Any]:
 
 
 @router.post("/whisper/download/{model_id}")
+@handle_grounded_errors
 async def download_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
     """Download a local Whisper model to disk cache."""
     try:
@@ -139,6 +146,7 @@ async def download_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
 
 
 @router.delete("/whisper/{model_id}")
+@handle_grounded_errors
 async def delete_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
     """Delete a downloaded local Whisper model from disk to free space."""
     try:

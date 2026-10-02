@@ -15,6 +15,7 @@ from app.ai.templates import (
     save_prompt,
     save_rubric,
 )
+from app.api.middleware.error_handlers import handle_grounded_errors
 
 router = APIRouter(prefix="/ai", tags=["ai-templates"])
 
@@ -32,11 +33,13 @@ class RubricUpdate(BaseModel):
 
 
 @router.get("/prompts")
+@handle_grounded_errors
 async def prompts() -> dict[str, Any]:
     return {"prompts": list_prompts()}
 
 
 @router.get("/prompts/{feature}")
+@handle_grounded_errors
 async def prompt_detail(feature: str) -> dict[str, Any]:
     try:
         return get_prompt(feature)
@@ -45,6 +48,7 @@ async def prompt_detail(feature: str) -> dict[str, Any]:
 
 
 @router.put("/prompts/{feature}")
+@handle_grounded_errors
 async def update_prompt(feature: str, body: TemplateUpdate = Body(...)) -> dict[str, Any]:
     try:
         return save_prompt(feature, body.model_dump(exclude_none=True))
@@ -53,6 +57,7 @@ async def update_prompt(feature: str, body: TemplateUpdate = Body(...)) -> dict[
 
 
 @router.post("/prompts/{feature}/reset")
+@handle_grounded_errors
 async def reset_prompt_endpoint(feature: str) -> dict[str, Any]:
     try:
         return reset_prompt(feature)
@@ -61,11 +66,13 @@ async def reset_prompt_endpoint(feature: str) -> dict[str, Any]:
 
 
 @router.get("/rubrics")
+@handle_grounded_errors
 async def rubrics() -> dict[str, Any]:
     return {"rubrics": list_rubrics()}
 
 
 @router.get("/rubrics/{feature}")
+@handle_grounded_errors
 async def rubric_detail(feature: str) -> dict[str, Any]:
     try:
         return get_rubric(feature)
@@ -74,6 +81,7 @@ async def rubric_detail(feature: str) -> dict[str, Any]:
 
 
 @router.put("/rubrics/{feature}")
+@handle_grounded_errors
 async def update_rubric(feature: str, body: RubricUpdate = Body(...)) -> dict[str, Any]:
     try:
         return save_rubric(feature, body.model_dump())
@@ -82,6 +90,7 @@ async def update_rubric(feature: str, body: RubricUpdate = Body(...)) -> dict[st
 
 
 @router.post("/rubrics/{feature}/reset")
+@handle_grounded_errors
 async def reset_rubric_endpoint(feature: str) -> dict[str, Any]:
     try:
         return reset_rubric(feature)
@@ -90,5 +99,6 @@ async def reset_rubric_endpoint(feature: str) -> dict[str, Any]:
 
 
 @router.get("/logs")
+@handle_grounded_errors
 async def ai_logs(limit: int = 20) -> dict[str, Any]:
     return {"logs": list_logs(limit=limit)}

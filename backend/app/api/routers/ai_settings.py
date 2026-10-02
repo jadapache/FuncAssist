@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.ai.catalog import get_model_catalog
 from app.ai.providers.factory import get_ai_settings
 from app.ai.providers.registry import find_provider_spec
+from app.api.middleware.error_handlers import handle_grounded_errors
 from app.core.storage import load_app_settings, save_app_settings
 
 router = APIRouter(prefix="/ai", tags=["ai-settings"])
@@ -28,6 +29,7 @@ class AISettingsUpdate(BaseModel):
 
 
 @router.get("/models/catalog")
+@handle_grounded_errors
 async def ai_models_catalog(
     refresh: bool = False,
     provider: str = "all",
@@ -38,6 +40,7 @@ async def ai_models_catalog(
 
 
 @router.get("/settings")
+@handle_grounded_errors
 async def get_settings_endpoint() -> dict[str, Any]:
     config = get_ai_settings()
     provider = (config.get("provider") or "").lower()
@@ -74,6 +77,7 @@ async def get_settings_endpoint() -> dict[str, Any]:
 
 
 @router.put("/settings")
+@handle_grounded_errors
 async def update_ai_settings(body: AISettingsUpdate = Body(...)) -> dict[str, Any]:
     current = load_app_settings()
     ai = dict(current.get("ai") or {})

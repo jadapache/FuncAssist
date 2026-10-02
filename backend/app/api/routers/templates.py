@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.api.middleware.error_handlers import handle_grounded_errors
 from app.core.template_storage import (
     delete_template,
     get_template_detail,
@@ -23,11 +24,13 @@ class TemplateMetadataUpdate(BaseModel):
 
 
 @router.get("")
+@handle_grounded_errors
 async def get_templates() -> dict[str, Any]:
     return {"templates": list_templates()}
 
 
 @router.get("/{template_id}/content")
+@handle_grounded_errors
 async def get_template_content_route(template_id: str) -> dict[str, Any]:
     detail = get_template_detail(template_id)
     if not detail:
@@ -36,6 +39,7 @@ async def get_template_content_route(template_id: str) -> dict[str, Any]:
 
 
 @router.post("/upload")
+@handle_grounded_errors
 async def upload_template(
     file: UploadFile = File(...),
     title: str = Form(default=""),
@@ -52,6 +56,7 @@ async def upload_template(
 
 
 @router.put("/{template_id}")
+@handle_grounded_errors
 async def edit_template(template_id: str, body: TemplateMetadataUpdate = Body(...)) -> dict[str, Any]:
     updated = update_template_metadata(
         template_id,
@@ -66,6 +71,7 @@ async def edit_template(template_id: str, body: TemplateMetadataUpdate = Body(..
 
 
 @router.delete("/{template_id}")
+@handle_grounded_errors
 async def remove_template(template_id: str) -> dict[str, Any]:
     success = delete_template(template_id)
     if not success:
