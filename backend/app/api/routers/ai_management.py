@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 import httpx
@@ -25,9 +23,15 @@ class AITestConnectionRequest(BaseModel):
     ollama_base_url: str | None = None
 
 
+AITestConnectionRequest.model_rebuild()
+
+
 class OllamaPullRequest(BaseModel):
     name: str = Field(min_length=1)
     base_url: str | None = None
+
+
+OllamaPullRequest.model_rebuild()
 
 
 @router.post("/test-connection")
@@ -100,6 +104,11 @@ async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, An
             res = await client.post(f"{target_url}/api/pull", json={"name": body.name, "stream": False})
             res.raise_for_status()
             return {"status": "success", "model": body.name, "response": res.json()}
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"No se pudo conectar con Ollama en {target_url}. Verifica que Ollama esté instalado y ejecutándose en segundo plano (ej. ejecuta 'ollama serve' o abre la app de Ollama).",
+        ) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al descargar el modelo {body.name} en Ollama: {e}")
 
@@ -116,6 +125,11 @@ async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = N
             res = await client.send(req)
             res.raise_for_status()
             return {"ok": True, "model": model_name, "message": f"Modelo {model_name} eliminado de Ollama correctamente."}
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"No se pudo conectar con Ollama en {target_url}. Verifica que Ollama esté instalado y ejecutándose en segundo plano.",
+        ) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al eliminar el modelo {model_name} en Ollama: {e}")
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 import httpx
@@ -66,9 +64,15 @@ class AISettingsUpdate(BaseModel):
   ollama_base_url: str | None = None
 
 
+AISettingsUpdate.model_rebuild()
+
+
 class OllamaPullRequest(BaseModel):
   name: str = Field(min_length=1)
   base_url: str | None = None
+
+
+OllamaPullRequest.model_rebuild()
 
 
 class GroundedRequest(BaseModel):
@@ -78,11 +82,17 @@ class GroundedRequest(BaseModel):
   chat_context: str | None = None
 
 
+GroundedRequest.model_rebuild()
+
+
 class FeatureWorkspaceRequest(BaseModel):
   query: str = Field(min_length=1)
   sources: list[str] | None = None
   document_ids: list[str] = Field(default_factory=list)
   chat_context: str | None = None
+
+
+FeatureWorkspaceRequest.model_rebuild()
 
 
 class TemplateUpdate(BaseModel):
@@ -92,9 +102,15 @@ class TemplateUpdate(BaseModel):
   allowed_sources: list[str] | None = None
 
 
+TemplateUpdate.model_rebuild()
+
+
 class RubricUpdate(BaseModel):
   model_config = ConfigDict(extra="allow")
   criteria: list[str]
+
+
+RubricUpdate.model_rebuild()
 
 
 @router.get("/ai/models/catalog")
@@ -170,6 +186,9 @@ class AITestConnectionRequest(BaseModel):
   model: str | None = None
   api_key: str | None = None
   ollama_base_url: str | None = None
+
+
+AITestConnectionRequest.model_rebuild()
 
 
 @router.post("/ai/test-connection")
