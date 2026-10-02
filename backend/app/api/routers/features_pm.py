@@ -10,6 +10,8 @@ from app.api.deps import (
 )
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.db.interfaces import IChatRepository, IPRDRepository, IStandupRepository
+from app.features.change_impact.service import analyze_change_impact
+from app.features.prd_checker.service import review_prd
 from app.features.standup.service import generate_standup
 
 router = APIRouter(prefix="/features", tags=["pm-features"])
@@ -83,11 +85,10 @@ async def prd_checker(
 ) -> dict[str, Any]:
     if not body.document_ids:
         raise HTTPException(status_code=400, detail="Upload at least one PRD or spec file.")
-    res = await run_grounded_feature(
-        feature="prd_checker",
+    res = await review_prd(
         query=body.query,
-        sources=body.sources or ["knowledge"],
         document_ids=body.document_ids,
+        sources=body.sources,
         chat_context=body.chat_context,
     )
     if isinstance(res, dict) and "markdown" in res:
@@ -107,10 +108,9 @@ async def change_impact(body: FeatureWorkspaceRequest = Body(...)) -> dict[str, 
             status_code=400,
             detail="Upload files and/or enable live sources (Jira, GitHub, GitLab).",
         )
-    return await run_grounded_feature(
-        feature="change_impact",
+    return await analyze_change_impact(
         query=body.query,
-        sources=body.sources or ["jira", "github", "knowledge"],
+        sources=body.sources,
         document_ids=body.document_ids,
         chat_context=body.chat_context,
     )
