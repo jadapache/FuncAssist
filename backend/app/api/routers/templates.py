@@ -39,7 +39,6 @@ async def get_template_content_route(template_id: str) -> dict[str, Any]:
 
 
 @router.post("/upload")
-@handle_grounded_errors
 async def upload_template(
     file: UploadFile = File(...),
     title: str = Form(default=""),

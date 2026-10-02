@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../api/client'
+import { API_BASE } from '../../../api/client'
 
 export interface TranscriptionProgressData {
   stage: string

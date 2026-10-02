@@ -8,9 +8,9 @@ import {
   Clock,
   Mic,
 } from 'lucide-react'
-import { useTranscriptionProgress } from '../../hooks/useTranscriptionProgress'
-import { transcriptionApi } from '../../api/modules/transcription'
-import { useToast } from '../../context/ToastContext'
+import { useTranscriptionProgress } from '../hooks/useTranscriptionProgress'
+import { transcriptionApi } from '../api/transcriptionApi'
+import { useToast } from '../../../context/ToastContext'
 
 interface ProgressModalProps {
   transcriptionId: string | null

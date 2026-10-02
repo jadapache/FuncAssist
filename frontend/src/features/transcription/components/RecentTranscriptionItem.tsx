@@ -6,7 +6,7 @@ import {
   HardDrive,
   Trash2,
 } from 'lucide-react'
-import type { TranscriptionResult } from '../../api/modules/transcription'
+import type { TranscriptionResult } from '../api/transcriptionApi'
 
 interface RecentTranscriptionItemProps {
   transcription: TranscriptionResult

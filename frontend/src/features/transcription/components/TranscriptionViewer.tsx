@@ -1,6 +1,6 @@
 import React from 'react'
 import { Volume2, Users, Copy, Check } from 'lucide-react'
-import type { TranscriptionResult } from '../../../api/modules/transcription'
+import type { TranscriptionResult } from '../api/transcriptionApi'
 import { SegmentList } from './SegmentList'
 import { DownloadMenu } from './DownloadMenu'
 

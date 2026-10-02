@@ -12,16 +12,16 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useTranscription } from '../../hooks/useTranscription'
-import type { TranscriptionResult } from '../../api/modules/transcription'
-import { ConfirmationModal } from '../../components/common'
+import { useTranscription } from '../hooks/useTranscription'
+import type { TranscriptionResult } from '../api/transcriptionApi'
+import { ConfirmationModal } from '../../../components/common'
 import {
   UploadArea,
   RecentTranscriptionItem,
   GenerateModal,
   FloatingTranscriptionToast,
   TranscriptionStudio,
-} from '../../components/transcription'
+} from '../components'
 
 const ITEMS_PER_PAGE = 10
 

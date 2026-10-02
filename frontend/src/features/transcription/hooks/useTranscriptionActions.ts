@@ -8,7 +8,7 @@ import {
   transcriptionApi,
   type TranscriptionResult,
   type TranscriptionProgress,
-} from '../../../api/modules/transcription'
+} from '../api/transcriptionApi'
 import { useToast } from '../../../context/ToastContext'
 
 export function formatDuration(seconds: number): string {

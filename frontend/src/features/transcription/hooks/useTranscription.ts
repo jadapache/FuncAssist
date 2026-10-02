@@ -4,8 +4,8 @@ import {
   type AvailableModelsInfo,
   type TranscriptionProgress,
   type TranscriptionResult,
-} from '../api/modules/transcription'
-import { useToast } from '../context/ToastContext'
+} from '../api/transcriptionApi'
+import { useToast } from '../../../context/ToastContext'
 
 const LOCAL_STORAGE_ACTIVE_JOBS = 'qa_active_transcription_jobs'
 

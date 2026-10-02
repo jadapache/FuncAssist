@@ -1,4 +1,5 @@
-import { API_BASE, getAuthHeaders, handleResponse } from '../client'
+import { API_BASE, getAuthHeaders, handleResponse } from '../../../api/client'
+
 
 export type MediaMetadata = {
   title: string

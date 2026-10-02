@@ -11,7 +11,7 @@ import {
   BrainCircuit,
   Loader2,
 } from 'lucide-react'
-import type { TranscriptionProgress } from '../../api/modules/transcription'
+import type { TranscriptionProgress } from '../api/transcriptionApi'
 
 interface TranscriptionProgressModalProps {
   isOpen: boolean

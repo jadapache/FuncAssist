@@ -1,6 +1,6 @@
 import React from 'react'
 import { Loader2, Star } from 'lucide-react'
-import type { TranscriptionSegment } from '../../../api/modules/transcription'
+import type { TranscriptionSegment } from '../api/transcriptionApi'
 import { formatTimestamp, getSpeakerColor } from '../hooks/useTranscriptionActions'
 
 interface SegmentListProps {

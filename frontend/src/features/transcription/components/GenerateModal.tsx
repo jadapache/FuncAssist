@@ -12,9 +12,9 @@ import {
   Loader2,
   ChevronLeft,
 } from 'lucide-react'
-import { api } from '../../api/client'
-import { transcriptionApi } from '../../api/modules/transcription'
-import { useToast } from '../../context/ToastContext'
+import { api } from '../../../api/client'
+import { transcriptionApi } from '../api/transcriptionApi'
+import { useToast } from '../../../context/ToastContext'
 
 interface GenerateModalProps {
   isOpen: boolean

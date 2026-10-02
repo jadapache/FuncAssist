@@ -14,8 +14,8 @@ import {
   Trash2,
   Loader2,
 } from 'lucide-react'
-import { transcriptionApi, type TranscriptionResult, type TranscriptionSummary } from '../../api/modules/transcription'
-import { useToast } from '../../context/ToastContext'
+import { transcriptionApi, type TranscriptionResult, type TranscriptionSummary } from '../api/transcriptionApi'
+import { useToast } from '../../../context/ToastContext'
 
 interface SummaryModalProps {
   isOpen: boolean

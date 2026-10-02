@@ -1,14 +1,14 @@
 import React from 'react'
 import { ArrowLeft, Sparkles, Clock, Users, CheckCircle2, Loader2, BookOpen } from 'lucide-react'
-import type { TranscriptionProgress } from '../../api/modules/transcription'
+import type { TranscriptionProgress } from '../api/transcriptionApi'
 import { GenerateModal } from './GenerateModal'
-import { TranscriptionViewer } from './components/TranscriptionViewer'
-import { SummaryPanel } from './components/SummaryPanel'
-import { SpeakerManager } from './components/SpeakerManager'
+import { TranscriptionViewer } from './TranscriptionViewer'
+import { SummaryPanel } from './SummaryPanel'
+import { SpeakerManager } from './SpeakerManager'
 import {
   useTranscriptionActions,
   formatDuration,
-} from './hooks/useTranscriptionActions'
+} from '../hooks/useTranscriptionActions'
 
 interface TranscriptionStudioProps {
   transcriptionId: string

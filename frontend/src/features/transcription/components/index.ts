@@ -1,10 +1,9 @@
+export { TranscriptionStudio } from './TranscriptionStudio'
 export { UploadArea } from './UploadArea'
 export { ActiveTranscriptionItem } from './ActiveTranscriptionItem'
 export { RecentTranscriptionItem } from './RecentTranscriptionItem'
 export { TranscriptionProgressModal } from './TranscriptionProgressModal'
+export { FloatingTranscriptionToast } from './FloatingTranscriptionToast'
+export { ProgressModal } from './ProgressModal'
 export { SummaryModal } from './SummaryModal'
 export { GenerateModal } from './GenerateModal'
-export { FloatingTranscriptionToast } from './FloatingTranscriptionToast'
-export { TranscriptionStudio } from './TranscriptionStudio'
-export { ProgressModal } from './ProgressModal'
-

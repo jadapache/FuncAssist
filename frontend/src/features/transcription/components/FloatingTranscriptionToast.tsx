@@ -7,7 +7,7 @@ import {
   X,
   Loader2,
 } from 'lucide-react'
-import type { TranscriptionProgress } from '../../api/modules/transcription'
+import type { TranscriptionProgress } from '../api/transcriptionApi'
 
 export interface BackgroundTaskItem {
   id: string
