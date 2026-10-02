@@ -155,9 +155,9 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
               <Sparkles className="h-6 w-6" />
             </div>
             <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-800">Resumen Ejecutivo no generado</h4>
+              <h4 className="text-sm font-bold text-slate-800">Resumen no generado</h4>
               <p className="text-xs text-slate-500 max-w-xs">
-                Genera una síntesis ejecutiva con IA para extraer los puntos clave y habilitar los
+                Genera una síntesis con IA para preparativos de los
                 entregables funcionales.
               </p>
             </div>
@@ -169,7 +169,7 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2 bg-[#002777] hover:bg-[#001e5c] text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-40"
             >
               <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-              <span>Generar Resumen Ejecutivo</span>
+              <span>Generar Resumen</span>
             </button>
           </div>
         )}

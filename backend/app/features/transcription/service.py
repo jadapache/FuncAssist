@@ -266,6 +266,8 @@ class TranscriptionService:
       if transcription_id in _CANCELLED_JOBS:
         raise asyncio.CancelledError(f"Job {transcription_id} was cancelled by user.")
 
+    media_title = media_entry.get("title", "Reunión de Requerimientos")
+
     try:
       # 1. Start Preprocessing
       _check_cancelled()
@@ -273,6 +275,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="preprocessing",
           stage="preprocessing",
           progress=15,
@@ -294,6 +297,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="transcribing",
           stage="transcribing",
           progress=20,
@@ -308,6 +312,7 @@ class TranscriptionService:
           _ACTIVE_JOBS[transcription_id].progress = prog_pct
           _ACTIVE_JOBS[transcription_id].message = message
           _ACTIVE_JOBS[transcription_id].eta = eta_str
+          _ACTIVE_JOBS[transcription_id].title = media_title
           save_active_job_progress(_ACTIVE_JOBS[transcription_id].model_dump())
           emit_progress_sync(transcription_id, _ACTIVE_JOBS[transcription_id].model_dump())
 
@@ -348,6 +353,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="diarizing",
           stage="diarizing",
           progress=75,
@@ -370,6 +376,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="summarizing",
           stage="summarizing",
           progress=88,
@@ -430,6 +437,7 @@ class TranscriptionService:
       final_prog = TranscriptionProgress(
         id=transcription_id,
         media_id=media_id,
+        title=media_title,
         status="complete",
         stage="complete",
         progress=100,

@@ -101,6 +101,7 @@ export const TranscripcionesPage = () => {
       <div className="animate-fade-in font-sans">
         <TranscriptionStudio
           transcriptionId={selectedTranscriptionId}
+          initialMeetingTitle={activeMeetingTitle}
           activeProgress={currentProgress}
           onBackToDashboard={closeStudio}
           onRefreshData={refreshTranscriptions}

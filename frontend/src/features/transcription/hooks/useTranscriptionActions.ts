@@ -59,6 +59,7 @@ export function useTranscriptionActions(
   transcriptionId: string,
   activeProgress?: TranscriptionProgress | null,
   onRefreshData?: () => void,
+  initialMeetingTitle?: string,
 ) {
   const { toast } = useToast()
 
@@ -340,7 +341,11 @@ export function useTranscriptionActions(
     setShowSummaryDownloadMenu(false)
   }, [transcriptionResult, isSummaryReady, summaryParagraphs, keyInsights, summaryData])
 
-  const meetingTitle = transcriptionResult?.metadata?.title || activeProgress?.message || 'Transcripción de Reunión'
+  const meetingTitle =
+    transcriptionResult?.metadata?.title ||
+    activeProgress?.title ||
+    initialMeetingTitle ||
+    'Transcripción de Reunión'
 
   return {
     transcriptionResult,

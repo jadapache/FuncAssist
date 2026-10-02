@@ -122,6 +122,7 @@ export function useTranscription() {
                   [id]: {
                     id,
                     media_id: existing?.media_id || data.media_id || '',
+                    title: data.title || existing?.title,
                     status: data.stage === 'complete' ? 'complete' : data.stage === 'failed' ? 'failed' : 'transcribing',
                     stage: data.stage || existing?.stage,
                     progress: typeof data.progress === 'number' ? data.progress : existing?.progress || 0,
@@ -219,6 +220,7 @@ export function useTranscription() {
         [tempId]: {
           id: tempId,
           media_id: '',
+          title,
           status: 'uploading',
           stage: 'uploading',
           progress: 5,
@@ -252,6 +254,7 @@ export function useTranscription() {
         next[transcriptionId] = {
           id: transcriptionId,
           media_id: mediaId,
+          title,
           status: 'preprocessing',
           stage: 'preprocessing',
           progress: 15,
@@ -327,8 +330,11 @@ export function useTranscription() {
   // Navigation helpers
   const openStudio = (transcriptionId: string) => {
     setSelectedTranscriptionId(transcriptionId)
+    const active = activeJobs[transcriptionId]
     const recent = recentTranscriptions.find((t) => t.id === transcriptionId)
-    if (recent) {
+    if (active?.title) {
+      setActiveMeetingTitle(active.title)
+    } else if (recent?.metadata?.title) {
       setActiveMeetingTitle(recent.metadata.title)
     }
     setViewMode('studio')

@@ -12,6 +12,7 @@ import {
 
 interface TranscriptionStudioProps {
   transcriptionId: string
+  initialMeetingTitle?: string
   activeProgress?: TranscriptionProgress | null
   onBackToDashboard: () => void
   onRefreshData?: () => void
@@ -19,6 +20,7 @@ interface TranscriptionStudioProps {
 
 export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
   transcriptionId,
+  initialMeetingTitle,
   activeProgress,
   onBackToDashboard,
   onRefreshData,
@@ -57,7 +59,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     handleCopySummary,
     handleDownloadSummaryTxt,
     handleDownloadSummaryJson,
-  } = useTranscriptionActions(transcriptionId, activeProgress, onRefreshData)
+  } = useTranscriptionActions(transcriptionId, activeProgress, onRefreshData, initialMeetingTitle)
 
   return (
     <div className="flex flex-col h-[calc(100vh-5.5rem)] max-w-[1700px] mx-auto bg-slate-100 font-sans rounded-2xl border border-slate-300/80 shadow-md overflow-hidden animate-fade-in">

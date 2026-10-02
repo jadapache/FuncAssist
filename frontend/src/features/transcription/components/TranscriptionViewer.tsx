@@ -71,8 +71,13 @@ export const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
           <button
             type="button"
             onClick={onRenameClick}
-            className="p-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-40 flex items-center justify-center"
-            title="Renombrar interlocutores"
+            disabled={isJobActive || !transcriptionResult?.segments?.length}
+            className="p-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+            title={
+              isJobActive
+                ? 'Disponible al finalizar la transcripción'
+                : 'Renombrar interlocutores'
+            }
           >
             <Users className="h-3.5 w-3.5 text-[#002777]" />
           </button>

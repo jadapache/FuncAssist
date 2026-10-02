@@ -31,6 +31,19 @@ interface FloatingTranscriptionToastProps {
   onDismissJob?: (id: string) => void
 }
 
+const STAGE_TRANSLATIONS: Record<string, string> = {
+  pending: 'En cola...',
+  uploading: 'Subiendo archivo...',
+  preprocessing: 'Extrayendo audio...',
+  transcribing: 'Transcribiendo...',
+  diarizing: 'Identificando interlocutores...',
+  summarizing: 'Generando resumen...',
+  finalizing: 'Finalizando...',
+  complete: 'Completado',
+  failed: 'Error',
+  cancelled: 'Cancelado',
+}
+
 export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProps> = ({
   activeJobs = [],
   extraTasks = [],
@@ -43,16 +56,18 @@ export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProp
     const isComplete = job.status === 'complete'
     const isFailed = job.status === 'failed'
 
-    // Title denotes the ongoing process
-    const title = job.model_info ? `Transcribiendo (${job.model_info})` : 'Transcribiendo Audio'
+    // Title denotes the meeting title typed by user or fallback
+    const title = job.title || (job.model_info ? `Transcribir (${job.model_info})` : 'Transcribir Audio')
 
     let stageText = 'Procesando...'
     if (isComplete) {
       stageText = 'Completado'
     } else if (isFailed) {
       stageText = job.error || job.message || 'Error en procesamiento'
-    } else if (job.stage) {
-      stageText = job.stage
+    } else if (job.stage && STAGE_TRANSLATIONS[job.stage.toLowerCase()]) {
+      stageText = STAGE_TRANSLATIONS[job.stage.toLowerCase()]
+    } else if (job.status && STAGE_TRANSLATIONS[job.status.toLowerCase()]) {
+      stageText = STAGE_TRANSLATIONS[job.status.toLowerCase()]
     } else if (job.message) {
       stageText = job.message
     }

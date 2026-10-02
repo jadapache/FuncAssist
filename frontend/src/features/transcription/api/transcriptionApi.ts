@@ -28,6 +28,7 @@ export type TranscriptionSummary = {
 export type TranscriptionProgress = {
   id: string
   media_id: string
+  title?: string | null
   status: 'pending' | 'uploading' | 'preprocessing' | 'transcribing' | 'diarizing' | 'summarizing' | 'complete' | 'failed' | 'cancelled'
   stage?: string
   progress: number

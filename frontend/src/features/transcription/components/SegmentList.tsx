@@ -27,7 +27,7 @@ export const SegmentList: React.FC<SegmentListProps> = ({
           {activeProgressMessage || 'Procesando transcripción de audio...'}
         </p>
         <p className="text-[11px] text-slate-400 max-w-xs">
-          Los segmentos y la identificación de interlocutores aparecerán aquí en tiempo real.
+          Los segmentos y la identificación de interlocutores aparecerán aquí al completarse la transcripción y diarización.
         </p>
       </div>
     )
