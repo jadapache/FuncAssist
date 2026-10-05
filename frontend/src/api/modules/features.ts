@@ -60,6 +60,20 @@ export const featuresApi = {
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<GroundedResult>(r)),
 
+  inventarioDoc: (payload: FeaturePayload) =>
+    fetch(`${API_BASE}/api/features/inventario`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<GroundedResult>(r)),
+
+  levantamientoDoc: (payload: FeaturePayload) =>
+    fetch(`${API_BASE}/api/features/levantamiento`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<GroundedResult>(r)),
+
   getAiPrompts: () =>
     fetch(`${API_BASE}/api/ai/prompts`).then((r) =>
       handleResponse<{ prompts: AIPromptTemplate[] }>(r),

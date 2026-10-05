@@ -27,6 +27,8 @@ from app.ai.runner import run_grounded_feature, run_grounded_feature_stream
 from app.core.document_agent.validator import DocumentOperationValidator
 from app.core.template_storage import list_templates
 from app.features.mejoras.docx_builder import create_mejoras_docx
+from app.features.levantamiento.docx_builder import create_levantamiento_docx
+from app.features.inventario.xlsx_builder import create_inventario_xlsx
 from app.features.mejoras.xlsx_builder import create_qa_matrix_xlsx
 
 router = APIRouter(prefix="/doc-agent", tags=["document-agent"])
@@ -118,8 +120,13 @@ class ExportDocxRequest(CamelModel):
 
 
 class ExportXlsxRequest(CamelModel):
-    title: str = "Matriz de Pruebas QA"
+    title: str = "Matriz de Inventario y Pruebas"
+    content: Optional[str] = Field(default="", alias="markdown")
     rows: Optional[List[Dict[str, Any]]] = None
+
+    @property
+    def text(self) -> str:
+        return self.content or ""
 
 
 @router.get("/fixtures")
@@ -429,11 +436,15 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
 
 
 @router.post("/export-docx")
-
 def export_native_docx(req: ExportDocxRequest):
     """Generates and downloads a native Microsoft Word .docx binary file."""
     try:
-        docx_bytes = create_mejoras_docx(req.text, title=req.title)
+        title_lower = req.title.lower()
+        if "levantamiento" in title_lower:
+            docx_bytes = create_levantamiento_docx(req.text, title=req.title)
+        else:
+            docx_bytes = create_mejoras_docx(req.text, title=req.title)
+
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', req.title)
         filename = f"{safe_title}.docx"
 
@@ -448,9 +459,14 @@ def export_native_docx(req: ExportDocxRequest):
 
 @router.post("/export-xlsx")
 def export_native_xlsx(req: ExportXlsxRequest):
-    """Genera y descarga una matriz de pruebas QA en formato .xlsx nativo."""
+    """Genera y descarga un archivo Excel .xlsx nativo para inventarios de requerimientos o matrices QA."""
     try:
-        xlsx_bytes = create_qa_matrix_xlsx(title=req.title, rows=req.rows)
+        title_lower = req.title.lower()
+        if "inventario" in title_lower or req.text:
+            xlsx_bytes = create_inventario_xlsx(markdown_content=req.text, title=req.title, rows=req.rows)
+        else:
+            xlsx_bytes = create_qa_matrix_xlsx(title=req.title, rows=req.rows)
+
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', req.title)
         return Response(
             content=xlsx_bytes,
@@ -459,4 +475,5 @@ def export_native_xlsx(req: ExportXlsxRequest):
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error generando XLSX: {exc}") from exc
+
 

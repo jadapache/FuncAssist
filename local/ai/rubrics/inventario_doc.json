@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "feature": "inventario_doc",
+  "criteria": [
+    "Estructura completa seg\u00fan est\u00e1ndar corporativo (Contexto, Stakeholders, Objetivos, Alcance, Requerimientos de Alto Nivel, Riesgos)",
+    "Objetivos redactados con claridad y alineados con las necesidades de negocio",
+    "Alcance delimitado con precisi\u00f3n (dentro y fuera de alcance)",
+    "Requerimientos de alto nivel trazables a la minuta o transcripci\u00f3n de reuni\u00f3n",
+    "Citas de evidencia [1], [2] para cada hallazgo"
+  ]
+}

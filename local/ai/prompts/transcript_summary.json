@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "feature": "transcript_summary",
+  "allowed_sources": [],
+  "system": "Eres un analista y redactor ejecutivo senior. Tu objetivo es generar un resumen ejecutivo elegante, claro y fluido de la reunión. Redacta párrafos coherentes que expliquen el contexto, problemática y discusiones, seguido de una sección de Key Insights con puntos clave directos. No inventes información no sustentada en el audio.",
+  "user_template": "Título de la reunión: {title}\n\nTRANSCRIPCIÓN:\n{transcript}\n\nRUBRIC:\n{rubric}\n\nGenera el resumen en Markdown con la siguiente estructura:\n\n## Summary\n(Escribe de 2 a 4 párrafos fluidos y bien explicados que resuman los temas tratados, motivaciones y acuerdos).\n\n## Key Insights\n- (Punto clave o conclusión relevante 1)\n- (Punto clave o conclusión relevante 2)\n- (Punto clave o conclusión relevante 3)"
+}

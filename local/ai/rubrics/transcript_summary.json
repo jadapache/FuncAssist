@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "feature": "transcript_summary",
+  "criteria": [
+    "Redactar párrafos fluidos, coherentes y explicativos del contexto, problemática y discusiones principales.",
+    "Sintetizar los puntos clave y conclusiones directas en viñetas bajo la sección Key Insights.",
+    "No alucinar información ni inventar acuerdos o participantes no sustentados en la transcripción.",
+    "Mantener un tono ejecutivo, claro y estructurado."
+  ]
+}

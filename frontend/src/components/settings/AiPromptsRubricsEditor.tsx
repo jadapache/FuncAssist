@@ -92,6 +92,24 @@ const FEATURE_METAS: FeatureMeta[] = [
     description: 'Semáforo de pase a producción verificando bloqueos abiertos, PRs pendientes y riesgos.',
     category: 'qa',
   },
+  {
+    id: 'transcript_summary',
+    title: 'Resumen de Transcripción y Minutas',
+    description: 'Generación de resumen narrativo ejecutivo y Key Insights a partir de audios transcritos.',
+    category: 'workspace',
+  },
+  {
+    id: 'inventario_doc',
+    title: 'Inventario de Requerimientos',
+    description: 'Plantilla y rúbrica para generación de matriz de contexto de proyecto e inventario funcional.',
+    category: 'product',
+  },
+  {
+    id: 'levantamiento_doc',
+    title: 'Levantamiento Detallado de Requerimientos',
+    description: 'Plantilla y rúbrica para especificación funcional detallada, historias de usuario y casos de uso.',
+    category: 'product',
+  },
 ]
 
 const AVAILABLE_SOURCES = [
@@ -363,18 +381,53 @@ export const AiPromptsRubricsEditor = () => {
     setRawJsonText(JSON.stringify(updatedObj, null, 2))
   }
 
+  const allFeatures = useMemo(() => {
+    const list: FeatureMeta[] = [...FEATURE_METAS]
+    const existingIds = new Set(list.map((f) => f.id))
+
+    // Add any features dynamically found in backend prompts/rubrics
+    for (const p of promptsList) {
+      if (p.feature && !existingIds.has(p.feature)) {
+        existingIds.add(p.feature)
+        list.push({
+          id: p.feature,
+          title: p.feature.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          description: `Configuración de plantilla y rúbrica para ${p.feature}`,
+          category: 'workspace',
+        })
+      }
+    }
+    for (const r of rubricsList) {
+      if (r.feature && !existingIds.has(r.feature)) {
+        existingIds.add(r.feature)
+        list.push({
+          id: r.feature,
+          title: r.feature.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          description: `Configuración de plantilla y rúbrica para ${r.feature}`,
+          category: 'workspace',
+        })
+      }
+    }
+    return list
+  }, [promptsList, rubricsList])
+
   const filteredFeatures = useMemo(() => {
-    if (!searchQuery.trim()) return FEATURE_METAS
+    if (!searchQuery.trim()) return allFeatures
     const q = searchQuery.toLowerCase()
-    return FEATURE_METAS.filter(
+    return allFeatures.filter(
       (f) =>
         f.id.toLowerCase().includes(q) ||
         f.title.toLowerCase().includes(q) ||
         f.description.toLowerCase().includes(q),
     )
-  }, [searchQuery])
+  }, [allFeatures, searchQuery])
 
-  const currentMeta = FEATURE_METAS.find((f) => f.id === selectedFeature)
+  const currentMeta = allFeatures.find((f) => f.id === selectedFeature) || {
+    id: selectedFeature,
+    title: selectedFeature,
+    description: 'Configuración personalizada',
+    category: 'workspace' as const,
+  }
   const currentVersion =
     activeDocType === 'prompt' ? promptData?.version || 1 : rubricData?.version || 1
 
@@ -424,7 +477,9 @@ export const AiPromptsRubricsEditor = () => {
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                   Funcionalidades ({filteredFeatures.length})
                 </span>
-                <span className="text-[10px] text-slate-400">10 archivos .json</span>
+                <span className="text-[10px] text-slate-400">
+                  {promptsList.length} prompts / {rubricsList.length} rúbricas
+                </span>
               </div>
 
               {/* Search filter input */}

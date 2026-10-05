@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "feature": "levantamiento_doc",
+  "criteria": [
+    "Cada requerimiento funcional incluye descripci\u00f3n detallada y criterios de aceptaci\u00f3n verificables",
+    "Historias de usuario siguen el est\u00e1ndar 'Como... Quiero... Para...'",
+    "Casos de uso detallan flujo principal, flujos alternativos y postcondiciones",
+    "Reglas de negocio y RNF claramente identificados con m\u00e9tricas",
+    "Matriz de trazabilidad vincula objetivos con RF, HU y CU",
+    "Cita de referencias a fuentes y documentos base"
+  ]
+}

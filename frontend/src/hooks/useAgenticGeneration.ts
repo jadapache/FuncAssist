@@ -243,13 +243,13 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           backendArtifacts && backendArtifacts.length > 0
             ? backendArtifacts.map((a) => ({
               title: a.title,
-              extension: (a.extension as 'docx' | 'xlsx' | 'txt') || 'docx',
+              extension: (a.extension as 'docx' | 'xlsx' | 'txt') || config.defaultExtension || 'docx',
               content: a.content,
             }))
             : parseMultipleArtifacts(
               finalContent,
               config.docxTitle || config.title,
-              'docx',
+              config.defaultExtension || 'docx',
               templateContent,
             )
 

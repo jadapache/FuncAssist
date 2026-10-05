@@ -24,6 +24,10 @@ class AIModelInfo(BaseModel):
   max_output_tokens: int | None = None
   badge: str | None = None
   is_free: bool = False
+  size: str | None = None
+  accuracy: str | None = None
+  is_downloaded: bool | None = None
+  disk_size_mb: float | None = None
 
 
 class ModelCatalogResponse(BaseModel):
