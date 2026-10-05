@@ -62,6 +62,16 @@ async def get_model_catalog(
         error_msg = "Error de conexión, no se pudo obtener los modelos"
         source = "error"
 
+    # Dynamically enrich builtin Whisper models with local download state
+    whisper_cache = Path.home() / ".cache" / "whisper"
+    for m in models:
+        if m.provider == "builtin" and m.task_type == "transcription":
+            clean_id = m.id.replace("whisper-", "")
+            target_pt = whisper_cache / f"{clean_id}.pt"
+            is_dl = target_pt.exists() and target_pt.stat().st_size > 1024 * 1024
+            m.is_downloaded = is_dl
+            m.disk_size_mb = round(target_pt.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
+
     # Filter by provider
     if provider and provider != "all":
         prov_key = provider.lower()

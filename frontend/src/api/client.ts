@@ -7,8 +7,17 @@ import { docAgentApi } from './modules/docAgent'
 import { integrationsApi } from './modules/integrations'
 import { templatesApi } from './modules/templates'
 import { settingsApi } from './modules/settings'
+import { transcriptionApi } from './modules/transcription'
 
 export type { AppSettings, IntegrationInfo, TestConnectionResult } from '../types'
+export type {
+  MediaMetadata,
+  TranscriptionSegment,
+  TranscriptionSummary,
+  TranscriptionProgress,
+  TranscriptionResult,
+  TranscribeOptions,
+} from './modules/transcription'
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -113,16 +122,18 @@ export type AgenticPromptResponse = {
 }
 
 export type AISettings = {
-  provider: string
-  model: string
-  transcription_provider?: string
-  transcription_model?: string
-  voice_command_provider?: string
-  voice_command_model?: string
+  provider: string | null
+  model: string | null
+  transcription_provider?: string | null
+  transcription_model?: string | null
+  voice_command_provider?: string | null
+  voice_command_model?: string | null
   openai_api_key_set: boolean
   claude_api_key_set: boolean
   groq_api_key_set: boolean
   gemini_api_key_set?: boolean
+  transcription_groq_api_key_set?: boolean
+  transcription_openai_api_key_set?: boolean
   ollama_base_url: string
   active_api_key_set?: boolean
 }
@@ -131,7 +142,7 @@ export type ModelCatalogItem = {
   id: string
   raw_id: string
   name: string
-  provider: 'groq' | 'openai' | 'claude' | 'gemini' | 'ollama'
+  provider: 'groq' | 'openai' | 'claude' | 'gemini' | 'ollama' | 'builtin' | 'local' | string
   provider_name: string
   description: string
   context_window: string
@@ -146,6 +157,21 @@ export type ModelCatalogItem = {
   max_output_tokens?: number
   badge?: string
   is_free: boolean
+  size?: string
+  accuracy?: string
+  is_downloaded?: boolean
+  disk_size_mb?: number
+}
+
+export type LocalWhisperModelInfo = {
+  id: string
+  name: string
+  size: string
+  accuracy: string
+  description: string
+  is_downloaded: boolean
+  disk_size_mb: number
+  file_path?: string | null
 }
 
 export type ModelCatalogResponse = {
@@ -215,6 +241,7 @@ export const api = {
   ...integrationsApi,
   ...templatesApi,
   ...settingsApi,
+  ...transcriptionApi,
 }
 
 export const apiClient = api

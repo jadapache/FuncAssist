@@ -9,10 +9,12 @@ import {
   EyeOff,
   FileText,
   Gauge,
+  Loader2,
   Lock,
   RefreshCw,
   RotateCw,
   Sparkles,
+  Trash2,
   Zap,
 } from 'lucide-react'
 import type { AISettings, ModelCatalogItem } from '../../api/client'
@@ -36,8 +38,10 @@ export type WritingModelSectionProps = {
   fetchOllamaModels: (url?: string, isUserAction?: boolean) => Promise<void>
   isPulling: boolean
   pullingModelTag: string | null
+  deletingModelTag?: string | null
   pullStatusMsg: string | null
   handlePullModel: (tag: string) => Promise<void>
+  handleDeleteModel?: (tag: string) => Promise<void>
   isModelDownloaded: (tag: string) => boolean
   catalogModels: ModelCatalogItem[]
   groqKey: string
@@ -74,8 +78,10 @@ export const WritingModelSection = ({
   fetchOllamaModels,
   isPulling,
   pullingModelTag,
+  deletingModelTag,
   pullStatusMsg,
   handlePullModel,
+  handleDeleteModel,
   isModelDownloaded,
   catalogModels,
   groqKey,
@@ -93,6 +99,24 @@ export const WritingModelSection = ({
   handleAiSave,
   handleTestConnection,
 }: WritingModelSectionProps) => {
+  const builtinFromCatalog = catalogModels.filter(
+    (m) => m.provider === 'builtin' && m.task_type === 'chat_writing',
+  )
+  const builtinModelsList =
+    builtinFromCatalog.length > 0
+      ? builtinFromCatalog.map((cm) => {
+          const match = BUILT_IN_MODELS.find((bm) => bm.id === cm.id || bm.tag === cm.raw_id)
+          return {
+            id: cm.id,
+            name: cm.name,
+            tag: cm.raw_id || cm.id,
+            description: cm.description,
+            size: cm.size || match?.size || '~1.2 GiB',
+            tokens: cm.context_window || match?.tokens || '32k tokens',
+          }
+        })
+      : BUILT_IN_MODELS
+
   return (
     <form
       onSubmit={(e) => void handleAiSave(e)}
@@ -116,7 +140,7 @@ export const WritingModelSection = ({
         <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
           {!isWritingOpen && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-              Activo: <span className="font-mono text-[11px] text-blue-700 font-bold">{provider} • {model}</span>
+              Activo: <span className="font-mono text-[11px] text-[#002777] font-bold">{provider} • {model}</span>
             </span>
           )}
           <div
@@ -133,7 +157,7 @@ export const WritingModelSection = ({
           {/* Selector de Proveedor / Tipo de Modelo */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-800 block">
-              Modelo de Inferencia / Resumen
+              Proveedor del Modelo de Inferencia
             </label>
 
             <select
@@ -184,10 +208,11 @@ export const WritingModelSection = ({
               ) : null}
 
               <div className="space-y-3">
-                {BUILT_IN_MODELS.map((m) => {
-                  const downloaded = isModelDownloaded(m.tag)
+                {builtinModelsList.map((m) => {
+                  const downloaded = isModelDownloaded(m.tag || m.id)
                   const isSelected = model === m.id || model === m.tag
-                  const isCurrentlyPulling = isPulling && pullingModelTag === m.tag
+                  const isCurrentlyPulling = isPulling && (pullingModelTag === m.tag || pullingModelTag === m.id)
+                  const isDeleting = deletingModelTag === m.tag || deletingModelTag === m.id
 
                   return (
                     <div
@@ -198,68 +223,108 @@ export const WritingModelSection = ({
                       className={[
                         'flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl transition-all cursor-pointer',
                         isSelected
-                          ? 'border-2 border-slate-900 bg-white shadow-sm'
+                          ? 'border-2 border-[#002777] bg-blue-50/20 shadow-xs'
                           : 'border border-slate-200 bg-white hover:border-slate-300',
                       ].join(' ')}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h5 className="font-bold text-slate-900 text-base">{m.name}</h5>
                           {downloaded ? (
-                            <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                              Listo
+                            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Descargado ({m.size})
                             </span>
-                          ) : null}
-                          {isSelected ? (
-                            <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500 border border-slate-200">
+                              No descargado ({m.size})
+                            </span>
+                          )}
+                          {isSelected && (
+                            <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-[#002777]">
                               Seleccionado
                             </span>
-                          ) : null}
+                          )}
                         </div>
 
                         <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
                           {m.description}
                         </p>
 
-                        <p className="text-xs text-slate-400 font-medium pt-0.5">
-                          {m.size} • {m.tokens}
+                        <p className="text-xs text-slate-400 font-medium pt-0.5 flex items-center gap-2">
+                          <span>Tamaño: {m.size}</span>
+                          <span>•</span>
+                          <span>Contexto / Tokens: {m.tokens}</span>
                         </p>
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         {downloaded ? (
-                          <button
-                            type="button"
-                            onClick={() => setModel(m.id)}
-                            className={[
-                              'px-4 py-2 rounded-lg text-xs font-semibold transition',
-                              isSelected
-                                ? 'bg-slate-900 text-white'
-                                : 'border border-slate-200 bg-white hover:bg-slate-50 text-slate-700',
-                            ].join(' ')}
-                          >
-                            {isSelected ? 'Activo' : 'Seleccionar'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={isPulling}
-                            onClick={() => void handlePullModel(m.tag)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold px-4 py-2 shadow-sm transition disabled:opacity-60 cursor-pointer"
-                          >
-                            {isCurrentlyPulling ? (
-                              <>
-                                <RotateCw className="h-3.5 w-3.5 animate-spin text-blue-600" />
-                                <span>Descargando…</span>
-                              </>
-                            ) : (
-                              <>
-                                <Download className="h-3.5 w-3.5 text-slate-700" />
-                                <span>Descargar</span>
-                              </>
+                          <>
+                            {handleDeleteModel && (
+                              <button
+                                type="button"
+                                disabled={isDeleting}
+                                onClick={() => void handleDeleteModel(m.tag || m.id)}
+                                title="Eliminar modelo para liberar espacio en disco"
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
+                              >
+                                {isDeleting ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                                Borrar
+                              </button>
                             )}
-                          </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setModel(m.id)}
+                              className={[
+                                'px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer',
+                                isSelected
+                                  ? 'bg-[#002777] text-white font-bold'
+                                  : 'border border-slate-200 bg-white hover:bg-slate-50 text-slate-700',
+                              ].join(' ')}
+                            >
+                              {isSelected ? 'Activo' : 'Seleccionar'}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isCurrentlyPulling}
+                              onClick={() => void handlePullModel(m.tag || m.id)}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-[#002777] bg-blue-50 hover:bg-blue-100 border border-blue-200 transition cursor-pointer disabled:opacity-50"
+                            >
+                              {isCurrentlyPulling ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#002777]" />
+                                  <span>Descargando…</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="h-3.5 w-3.5 text-[#002777]" />
+                                  <span>Descargar ({m.size})</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setModel(m.id)}
+                              className={[
+                                'px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer',
+                                isSelected
+                                  ? 'bg-[#002777] text-white font-bold'
+                                  : 'border border-slate-200 bg-white hover:bg-slate-50 text-slate-700',
+                              ].join(' ')}
+                            >
+                              {isSelected ? 'Activo' : 'Seleccionar'}
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -275,7 +340,7 @@ export const WritingModelSection = ({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-800 block">
-                    Modelo Recomendado
+                    Modelo de frontera
                   </label>
                   <select
                     value={
@@ -431,7 +496,7 @@ export const WritingModelSection = ({
                     ) : (
                       <Download className="h-3.5 w-3.5" />
                     )}
-                    <span>Descargar gemma3:1b (Recomendado, ~800MB)</span>
+                    <span>Descargar gemma3:1b (Recomendado)</span>
                   </button>
                 </div>
 
@@ -457,17 +522,11 @@ export const WritingModelSection = ({
 
             return (
               <div className="space-y-4 pt-2">
-                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-950">
-                  <FileText className="h-4 w-4 text-[#002777] shrink-0" />
-                  <span className="font-medium">
-                    Modelo empleado para redacción y comprensión de peticiones desde el chat realizadas por el usuario
-                  </span>
-                </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-800 block">
-                      Modelo Recomendado (Redacción y Chat)
+                      Modelo de frontera
                     </label>
                     <select
                       value={dropdownModels.some((m) => m.id === model) ? model : 'custom'}
@@ -514,9 +573,6 @@ export const WritingModelSection = ({
                         <code className="text-[11px] font-mono text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">
                           {currentModelDetails.id}
                         </code>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
-                          <FileText className="h-2.5 w-2.5" /> {currentModelDetails.task_label}
-                        </span>
                       </div>
                       {currentModelDetails.is_free ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
@@ -734,7 +790,7 @@ export const WritingModelSection = ({
             <button
               type="submit"
               disabled={savingAi || testingConnection}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer text-sm"
+              className="bg-[#002777] hover:bg-[#001f5f] text-white font-bold px-6 py-2.5 rounded-xl shadow-xs transition flex items-center gap-2 cursor-pointer text-sm disabled:opacity-50"
             >
               {savingAi ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               <span>Guardar Modelo de Redacción</span>

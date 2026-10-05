@@ -12,4 +12,7 @@ python-docx>=1.1.2
 aiosqlite>=0.20.0
 litellm>=1.35.0
 openpyxl>=3.1.0
+openai-whisper>=20250625
+tenacity>=8.2.0
+pyannote.audio>=3.1.1
 

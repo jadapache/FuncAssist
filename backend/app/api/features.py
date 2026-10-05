@@ -60,6 +60,8 @@ class AISettingsUpdate(BaseModel):
   claude_api_key: str | None = None
   groq_api_key: str | None = None
   gemini_api_key: str | None = None
+  transcription_groq_api_key: str | None = None
+  transcription_openai_api_key: str | None = None
   ollama_base_url: str | None = None
 
 
@@ -122,16 +124,22 @@ async def ai_settings() -> dict[str, Any]:
       active_key_set = bool(os.getenv(spec.env_key))
 
   return {
-    "provider": config.get("provider") or "",
-    "model": config.get("model") or "",
-    "transcription_provider": config.get("transcription_provider") or "groq",
-    "transcription_model": config.get("transcription_model") or "whisper-large-v3",
-    "voice_command_provider": config.get("voice_command_provider") or "groq",
-    "voice_command_model": config.get("voice_command_model") or "whisper-large-v3",
+    "provider": config.get("provider") or None,
+    "model": config.get("model") or None,
+    "transcription_provider": config.get("transcription_provider") or None,
+    "transcription_model": config.get("transcription_model") or None,
+    "voice_command_provider": config.get("voice_command_provider") or None,
+    "voice_command_model": config.get("voice_command_model") or None,
     "openai_api_key_set": bool(config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")),
     "claude_api_key_set": bool(config.get("claude_api_key") or os.getenv("ANTHROPIC_API_KEY")),
     "groq_api_key_set": bool(config.get("groq_api_key") or os.getenv("GROQ_API_KEY")),
     "gemini_api_key_set": bool(config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")),
+    "transcription_groq_api_key_set": bool(
+      config.get("transcription_groq_api_key") or config.get("groq_api_key") or os.getenv("GROQ_API_KEY")
+    ),
+    "transcription_openai_api_key_set": bool(
+      config.get("transcription_openai_api_key") or config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+    ),
     "ollama_base_url": config.get("ollama_base_url"),
     "active_api_key_set": active_key_set,
   }
@@ -224,6 +232,62 @@ async def pull_ollama_model(body: OllamaPullRequest) -> dict[str, Any]:
       return {"status": "success", "model": body.name, "response": res.json()}
   except Exception as e:
     raise HTTPException(status_code=500, detail=f"Error al descargar el modelo {body.name} en Ollama: {e}")
+
+
+@router.delete("/ai/ollama/{model_name:path}")
+async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = None) -> dict[str, Any]:
+  """Delete a local Ollama model to free disk space."""
+  config = get_ai_settings()
+  target_url = (base_url or config.get("ollama_base_url") or "http://127.0.0.1:11434").rstrip("/")
+  try:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      req = client.build_request("DELETE", f"{target_url}/api/delete", json={"name": model_name})
+      res = await client.send(req)
+      res.raise_for_status()
+      return {"ok": True, "model": model_name, "message": f"Modelo {model_name} eliminado de Ollama correctamente."}
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=f"Error al eliminar el modelo {model_name} en Ollama: {e}")
+
+
+
+@router.get("/ai/whisper/models")
+async def list_whisper_models() -> dict[str, Any]:
+  """List all local Whisper built-in models and their download status on disk."""
+  from app.features.transcription.whisper_local import get_local_models_info
+  models = get_local_models_info()
+  return {"ok": True, "models": models}
+
+
+@router.post("/ai/whisper/download/{model_id}")
+async def download_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
+  """Download a local Whisper model to disk cache."""
+  import asyncio
+  from app.features.transcription.whisper_local import download_model_file
+  try:
+    clean_id = model_id.replace("whisper-", "")
+    path = await asyncio.to_thread(download_model_file, clean_id)
+    return {
+      "ok": True,
+      "model_id": clean_id,
+      "file_path": str(path),
+      "message": f"Modelo {clean_id} descargado y listo para uso local.",
+    }
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Error descargando modelo Whisper {model_id}: {exc}") from exc
+
+
+@router.delete("/ai/whisper/{model_id}")
+async def delete_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
+  """Delete a downloaded local Whisper model from disk to free space."""
+  from app.features.transcription.whisper_local import delete_model_file
+  try:
+    clean_id = model_id.replace("whisper-", "")
+    deleted = delete_model_file(clean_id)
+    if not deleted:
+      return {"ok": True, "message": f"El modelo {clean_id} no estaba descargado."}
+    return {"ok": True, "message": f"Modelo Whisper {clean_id} eliminado del disco con éxito."}
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Error eliminando modelo Whisper {model_id}: {exc}") from exc
 
 
 @router.get("/ai/prompts")
@@ -448,6 +512,38 @@ async def mejoras_doc(body: FeatureWorkspaceRequest) -> dict[str, Any]:
       feature="mejoras_doc",
       query=body.query,
       sources=body.sources or ["jira", "github", "gitlab", "knowledge"],
+      document_ids=body.document_ids,
+      chat_context=body.chat_context,
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/features/inventario")
+async def inventario_doc_endpoint(body: FeatureWorkspaceRequest) -> dict[str, Any]:
+  try:
+    return await run_grounded_feature(
+      feature="inventario_doc",
+      query=body.query,
+      sources=body.sources or ["knowledge", "jira", "github"],
+      document_ids=body.document_ids,
+      chat_context=body.chat_context,
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/features/levantamiento")
+async def levantamiento_doc_endpoint(body: FeatureWorkspaceRequest) -> dict[str, Any]:
+  try:
+    return await run_grounded_feature(
+      feature="levantamiento_doc",
+      query=body.query,
+      sources=body.sources or ["knowledge", "jira", "github"],
       document_ids=body.document_ids,
       chat_context=body.chat_context,
     )

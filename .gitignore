@@ -132,6 +132,10 @@ local/ai/logs/**
 !local/ai/logs/.gitkeep
 local/templates/**
 !local/templates/.gitkeep
+local/media/**
+!local/media/.gitkeep
+local/transcriptions/**
+!local/transcriptions/.gitkeep
 
 # Legacy & reference folders
 _legacy_archive/

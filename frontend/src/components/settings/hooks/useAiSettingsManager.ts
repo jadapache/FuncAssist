@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type AISettings, type ModelCatalogItem } from '../../../api/client'
+import { api, type AISettings, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 
@@ -26,6 +26,15 @@ export function useAiSettingsManager() {
   // Voice & Transcription unified state
   const [voiceAudioProvider, setVoiceAudioProvider] = useState<string>('groq')
   const [voiceAudioModel, setVoiceAudioModel] = useState<string>('whisper-large-v3')
+  const [transcriptionGroqKey, setTranscriptionGroqKey] = useState('')
+  const [transcriptionOpenaiKey, setTranscriptionOpenaiKey] = useState('')
+  const [showTranscriptionKey, setShowTranscriptionKey] = useState(false)
+
+  // Local Whisper models & download state
+  const [localWhisperModels, setLocalWhisperModels] = useState<LocalWhisperModelInfo[]>([])
+  const [downloadingWhisperId, setDownloadingWhisperId] = useState<string | null>(null)
+  const [deletingWhisperId, setDeletingWhisperId] = useState<string | null>(null)
+  const [fetchingWhisperModels, setFetchingWhisperModels] = useState(false)
 
   // API Keys & credentials
   const [groqKey, setGroqKey] = useState('')
@@ -40,6 +49,7 @@ export function useAiSettingsManager() {
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [isPulling, setIsPulling] = useState(false)
   const [pullingModelTag, setPullingModelTag] = useState<string | null>(null)
+  const [deletingModelTag, setDeletingModelTag] = useState<string | null>(null)
   const [pullStatusMsg, setPullStatusMsg] = useState<string | null>(null)
   const [fetchingModels, setFetchingModels] = useState(false)
 
@@ -90,6 +100,20 @@ export function useAiSettingsManager() {
     }
   }, [ollamaUrl, toast])
 
+  const fetchLocalWhisperModels = useCallback(async () => {
+    setFetchingWhisperModels(true)
+    try {
+      const res = await api.listWhisperModels()
+      if (res.ok && res.models) {
+        setLocalWhisperModels(res.models)
+      }
+    } catch (e) {
+      console.error('Error fetching local whisper models:', e)
+    } finally {
+      setFetchingWhisperModels(false)
+    }
+  }, [])
+
   useEffect(() => {
     let isMounted = true
     const load = async () => {
@@ -99,16 +123,51 @@ export function useAiSettingsManager() {
         const settings = await api.getAiSettings()
         if (!isMounted) return
         setAi(settings)
-        if (settings.provider) {
-          setProvider(settings.provider)
-        }
+
+        const isFirstTimeSetup = !settings.provider && !settings.transcription_provider
+
+        const prov = settings.provider || 'builtin'
+        setProvider(prov)
+
         if (settings.model) {
           setModel(settings.model)
+        } else if (isFirstTimeSetup) {
+          if (prov === 'groq') setModel('llama-3.3-70b-versatile')
+          else if (prov === 'builtin') setModel('qwen3.5:2b')
+          else if (prov === 'gemini') setModel('gemini-1.5-flash')
+          else if (prov === 'openai') setModel('gpt-4o-mini')
+          else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
+          else setModel('qwen3.5:2b')
+        } else {
+          // Provider exists but model is unset, assign sensible default for that provider
+          if (prov === 'groq') setModel('llama-3.3-70b-versatile')
+          else if (prov === 'builtin') setModel('qwen3.5:2b')
+          else if (prov === 'gemini') setModel('gemini-1.5-flash')
+          else if (prov === 'openai') setModel('gpt-4o-mini')
+          else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
         }
-        const unifiedProvider = settings.transcription_provider || settings.voice_command_provider || 'groq'
-        const unifiedModel = settings.transcription_model || settings.voice_command_model || 'whisper-large-v3'
-        setVoiceAudioProvider(unifiedProvider)
-        setVoiceAudioModel(unifiedModel)
+
+        if (settings.transcription_provider || settings.voice_command_provider) {
+          const savedProvider = (settings.transcription_provider || settings.voice_command_provider)!
+          setVoiceAudioProvider(savedProvider)
+
+          const savedModel = settings.transcription_model || settings.voice_command_model
+          if (savedModel) {
+            setVoiceAudioModel(savedModel)
+          } else {
+            const defaultTransModel =
+              savedProvider === 'groq'
+                ? 'whisper-large-v3'
+                : savedProvider === 'openai'
+                ? 'whisper-1'
+                : 'base'
+            setVoiceAudioModel(defaultTransModel)
+          }
+        } else if (isFirstTimeSetup) {
+          setVoiceAudioProvider('groq')
+          setVoiceAudioModel('whisper-large-v3')
+        }
+
         if (
           settings.ollama_base_url &&
           settings.ollama_base_url !== 'http://localhost:11434' &&
@@ -119,8 +178,9 @@ export function useAiSettingsManager() {
           setOllamaUrl('')
         }
 
-        // Fetch local Ollama models silently in background
+        // Fetch local Ollama and Whisper models silently in background
         void fetchOllamaModels(settings.ollama_base_url || 'http://localhost:11434', false)
+        void fetchLocalWhisperModels()
       } catch (err) {
         if (isMounted) {
           toast.error(err instanceof Error ? err.message : 'Error al cargar la configuración del sistema')
@@ -136,7 +196,40 @@ export function useAiSettingsManager() {
     return () => {
       isMounted = false
     }
-  }, [fetchOllamaModels, loadDynamicCatalog, toast])
+  }, [fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
+
+  const handleDownloadWhisperModel = async (modelId: string) => {
+    setDownloadingWhisperId(modelId)
+    try {
+      toast.info(`Iniciando descarga de Whisper ${modelId}... Esto puede demorar según tu conexión.`)
+      const res = await api.downloadWhisperModel(modelId)
+      if (res.ok) {
+        toast.success(res.message || `Modelo Whisper ${modelId} descargado correctamente.`)
+        await fetchLocalWhisperModels()
+        await loadDynamicCatalog(true)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
+    } finally {
+      setDownloadingWhisperId(null)
+    }
+  }
+
+  const handleDeleteWhisperModel = async (modelId: string) => {
+    setDeletingWhisperId(modelId)
+    try {
+      const res = await api.deleteWhisperModel(modelId)
+      if (res.ok) {
+        toast.success(res.message || `Modelo Whisper ${modelId} eliminado del disco.`)
+        await fetchLocalWhisperModels()
+        await loadDynamicCatalog(true)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
+    } finally {
+      setDeletingWhisperId(null)
+    }
+  }
 
   const handlePullModel = async (targetModelTag: string) => {
     setIsPulling(true)
@@ -159,6 +252,23 @@ export function useAiSettingsManager() {
     } finally {
       setIsPulling(false)
       setPullingModelTag(null)
+    }
+  }
+
+  const handleDeleteModel = async (targetModelTag: string) => {
+    setDeletingModelTag(targetModelTag)
+    const effectiveTargetUrl = normalizeOllamaUrl(ollamaUrl)
+
+    try {
+      await api.deleteOllamaModel(targetModelTag, effectiveTargetUrl)
+      toast.success(`Modelo "${targetModelTag}" eliminado de Ollama correctamente.`)
+      void fetchOllamaModels(effectiveTargetUrl, false)
+      await loadDynamicCatalog(true)
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : `Error al eliminar el modelo ${targetModelTag}`
+      toast.error(errMsg)
+    } finally {
+      setDeletingModelTag(null)
     }
   }
 
@@ -272,15 +382,27 @@ export function useAiSettingsManager() {
   const handleVoiceAudioSave = async (event?: FormEvent) => {
     if (event) event.preventDefault()
     setSavingAi(true)
+
+    const payload: Record<string, string> = {
+      transcription_provider: voiceAudioProvider,
+      transcription_model: voiceAudioModel.trim(),
+      voice_command_provider: voiceAudioProvider,
+      voice_command_model: voiceAudioModel.trim(),
+    }
+
+    if (transcriptionGroqKey.trim()) {
+      payload.transcription_groq_api_key = transcriptionGroqKey.trim()
+    }
+    if (transcriptionOpenaiKey.trim()) {
+      payload.transcription_openai_api_key = transcriptionOpenaiKey.trim()
+    }
+
     try {
-      const updated = await api.updateAiSettings({
-        transcription_provider: voiceAudioProvider,
-        transcription_model: voiceAudioModel.trim(),
-        voice_command_provider: voiceAudioProvider,
-        voice_command_model: voiceAudioModel.trim(),
-      })
+      const updated = await api.updateAiSettings(payload)
       setAi(updated)
-      toast.success('Configuración del modelo de transcripción y comandos de voz guardada exitosamente.')
+      setTranscriptionGroqKey('')
+      setTranscriptionOpenaiKey('')
+      toast.success('Configuración del motor de transcripción y voz guardada exitosamente.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el modelo de voz y transcripción')
     } finally {
@@ -308,6 +430,12 @@ export function useAiSettingsManager() {
     setVoiceAudioProvider,
     voiceAudioModel,
     setVoiceAudioModel,
+    transcriptionGroqKey,
+    setTranscriptionGroqKey,
+    transcriptionOpenaiKey,
+    setTranscriptionOpenaiKey,
+    showTranscriptionKey,
+    setShowTranscriptionKey,
     groqKey,
     setGroqKey,
     geminiKey,
@@ -324,11 +452,20 @@ export function useAiSettingsManager() {
     ollamaModels,
     isPulling,
     pullingModelTag,
+    deletingModelTag,
     pullStatusMsg,
     fetchingModels,
     fetchOllamaModels,
     handlePullModel,
+    handleDeleteModel,
     isModelDownloaded,
+    localWhisperModels,
+    downloadingWhisperId,
+    deletingWhisperId,
+    fetchingWhisperModels,
+    fetchLocalWhisperModels,
+    handleDownloadWhisperModel,
+    handleDeleteWhisperModel,
     savingAi,
     testingConnection,
     handleAiSave,

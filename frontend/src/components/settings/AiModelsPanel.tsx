@@ -24,8 +24,10 @@ export const AiModelsPanel = () => {
     fetchOllamaModels,
     isPulling,
     pullingModelTag,
+    deletingModelTag,
     pullStatusMsg,
     handlePullModel,
+    handleDeleteModel,
     isModelDownloaded,
     catalogModels,
     catalogError,
@@ -48,9 +50,22 @@ export const AiModelsPanel = () => {
     setVoiceAudioProvider,
     voiceAudioModel,
     setVoiceAudioModel,
+    transcriptionGroqKey,
+    setTranscriptionGroqKey,
+    transcriptionOpenaiKey,
+    setTranscriptionOpenaiKey,
+    showTranscriptionKey,
+    setShowTranscriptionKey,
     isVoiceAudioOpen,
     setIsVoiceAudioOpen,
     handleVoiceAudioSave,
+    localWhisperModels,
+    downloadingWhisperId,
+    deletingWhisperId,
+    fetchingWhisperModels,
+    fetchLocalWhisperModels,
+    handleDownloadWhisperModel,
+    handleDeleteWhisperModel,
   } = useAiSettingsManager()
 
   if (loadingAi) {
@@ -62,13 +77,13 @@ export const AiModelsPanel = () => {
       <div className="space-y-1">
         <h2 className="text-xl font-bold text-slate-900">Configuración del Modelo de IA</h2>
         <p className="text-sm text-slate-500">
-          Configura el modelo de IA utilizado para la generación de resúmenes, análisis de QA e ingeniería de requerimientos.
+          Configura el modelo de IA utilizado para la generación de resúmenes, análisis de QA, transcripción de reuniones y comandos de voz.
         </p>
       </div>
 
       {/* Alerta de conexión si el catálogo externo falló */}
       {catalogError && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-center justify-between gap-3">
+        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2.5">
             <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
             <div>
@@ -108,8 +123,10 @@ export const AiModelsPanel = () => {
         fetchOllamaModels={fetchOllamaModels}
         isPulling={isPulling}
         pullingModelTag={pullingModelTag}
+        deletingModelTag={deletingModelTag}
         pullStatusMsg={pullStatusMsg}
         handlePullModel={handlePullModel}
+        handleDeleteModel={handleDeleteModel}
         isModelDownloaded={isModelDownloaded}
         catalogModels={catalogModels}
         groqKey={groqKey}
@@ -130,6 +147,7 @@ export const AiModelsPanel = () => {
 
       {/* Panel 2: Modelo de Transcripción y Comandos de Voz */}
       <VoiceAudioSection
+        ai={ai}
         voiceAudioProvider={voiceAudioProvider}
         setVoiceAudioProvider={setVoiceAudioProvider}
         voiceAudioModel={voiceAudioModel}
@@ -137,8 +155,21 @@ export const AiModelsPanel = () => {
         isVoiceAudioOpen={isVoiceAudioOpen}
         setIsVoiceAudioOpen={setIsVoiceAudioOpen}
         catalogModels={catalogModels}
+        transcriptionGroqKey={transcriptionGroqKey}
+        setTranscriptionGroqKey={setTranscriptionGroqKey}
+        transcriptionOpenaiKey={transcriptionOpenaiKey}
+        setTranscriptionOpenaiKey={setTranscriptionOpenaiKey}
+        showTranscriptionKey={showTranscriptionKey}
+        setShowTranscriptionKey={setShowTranscriptionKey}
         savingAi={savingAi}
         handleVoiceAudioSave={handleVoiceAudioSave}
+        localWhisperModels={localWhisperModels}
+        downloadingWhisperId={downloadingWhisperId}
+        deletingWhisperId={deletingWhisperId}
+        fetchingWhisperModels={fetchingWhisperModels}
+        fetchLocalWhisperModels={fetchLocalWhisperModels}
+        handleDownloadWhisperModel={handleDownloadWhisperModel}
+        handleDeleteWhisperModel={handleDeleteWhisperModel}
       />
     </div>
   )

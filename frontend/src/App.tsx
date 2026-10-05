@@ -12,6 +12,8 @@ import { ProfilePage } from './pages/configuraciones/ProfilePage'
 import { SettingsPage } from './pages/configuraciones/SettingsPage'
 import { LevantamientoPage } from './pages/funcional/LevantamientoPage'
 import { MejorasPage } from './pages/funcional/MejorasPage'
+import { InventarioPage } from './pages/funcional/InventarioPage'
+import { TranscripcionesPage } from './pages/funcional/TranscripcionesPage'
 import { FuncionalFeaturePage } from './pages/funcional/FuncionalFeaturePage'
 import { PmFeaturePage } from './pages/pm/PmFeaturePage'
 import { StandupPage } from './pages/pm/StandupPage'
@@ -30,6 +32,8 @@ export const App = () => {
                 <Route index element={<DashboardPage />} />
                 <Route path="pm/standup" element={<StandupPage />} />
                 <Route path="pm/:slug" element={<PmFeaturePage />} />
+                <Route path="funcional/transcripciones" element={<TranscripcionesPage />} />
+                <Route path="funcional/inventario" element={<InventarioPage />} />
                 <Route path="funcional/levantamiento" element={<LevantamientoPage />} />
                 <Route path="funcional/mejoras" element={<MejorasPage />} />
                 <Route path="funcional/:slug" element={<FuncionalFeaturePage />} />

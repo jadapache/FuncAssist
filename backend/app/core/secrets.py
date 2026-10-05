@@ -82,6 +82,8 @@ API_KEY_FIELDS = {
     "groq_api_key",
     "gemini_api_key",
     "api_key",
+    "transcription_groq_api_key",
+    "transcription_openai_api_key",
 }
 
 
