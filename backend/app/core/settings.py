@@ -11,6 +11,7 @@ LOCAL_DIR = Path(_custom_local) if _custom_local else ROOT_DIR / "local"
 CONNECTIONS_DIR = LOCAL_DIR / "connections"
 CACHE_DIR = LOCAL_DIR / "cache"
 SETTINGS_DIR = LOCAL_DIR / "settings"
+HISTORY_DIR = LOCAL_DIR / "history"
 
 
 class Settings(BaseSettings):
@@ -59,5 +60,5 @@ def get_settings() -> Settings:
 
 
 def ensure_local_dirs() -> None:
-  for path in (LOCAL_DIR, CONNECTIONS_DIR, CACHE_DIR, SETTINGS_DIR):
+  for path in (LOCAL_DIR, CONNECTIONS_DIR, CACHE_DIR, SETTINGS_DIR, HISTORY_DIR):
     path.mkdir(parents=True, exist_ok=True)
