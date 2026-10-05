@@ -1,123 +1,23 @@
-import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertTriangle,
   Bot,
   CheckCircle2,
   Copy,
   FileCode,
   FileText,
   ListOrdered,
-  Plus,
   RefreshCw,
   RotateCcw,
   Save,
-  Search,
   Sparkles,
-  Trash2,
-  Zap,
 } from 'lucide-react'
-import {
-  api,
-  type AIPromptTemplate,
-  type AIRubric,
-} from '../../api/client'
+import { api, type AIPromptTemplate, type AIRubric } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
-
-interface FeatureMeta {
-  id: string
-  title: string
-  description: string
-  category: 'workspace' | 'qa' | 'product'
-}
-
-const FEATURE_METAS: FeatureMeta[] = [
-  {
-    id: 'mejoras_doc',
-    title: 'Redacción y Mejoras de Documentos',
-    description: 'Instrucciones del agente de redacción para propuestas de mejora funcional en formato corporativo.',
-    category: 'workspace',
-  },
-  {
-    id: 'standup',
-    title: 'Asistente de Standup Diario',
-    description: 'Estructuración de resúmenes diarios (Ayer, Hoy, Bloqueos, Riesgos) basados en tickets y PRs.',
-    category: 'product',
-  },
-  {
-    id: 'ask_product',
-    title: 'Preguntas de Producto y QA',
-    description: 'Respuestas a consultas funcionales sustentadas estrictamente en la base de conocimiento.',
-    category: 'product',
-  },
-  {
-    id: 'prd_checker',
-    title: 'Auditoría de PRDs y Especificaciones',
-    description: 'Revisión y análisis de completitud, riesgos y criterios de aceptación en especificaciones.',
-    category: 'product',
-  },
-  {
-    id: 'change_impact',
-    title: 'Análisis de Impacto de Cambios',
-    description: 'Identificación de áreas afectadas, documentación, tickets y partes interesadas por un cambio.',
-    category: 'qa',
-  },
-  {
-    id: 'regression',
-    title: 'Estrategia de Pruebas de Regresión',
-    description: 'Definición de alcance y flujos prioritarios de pruebas basados en historias y cambios recientes.',
-    category: 'qa',
-  },
-  {
-    id: 'api_qa',
-    title: 'Cobertura y Pruebas de APIs',
-    description: 'Detección de endpoints sin probar, escenarios negativos y verificaciones de autenticación.',
-    category: 'qa',
-  },
-  {
-    id: 'visual_qa',
-    title: 'Checklist de QA Visual y UI',
-    description: 'Pautas de verificación de estados de interfaz, accesibilidad y criterios de diseño.',
-    category: 'qa',
-  },
-  {
-    id: 'smart_test_data',
-    title: 'Generación de Datos de Prueba',
-    description: 'Construcción de casos válidos, límites e inválidos respetando reglas de negocio y esquemas.',
-    category: 'qa',
-  },
-  {
-    id: 'release_readiness',
-    title: 'Evaluación de Salida a Producción',
-    description: 'Semáforo de pase a producción verificando bloqueos abiertos, PRs pendientes y riesgos.',
-    category: 'qa',
-  },
-  {
-    id: 'transcript_summary',
-    title: 'Resumen de Transcripción y Minutas',
-    description: 'Generación de resumen narrativo ejecutivo y Key Insights a partir de audios transcritos.',
-    category: 'workspace',
-  },
-  {
-    id: 'inventario_doc',
-    title: 'Inventario de Requerimientos',
-    description: 'Plantilla y rúbrica para generación de matriz de contexto de proyecto e inventario funcional.',
-    category: 'product',
-  },
-  {
-    id: 'levantamiento_doc',
-    title: 'Levantamiento Detallado de Requerimientos',
-    description: 'Plantilla y rúbrica para especificación funcional detallada, historias de usuario y casos de uso.',
-    category: 'product',
-  },
-]
-
-const AVAILABLE_SOURCES = [
-  { id: 'knowledge', label: 'Base de Conocimiento (Archivos subidos)' },
-  { id: 'jira', label: 'Jira Software' },
-  { id: 'github', label: 'GitHub' },
-  { id: 'gitlab', label: 'GitLab' },
-]
+import { FEATURE_METAS, type FeatureMeta } from './prompts_rubrics/types'
+import { FeatureSelectorSidebar } from './prompts_rubrics/FeatureSelectorSidebar'
+import { PromptEditor } from './prompts_rubrics/PromptEditor'
+import { RubricEditor } from './prompts_rubrics/RubricEditor'
+import { JsonCodeEditor } from './prompts_rubrics/JsonCodeEditor'
 
 export const AiPromptsRubricsEditor = () => {
   const { toast } = useToast()
@@ -142,9 +42,6 @@ export const AiPromptsRubricsEditor = () => {
 
   // Search filter for features list
   const [searchQuery, setSearchQuery] = useState<string>('')
-
-  // New criterion input in rubric form mode
-  const [newCriterion, setNewCriterion] = useState<string>('')
 
   // Fetch all prompts and rubrics from backend
   const loadAll = useCallback(async () => {
@@ -207,7 +104,7 @@ export const AiPromptsRubricsEditor = () => {
       setRawJsonText(JSON.stringify(parsed, null, 2))
       setJsonError(null)
       toast.success('JSON formateado correctamente')
-    } catch (e) {
+    } catch {
       toast.error('Corrige los errores de sintaxis antes de formatear')
     }
   }
@@ -340,52 +237,10 @@ export const AiPromptsRubricsEditor = () => {
     toast.success(`Variable ${placeholder} agregada`)
   }
 
-  // Source checkbox toggle
-  const handleToggleSource = (sourceId: string) => {
-    if (!promptData) return
-    const current = promptData.allowed_sources || []
-    const updated = current.includes(sourceId)
-      ? current.filter((s) => s !== sourceId)
-      : [...current, sourceId]
-    const updatedObj = { ...promptData, allowed_sources: updated }
-    setPromptData(updatedObj)
-    setRawJsonText(JSON.stringify(updatedObj, null, 2))
-  }
-
-  // Rubric criteria methods
-  const handleAddCriterion = (e: FormEvent) => {
-    e.preventDefault()
-    if (!newCriterion.trim() || !rubricData) return
-    const updatedCriteria = [...(rubricData.criteria || []), newCriterion.trim()]
-    const updatedObj = { ...rubricData, criteria: updatedCriteria }
-    setRubricData(updatedObj)
-    setRawJsonText(JSON.stringify(updatedObj, null, 2))
-    setNewCriterion('')
-    toast.success('Criterio añadido a la rúbrica')
-  }
-
-  const handleDeleteCriterion = (index: number) => {
-    if (!rubricData) return
-    const updatedCriteria = (rubricData.criteria || []).filter((_, idx) => idx !== index)
-    const updatedObj = { ...rubricData, criteria: updatedCriteria }
-    setRubricData(updatedObj)
-    setRawJsonText(JSON.stringify(updatedObj, null, 2))
-  }
-
-  const handleUpdateCriterion = (index: number, val: string) => {
-    if (!rubricData) return
-    const updatedCriteria = [...(rubricData.criteria || [])]
-    updatedCriteria[index] = val
-    const updatedObj = { ...rubricData, criteria: updatedCriteria }
-    setRubricData(updatedObj)
-    setRawJsonText(JSON.stringify(updatedObj, null, 2))
-  }
-
   const allFeatures = useMemo(() => {
     const list: FeatureMeta[] = [...FEATURE_METAS]
     const existingIds = new Set(list.map((f) => f.id))
 
-    // Add any features dynamically found in backend prompts/rubrics
     for (const p of promptsList) {
       if (p.feature && !existingIds.has(p.feature)) {
         existingIds.add(p.feature)
@@ -445,7 +300,12 @@ export const AiPromptsRubricsEditor = () => {
             </h2>
           </div>
           <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
-            Edita y ajusta directamente los archivos de configuración <code className="font-mono text-[11px] bg-white px-1.5 py-0.5 rounded border border-blue-200 text-[#002777]">.json</code> almacenados en <strong className="text-slate-800">/local/ai/prompts</strong> y <strong className="text-slate-800">/local/ai/rubrics</strong> para afinar las restricciones del modelo.
+            Edita y ajusta directamente los archivos de configuración{' '}
+            <code className="font-mono text-[11px] bg-white px-1.5 py-0.5 rounded border border-blue-200 text-[#002777]">
+              .json
+            </code>{' '}
+            almacenados en <strong className="text-slate-800">/local/ai/prompts</strong> y{' '}
+            <strong className="text-slate-800">/local/ai/rubrics</strong> para afinar las restricciones del modelo.
           </p>
         </div>
 
@@ -472,77 +332,15 @@ export const AiPromptsRubricsEditor = () => {
         <div className="grid gap-6 lg:grid-cols-12 items-start">
           {/* LEFT COLUMN: FEATURES LIST SELECTOR */}
           <div className="lg:col-span-4 space-y-3">
-            <div className="card p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Funcionalidades ({filteredFeatures.length})
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {promptsList.length} prompts / {rubricsList.length} rúbricas
-                </span>
-              </div>
-
-              {/* Search filter input */}
-              <div className="relative">
-                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar funcionalidad..."
-                  className="input-field pl-8.5 text-xs py-1.5 border border-slate-200 rounded-xl"
-                />
-              </div>
-
-              {/* Features List */}
-              <div className="space-y-1.5 max-h-[600px] overflow-y-auto pr-1">
-                {filteredFeatures.map((f) => {
-                  const isSelected = selectedFeature === f.id
-                  const pItem = promptsList.find((p) => p.feature === f.id)
-                  const rItem = rubricsList.find((r) => r.feature === f.id)
-
-                  return (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setSelectedFeature(f.id)}
-                      className={[
-                        'w-full text-left p-3 rounded-xl transition-all cursor-pointer border flex flex-col gap-1',
-                        isSelected
-                          ? 'bg-blue-50/90 border-[#002777] shadow-xs'
-                          : 'bg-white hover:bg-slate-50 border-slate-200/80 text-slate-700',
-                      ].join(' ')}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className={[
-                            'text-xs font-bold truncate',
-                            isSelected ? 'text-[#002777]' : 'text-slate-900',
-                          ].join(' ')}
-                        >
-                          {f.title}
-                        </span>
-                        <code className="text-[10px] font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">
-                          {f.id}
-                        </code>
-                      </div>
-
-                      <p className="text-[11px] text-slate-500 line-clamp-1">{f.description}</p>
-
-                      <div className="flex items-center gap-2 pt-1 text-[10px]">
-                        <span className="inline-flex items-center gap-1 text-slate-500 font-mono">
-                          P: v{pItem?.version || 1}
-                        </span>
-                        <span className="text-slate-300">•</span>
-                        <span className="inline-flex items-center gap-1 text-slate-500 font-mono">
-                          R: v{rItem?.version || 1}
-                        </span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+            <FeatureSelectorSidebar
+              features={filteredFeatures}
+              selectedFeature={selectedFeature}
+              promptsList={promptsList}
+              rubricsList={rubricsList}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onSelectFeature={setSelectedFeature}
+            />
           </div>
 
           {/* RIGHT COLUMN: EDITOR CANVAS */}
@@ -666,206 +464,33 @@ export const AiPromptsRubricsEditor = () => {
 
               {/* EDITOR VIEW BODY */}
               {editMode === 'form' ? (
-                /* ======================== MODO FORMULARIO GUIADO ======================== */
                 <div className="space-y-5 pt-1">
                   {activeDocType === 'prompt' ? (
-                    /* Form for Prompt */
-                    <div className="space-y-4">
-                      {/* System Prompt */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-800 block flex items-center justify-between">
-                          <span>Instrucción del Sistema (Rol y Reglas de Comportamiento)</span>
-                          <span className="text-[10px] text-slate-400 font-normal">
-                            Define el rol, tono y restricciones de invención
-                          </span>
-                        </label>
-                        <textarea
-                          rows={4}
-                          value={promptData?.system || ''}
-                          onChange={(e) => {
-                            const updated = { ...(promptData || { version: 1, feature: selectedFeature }), system: e.target.value }
-                            setPromptData(updated)
-                            setRawJsonText(JSON.stringify(updated, null, 2))
-                          }}
-                          placeholder="Ej. You are a senior QA lead reviewing PRDs and specs. Answer ONLY from context chunks..."
-                          className="input-field text-xs font-mono leading-relaxed p-3 border border-slate-200 rounded-xl"
-                        />
-                      </div>
-
-                      {/* Allowed Sources Selector */}
-                      <div className="space-y-2 rounded-xl bg-slate-50 p-4 border border-slate-200">
-                        <label className="text-xs font-bold text-slate-800 block">
-                          Fuentes de Contexto Conectadas Permitidas
-                        </label>
-                        <p className="text-[11px] text-slate-500">
-                          Selecciona de dónde puede extraer evidencia este prompt para fundamentar sus respuestas:
-                        </p>
-                        <div className="grid gap-2 sm:grid-cols-2 pt-1">
-                          {AVAILABLE_SOURCES.map((src) => {
-                            const isChecked = (promptData?.allowed_sources || []).includes(src.id)
-                            return (
-                              <label
-                                key={src.id}
-                                className={[
-                                  'flex items-center gap-2.5 p-2.5 rounded-lg border text-xs font-medium cursor-pointer transition',
-                                  isChecked
-                                    ? 'bg-white border-[#002777] text-[#002777] font-semibold shadow-2xs'
-                                    : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white',
-                                ].join(' ')}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => handleToggleSource(src.id)}
-                                  className="rounded text-[#002777] focus:ring-[#002777]"
-                                />
-                                <span>{src.label}</span>
-                              </label>
-                            )
-                          })}
-                        </div>
-                      </div>
-
-                      {/* User Template */}
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold text-slate-800">
-                            Plantilla de Usuario (Estructura del Mensaje al Modelo)
-                          </label>
-                          <span className="text-[10px] text-slate-400">
-                            Variables inyectadas: <code className="font-mono text-[#002777]">{'{{...}}'}</code>
-                          </span>
-                        </div>
-
-                        {/* Variables quick insertion pills */}
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                          <span className="text-[11px] text-slate-500 mr-1 flex items-center gap-1">
-                            <Zap className="h-3 w-3 text-amber-500" /> Insertar variable:
-                          </span>
-                          {['query', 'context', 'rubric', 'chat_context'].map((v) => (
-                            <button
-                              key={v}
-                              type="button"
-                              onClick={() => insertTemplateVariable(v)}
-                              className="px-2 py-0.5 rounded-md bg-blue-50 hover:bg-blue-100 text-[#002777] text-[11px] font-mono font-semibold border border-blue-200 transition cursor-pointer"
-                            >
-                              +{`{${v}}`}
-                            </button>
-                          ))}
-                        </div>
-
-                        <textarea
-                          rows={7}
-                          value={promptData?.user_template || ''}
-                          onChange={(e) => {
-                            const updated = { ...(promptData || { version: 1, feature: selectedFeature }), user_template: e.target.value }
-                            setPromptData(updated)
-                            setRawJsonText(JSON.stringify(updated, null, 2))
-                          }}
-                          placeholder="Plantilla enviada al modelo con variables como {query}, {context}, {rubric}..."
-                          className="input-field text-xs font-mono leading-relaxed p-3 border border-slate-200 rounded-xl"
-                        />
-                      </div>
-                    </div>
+                    <PromptEditor
+                      selectedFeature={selectedFeature}
+                      promptData={promptData}
+                      onChange={(updated: AIPromptTemplate) => {
+                        setPromptData(updated)
+                        setRawJsonText(JSON.stringify(updated, null, 2))
+                      }}
+                      onInsertVariable={insertTemplateVariable}
+                    />
                   ) : (
-                    /* Form for Rubric */
-                    <div className="space-y-4">
-                      <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200 text-xs text-slate-700 leading-relaxed">
-                        <strong className="text-[#002777] block mb-1">¿Qué es una rúbrica en el sistema?</strong>
-                        Son criterios estrictos de evaluación inyectados en la variable <code className="font-mono bg-blue-100 px-1 rounded text-[#002777]">{'{rubric}'}</code>. El modelo LLM debe cumplir cada punto antes de emitir su respuesta.
-                      </div>
-
-                      {/* Criteria list */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-800 block">
-                          Criterios de Evaluación Obligatorios ({(rubricData?.criteria || []).length})
-                        </label>
-
-                        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                          {(rubricData?.criteria || []).map((crit, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-start gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl group hover:bg-white transition"
-                            >
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#002777] text-[10px] font-bold text-white mt-1">
-                                {idx + 1}
-                              </span>
-                              <textarea
-                                rows={2}
-                                value={crit}
-                                onChange={(e) => handleUpdateCriterion(idx, e.target.value)}
-                                className="flex-1 text-xs bg-transparent border-none p-1 focus:bg-white focus:ring-1 focus:ring-[#002777] rounded leading-relaxed text-slate-800 resize-none font-medium"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteCriterion(idx)}
-                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer shrink-0 mt-1"
-                                title="Eliminar criterio"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Add criterion form */}
-                        <form onSubmit={handleAddCriterion} className="flex gap-2 pt-2">
-                          <input
-                            type="text"
-                            value={newCriterion}
-                            onChange={(e) => setNewCriterion(e.target.value)}
-                            placeholder="Escribe un nuevo criterio estricto para el modelo..."
-                            className="input-field text-xs border border-slate-200 rounded-xl"
-                          />
-                          <button
-                            type="submit"
-                            disabled={!newCriterion.trim()}
-                            className="btn btn-secondary text-xs px-3.5 py-1.5 shrink-0 inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>Agregar Criterio</span>
-                          </button>
-                        </form>
-                      </div>
-                    </div>
+                    <RubricEditor
+                      rubricData={rubricData}
+                      onChange={(updated: AIRubric) => {
+                        setRubricData(updated)
+                        setRawJsonText(JSON.stringify(updated, null, 2))
+                      }}
+                    />
                   )}
                 </div>
               ) : (
-                /* ======================== MODO EDITOR DE CÓDIGO JSON ======================== */
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 font-medium flex items-center gap-1.5">
-                      <FileCode className="h-3.5 w-3.5 text-[#002777]" />
-                      <span>Edición directa del archivo fuente JSON</span>
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {rawJsonText.split('\n').length} líneas
-                    </span>
-                  </div>
-
-                  {jsonError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="block font-bold">Error en la sintaxis del JSON:</strong>
-                        <span className="font-mono text-[11px]">{jsonError}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <textarea
-                    rows={16}
-                    value={rawJsonText}
-                    onChange={(e) => handleRawJsonChange(e.target.value)}
-                    className={[
-                      'w-full p-4 font-mono text-xs rounded-xl border leading-relaxed resize-y focus:outline-none focus:ring-2 shadow-inner',
-                      jsonError
-                        ? 'border-red-300 bg-red-50/20 focus:ring-red-500 text-red-900'
-                        : 'border-slate-300 bg-slate-900 text-emerald-400 focus:ring-[#002777]',
-                    ].join(' ')}
-                    spellCheck={false}
-                  />
-                </div>
+                <JsonCodeEditor
+                  rawJsonText={rawJsonText}
+                  jsonError={jsonError}
+                  onChange={handleRawJsonChange}
+                />
               )}
 
               {/* ACTION FOOTER */}

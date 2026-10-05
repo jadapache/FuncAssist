@@ -12,6 +12,7 @@ from app.core.storage import load_app_settings
 
 
 def get_ai_settings() -> dict[str, Any]:
+  """Load AI settings from storage"""
   settings = load_app_settings()
   ai = settings.get("ai") or {}
   return {

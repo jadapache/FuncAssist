@@ -360,4 +360,46 @@ def test_local_whisper_models_endpoint(client: TestClient):
   assert any(m["id"] == "base" for m in data["models"])
 
 
+def test_generate_summary_endpoint(client: TestClient, monkeypatch):
+  from app.schemas.transcription import TranscriptionSummary
+
+  # Save dummy transcription record
+  test_record = {
+    "id": "test-summary-id-999",
+    "media_id": "media-999",
+    "metadata": {"title": "Reunión de Prueba Resumen", "description": ""},
+    "language": "es",
+    "duration_seconds": 60.0,
+    "created_at": "2026-10-02T12:00:00Z",
+    "segments": [
+      {"start": 0.0, "end": 5.0, "speaker": "Participante 1", "text": "Hola a todos, iniciamos."},
+      {"start": 5.0, "end": 10.0, "speaker": "Participante 2", "text": "De acuerdo, revisemos requerimientos."},
+    ],
+    "text": "Hola a todos, iniciamos. De acuerdo, revisemos requerimientos.",
+    "summary": None,
+    "saved_to_knowledge": False,
+  }
+  save_transcription_record(test_record)
+
+  async def mock_summarize(segments, title):
+    return TranscriptionSummary(
+      summary_text="Resumen generado para la prueba.",
+      key_insights=["Insight 1"],
+      participants=["Participante 1", "Participante 2"],
+      topics=["Requerimientos"],
+    )
+
+  monkeypatch.setattr("app.api.transcription.summarize_transcript", mock_summarize)
+
+  res = client.post("/api/transcription/generate-summary/test-summary-id-999")
+  assert res.status_code == 200
+  data = res.json()
+  assert data["ok"] is True
+  assert data["summary"]["summary_text"] == "Resumen generado para la prueba."
+
+  # Clean up
+  delete_transcription_record("test-summary-id-999")
+
+
+
 
