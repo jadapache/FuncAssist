@@ -7,89 +7,20 @@ import {
   X,
   Loader2,
 } from 'lucide-react'
-import type { TranscriptionProgress } from '../api/transcriptionApi'
+import type { BackgroundJobItem } from '../../context/BackgroundJobContext'
 
-export interface BackgroundTaskItem {
-  id: string
-  type?: 'transcription' | 'download' | 'processing'
-  title: string
-  progress: number
-  status?: 'pending' | 'uploading' | 'preprocessing' | 'transcribing' | 'diarizing' | 'summarizing' | 'complete' | 'failed' | 'cancelled'
-  stageText?: string
-  eta?: string | null
-  speedOrSize?: string | null
-  onCancel?: () => void
-  onClick?: () => void
-  onDismiss?: () => void
-}
-
-interface FloatingTranscriptionToastProps {
-  activeJobs?: TranscriptionProgress[]
-  extraTasks?: BackgroundTaskItem[]
-  onOpenStudio?: (id: string) => void
+export interface FloatingJobToastProps {
+  jobs?: BackgroundJobItem[]
   onCancelJob?: (id: string) => void
   onDismissJob?: (id: string) => void
 }
 
-const STAGE_TRANSLATIONS: Record<string, string> = {
-  pending: 'En cola...',
-  uploading: 'Subiendo archivo...',
-  preprocessing: 'Extrayendo audio...',
-  transcribing: 'Transcribiendo...',
-  diarizing: 'Identificando interlocutores...',
-  summarizing: 'Generando resumen...',
-  finalizing: 'Finalizando...',
-  complete: 'Completado',
-  failed: 'Error',
-  cancelled: 'Cancelado',
-}
-
-export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProps> = ({
-  activeJobs = [],
-  extraTasks = [],
-  onOpenStudio,
+export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
+  jobs = [],
   onCancelJob,
   onDismissJob,
 }) => {
-  // Convert activeJobs into generic tasks
-  const transcriptionTasks: BackgroundTaskItem[] = activeJobs.map((job) => {
-    const isComplete = job.status === 'complete'
-    const isFailed = job.status === 'failed'
-
-    // Title denotes the meeting title typed by user or fallback
-    const title = job.title || (job.model_info ? `Transcribir (${job.model_info})` : 'Transcribir Audio')
-
-    let stageText = 'Procesando...'
-    if (isComplete) {
-      stageText = 'Completado'
-    } else if (isFailed) {
-      stageText = job.error || job.message || 'Error en procesamiento'
-    } else if (job.stage && STAGE_TRANSLATIONS[job.stage.toLowerCase()]) {
-      stageText = STAGE_TRANSLATIONS[job.stage.toLowerCase()]
-    } else if (job.status && STAGE_TRANSLATIONS[job.status.toLowerCase()]) {
-      stageText = STAGE_TRANSLATIONS[job.status.toLowerCase()]
-    } else if (job.message) {
-      stageText = job.message
-    }
-
-    return {
-      id: job.id,
-      type: 'transcription',
-      title,
-      progress: typeof job.progress === 'number' ? job.progress : 0,
-      status: job.status,
-      stageText,
-      eta: job.eta,
-      speedOrSize: job.preview || null,
-      onCancel: () => onCancelJob?.(job.id),
-      onClick: () => onOpenStudio?.(job.id),
-      onDismiss: () => onDismissJob?.(job.id),
-    }
-  })
-
-  const allTasks = [...transcriptionTasks, ...extraTasks]
-
-  if (allTasks.length === 0) {
+  if (jobs.length === 0) {
     return null
   }
 
@@ -98,7 +29,7 @@ export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProp
       aria-label="Notificaciones de procesos en segundo plano"
       className="fixed top-6 right-6 z-50 flex flex-col gap-3 w-80 sm:w-96 pointer-events-auto animate-fade-in font-sans"
     >
-      {allTasks.map((task) => {
+      {jobs.map((task) => {
         const isComplete = task.status === 'complete'
         const isFailed = task.status === 'failed'
         const inProgress = !isComplete && !isFailed
@@ -147,12 +78,13 @@ export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProp
                     {task.title}
                   </h4>
 
-                  {inProgress && task.onCancel && (
+                  {inProgress && (task.onCancel || onCancelJob) && (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        task.onCancel?.()
+                        if (task.onCancel) task.onCancel()
+                        else onCancelJob?.(task.id)
                       }}
                       className="text-[11px] font-semibold text-slate-400 hover:text-red-600 transition shrink-0 cursor-pointer"
                       title="Cancelar proceso"
@@ -161,12 +93,13 @@ export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProp
                     </button>
                   )}
 
-                  {!inProgress && task.onDismiss && (
+                  {!inProgress && (task.onDismiss || onDismissJob) && (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        task.onDismiss?.()
+                        if (task.onDismiss) task.onDismiss()
+                        else onDismissJob?.(task.id)
                       }}
                       className="text-slate-400 hover:text-slate-600 p-0.5 rounded transition shrink-0 cursor-pointer"
                       title="Cerrar notificación"
@@ -216,3 +149,4 @@ export const FloatingTranscriptionToast: React.FC<FloatingTranscriptionToastProp
     </aside>
   )
 }
+export default FloatingJobToast

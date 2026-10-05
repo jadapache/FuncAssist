@@ -1,0 +1,128 @@
+[
+  {
+    "id": "qwen2.5:1.5b",
+    "name": "Qwen 2.5 1.5B (Ultra Ligero)",
+    "filename": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "size": "~1.0 GiB",
+    "tokens": "32.768 tokens",
+    "description": "Modelo ultra rápido y liviano para análisis ágil en cualquier CPU o laptop sin GPU dedicada.",
+    "task_type": "chat_writing",
+    "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "aliases": ["qwen:1.5b", "qwen1.5b"]
+  },
+  {
+    "id": "qwen2.5:3b",
+    "name": "Qwen 2.5 3B (Equilibrado / Recomendado)",
+    "filename": "qwen2.5-3b-instruct-q4_k_m.gguf",
+    "size": "~1.9 GiB",
+    "tokens": "32.768 tokens",
+    "description": "Modelo insignia equilibrado de alta fidelidad para redacción de historias de usuario y análisis QA.",
+    "task_type": "chat_writing",
+    "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+    "aliases": ["qwen3.5:2b", "qwen:3b", "qwen3b"]
+  },
+  {
+    "id": "llama3.2:1b",
+    "name": "Llama 3.2 1B (Meta Instantáneo)",
+    "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    "size": "~770 MiB",
+    "tokens": "131.072 tokens",
+    "description": "Modelo ligero de Meta de última generación, bajo consumo de memoria y respuesta instantánea.",
+    "task_type": "chat_writing",
+    "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    "aliases": ["llama:1b", "llama1b"]
+  },
+  {
+    "id": "llama3.2:3b",
+    "name": "Llama 3.2 3B (Alta Calidad)",
+    "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "size": "~2.0 GiB",
+    "tokens": "131.072 tokens",
+    "description": "Alta precisión en razonamiento, casos de prueba y análisis estructurado en español e inglés.",
+    "task_type": "chat_writing",
+    "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "aliases": ["llama:3b", "llama3b"]
+  },
+  {
+    "id": "deepseek-r1:1.5b",
+    "name": "DeepSeek R1 1.5B (Razonamiento)",
+    "filename": "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
+    "size": "~1.0 GiB",
+    "tokens": "65.536 tokens",
+    "description": "Modelo de razonamiento estructurado (Chain-of-Thought) para lógica de validación QA profunda.",
+    "task_type": "chat_writing",
+    "url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
+    "aliases": ["deepseek-r1:8b", "deepseek:1.5b"]
+  },
+  {
+    "id": "gemma-2-2b",
+    "name": "Gemma 2 2B (Google Open Model)",
+    "filename": "gemma-2-2b-it-Q4_K_M.gguf",
+    "size": "~1.6 GiB",
+    "tokens": "8.192 tokens",
+    "description": "Modelo de Google optimizado para seguimiento de instrucciones y redacción técnica concisa.",
+    "task_type": "chat_writing",
+    "url": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
+    "aliases": ["gemma3:1b", "gemma:2b"]
+  },
+  {
+    "id": "tiny",
+    "name": "Whisper Tiny (Ultra Ligero)",
+    "tag": "whisper:tiny",
+    "description": "Modelo ultrarrápido con menor consumo de memoria. Ideal para transcripciones rápidas en cualquier equipo.",
+    "size": "75 MB",
+    "accuracy": "Básica (Rápido)",
+    "task_type": "transcription",
+    "aliases": ["whisper-tiny"]
+  },
+  {
+    "id": "base",
+    "name": "Whisper Base (Equilibrado / Recomendado)",
+    "tag": "whisper:base",
+    "description": "Excelente balance entre velocidad y precisión para reuniones estándar.",
+    "size": "142 MB",
+    "accuracy": "Estándar",
+    "task_type": "transcription",
+    "aliases": ["whisper-base"]
+  },
+  {
+    "id": "small",
+    "name": "Whisper Small (Mayor Precisión)",
+    "tag": "whisper:small",
+    "description": "Mayor precisión con acentos y términos técnicos en español.",
+    "size": "466 MB",
+    "accuracy": "Buena",
+    "task_type": "transcription",
+    "aliases": ["whisper-small"]
+  },
+  {
+    "id": "medium",
+    "name": "Whisper Medium (Alta Fidelidad)",
+    "tag": "whisper:medium",
+    "description": "Alta fidelidad en la transcripción, requiere GPU o CPU con buen rendimiento.",
+    "size": "1.5 GB",
+    "accuracy": "Alta",
+    "task_type": "transcription",
+    "aliases": ["whisper-medium"]
+  },
+  {
+    "id": "large-v3",
+    "name": "Whisper Large v3 (Flagship)",
+    "tag": "whisper:large-v3",
+    "description": "El modelo insignia con la mayor precisión multilingüe disponible.",
+    "size": "3.1 GB",
+    "accuracy": "Máxima",
+    "task_type": "transcription",
+    "aliases": ["whisper-large-v3"]
+  },
+  {
+    "id": "large-v3-turbo",
+    "name": "Whisper Large v3 Turbo (Acelerado)",
+    "tag": "whisper:large-v3-turbo",
+    "description": "Versión optimizada de Large v3 con decodificación acelerada.",
+    "size": "1.6 GB",
+    "accuracy": "Alta / Rápido",
+    "task_type": "transcription",
+    "aliases": ["whisper-large-v3-turbo"]
+  }
+]

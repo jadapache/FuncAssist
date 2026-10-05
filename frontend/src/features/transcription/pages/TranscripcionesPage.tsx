@@ -19,7 +19,6 @@ import { ConfirmationModal } from '../../../components/common'
 import {
   RecentTranscriptionItem,
   GenerateModal,
-  FloatingTranscriptionToast,
   TranscriptionStudio,
   UploadMediaModal,
 } from '../components'
@@ -41,9 +40,7 @@ export const TranscripcionesPage = () => {
     activeMeetingTitle,
     currentProgress,
     handleUploadAndStart,
-    handleCancelTranscription,
     handleDeleteTranscription,
-    handleDismissJob,
     setShowGenerateModal,
     refreshTranscriptions,
   } = useTranscription()
@@ -107,13 +104,6 @@ export const TranscripcionesPage = () => {
           activeProgress={currentProgress}
           onBackToDashboard={closeStudio}
           onRefreshData={refreshTranscriptions}
-        />
-        {/* Floating toast widget in top right */}
-        <FloatingTranscriptionToast
-          activeJobs={activeJobs}
-          onOpenStudio={(id) => openStudio(id)}
-          onCancelJob={(id) => handleCancelTranscription(id)}
-          onDismissJob={(id) => handleDismissJob(id)}
         />
       </div>
     )
@@ -364,14 +354,6 @@ export const TranscripcionesPage = () => {
         }}
         isUploading={isUploading}
         configuredModelLabel={availableModels?.active_model_label}
-      />
-
-      {/* Floating Background Task Toast (Top-Right Widget) */}
-      <FloatingTranscriptionToast
-        activeJobs={activeJobs}
-        onOpenStudio={(id) => openStudio(id)}
-        onCancelJob={(id) => handleCancelTranscription(id)}
-        onDismissJob={(id) => handleDismissJob(id)}
       />
 
       {/* Delete Confirmation Modal */}

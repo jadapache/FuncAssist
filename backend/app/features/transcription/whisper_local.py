@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -65,49 +66,200 @@ def get_local_models_info() -> List[Dict[str, Any]]:
   return results
 
 
+# Track active Whisper downloads and cancellation tokens
+_WHISPER_DOWNLOADS: Dict[str, Dict[str, Any]] = {}
+_WHISPER_CANCEL_EVENTS: Dict[str, threading.Event] = {}
+_WHISPER_LOCK = threading.Lock()
+
+
+def get_active_whisper_downloads() -> List[Dict[str, Any]]:
+  """Returns active Whisper download tasks and purges finished tasks after 5 seconds."""
+  now = time.time()
+  with _WHISPER_LOCK:
+    to_purge = [
+      cid for cid, task in _WHISPER_DOWNLOADS.items()
+      if task.get("status") in ("complete", "cancelled", "failed")
+      and (now - task.get("finished_at", 0) > 5.0)
+    ]
+    for cid in to_purge:
+      _WHISPER_DOWNLOADS.pop(cid, None)
+      _WHISPER_CANCEL_EVENTS.pop(cid, None)
+    return list(_WHISPER_DOWNLOADS.values())
+
+
+def prepare_whisper_download(model_id: str) -> str:
+  """Synchronously initializes Whisper download tracking to 0% before background thread starts."""
+  clean_id = model_id.replace("whisper-", "").strip().lower()
+  with _WHISPER_LOCK:
+    _WHISPER_CANCEL_EVENTS.pop(clean_id, None)
+    _WHISPER_DOWNLOADS[clean_id] = {
+      "id": clean_id,
+      "title": f"Descargando Whisper {clean_id.title()}",
+      "type": "download",
+      "progress": 0,
+      "status": "downloading",
+      "stageText": "Conectando con el repositorio...",
+      "speedOrSize": "0 MB",
+      "eta": None,
+    }
+  return clean_id
+
+
+def cancel_whisper_download(model_id: str) -> bool:
+  """Cancels an active Whisper model download and removes partial download files."""
+  clean = model_id.replace("whisper-", "").strip().lower()
+  with _WHISPER_LOCK:
+    event = _WHISPER_CANCEL_EVENTS.get(clean)
+    if event:
+      event.set()
+      if clean in _WHISPER_DOWNLOADS:
+        _WHISPER_DOWNLOADS[clean]["status"] = "cancelled"
+        _WHISPER_DOWNLOADS[clean]["progress"] = 0
+        _WHISPER_DOWNLOADS[clean]["stageText"] = "Descarga cancelada por el usuario"
+        _WHISPER_DOWNLOADS[clean]["finished_at"] = time.time()
+      logger.info(f"Cancellation requested for Whisper model {clean}")
+
+      cache_dir = get_whisper_cache_dir()
+      tmp_file = cache_dir / f"{clean}.pt.download"
+      if tmp_file.exists():
+        try:
+          tmp_file.unlink()
+          logger.info(f"Removed partial Whisper download file: {tmp_file}")
+        except Exception:
+          pass
+      return True
+  return False
+
+
 def download_model_file(
   model_id: str,
   progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Path:
-  """Downloads a Whisper model file (.pt) to the local cache directory."""
+  """Downloads a Whisper model file (.pt) to the local cache directory with progress and cancellation."""
   import whisper
 
-  if model_id not in whisper._MODELS:
-    raise ValueError(f"Modelo Whisper desconocido: {model_id}. Modelos disponibles: {list(whisper._MODELS.keys())}")
+  clean_id = model_id.replace("whisper-", "").strip().lower()
+  if clean_id not in whisper._MODELS:
+    raise ValueError(f"Modelo Whisper desconocido: {clean_id}. Modelos disponibles: {list(whisper._MODELS.keys())}")
 
-  url = whisper._MODELS[model_id]
+  url = whisper._MODELS[clean_id]
   cache_dir = get_whisper_cache_dir()
-  target_file = cache_dir / f"{model_id}.pt"
-  tmp_file = cache_dir / f"{model_id}.pt.download"
+  target_file = cache_dir / f"{clean_id}.pt"
+  tmp_file = cache_dir / f"{clean_id}.pt.download"
 
   if target_file.exists() and target_file.stat().st_size > 1024 * 1024:
-    logger.info(f"Whisper model {model_id} already exists at {target_file}")
+    logger.info(f"Whisper model {clean_id} already exists at {target_file}")
     return target_file
 
-  logger.info(f"Downloading Whisper model {model_id} from {url} to {target_file}")
+  if tmp_file.exists():
+    try:
+      tmp_file.unlink()
+    except Exception:
+      pass
 
-  req = urllib.request.Request(url, headers={"User-Agent": "QA-Project-MGMT/1.0"})
-  with urllib.request.urlopen(req) as response:
-    total_size = int(response.headers.get("content-length", 0))
-    downloaded = 0
-    chunk_size = 1024 * 512  # 512 KB chunks
+  cancel_event = threading.Event()
+  start_time = time.time()
+  last_update_time = 0.0
 
-    with open(tmp_file, "wb") as f_out:
-      while True:
-        chunk = response.read(chunk_size)
-        if not chunk:
-          break
-        f_out.write(chunk)
-        downloaded += len(chunk)
-        if total_size > 0 and progress_callback:
-          progress_callback(downloaded, total_size, round((downloaded / total_size) * 100, 1))
+  with _WHISPER_LOCK:
+    _WHISPER_CANCEL_EVENTS[clean_id] = cancel_event
+    _WHISPER_DOWNLOADS[clean_id] = {
+      "id": clean_id,
+      "title": f"Descargando Whisper {clean_id.title()}",
+      "type": "download",
+      "progress": 0,
+      "status": "downloading",
+      "stageText": "Iniciando descarga...",
+      "speedOrSize": "0 MB",
+      "eta": None,
+    }
 
-  # Atomically replace
-  if target_file.exists():
-    target_file.unlink()
-  tmp_file.rename(target_file)
-  logger.info(f"Whisper model {model_id} downloaded successfully to {target_file}")
-  return target_file
+  logger.info(f"Downloading Whisper model {clean_id} from {url} to {target_file}")
+
+  req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; QA-Project-MGMT/1.0)"})
+  try:
+    with urllib.request.urlopen(req) as response:
+      total_size = int(response.headers.get("content-length", 0))
+      downloaded = 0
+      chunk_size = 1024 * 512  # 512 KB chunks
+
+      with open(tmp_file, "wb") as f_out:
+        while True:
+          if cancel_event.is_set():
+            logger.warning(f"Whisper download cancelled for {clean_id}")
+            raise RuntimeError(f"Descarga de Whisper {clean_id} cancelada por el usuario.")
+
+          chunk = response.read(chunk_size)
+          if not chunk:
+            break
+          f_out.write(chunk)
+          downloaded += len(chunk)
+
+          now = time.time()
+          if now - last_update_time >= 0.2:
+            last_update_time = now
+            elapsed = max(0.1, now - start_time)
+            speed_mb = (downloaded / (1024 * 1024)) / elapsed
+            speed_str = f"{speed_mb:.1f} MB/s"
+            pct = round((downloaded / total_size) * 100, 1) if total_size > 0 else 0.0
+            dl_mb = round(downloaded / (1024 * 1024), 1)
+            tot_mb = round(total_size / (1024 * 1024), 1) if total_size > 0 else 0.0
+
+            eta_str = None
+            if speed_mb > 0 and total_size > downloaded:
+              eta_sec = int((total_size - downloaded) / (speed_mb * 1024 * 1024))
+              eta_str = f"{eta_sec // 60}m {eta_sec % 60}s" if eta_sec >= 60 else f"{eta_sec}s"
+
+            with _WHISPER_LOCK:
+              if clean_id in _WHISPER_DOWNLOADS:
+                _WHISPER_DOWNLOADS[clean_id].update({
+                  "progress": int(pct),
+                  "stageText": f"{dl_mb} MB de {tot_mb} MB ({speed_str})",
+                  "speedOrSize": f"{dl_mb}/{tot_mb} MB",
+                  "eta": eta_str,
+                })
+
+            if progress_callback:
+              progress_callback(downloaded, total_size, pct)
+
+    # Atomically replace
+    if target_file.exists():
+      target_file.unlink()
+    tmp_file.rename(target_file)
+
+    with _WHISPER_LOCK:
+      if clean_id in _WHISPER_DOWNLOADS:
+        _WHISPER_DOWNLOADS[clean_id].update({
+          "progress": 100,
+          "status": "complete",
+          "stageText": "Descarga completada con éxito",
+          "speedOrSize": "Listo",
+          "eta": None,
+          "finished_at": time.time(),
+        })
+
+    logger.info(f"Whisper model {clean_id} downloaded successfully to {target_file}")
+    return target_file
+
+  except Exception as exc:
+    if tmp_file.exists():
+      try:
+        tmp_file.unlink()
+      except Exception:
+        pass
+
+    with _WHISPER_LOCK:
+      if clean_id in _WHISPER_DOWNLOADS:
+        is_cancel = cancel_event.is_set() or "cancelada" in str(exc).lower()
+        _WHISPER_DOWNLOADS[clean_id].update({
+          "status": "cancelled" if is_cancel else "failed",
+          "stageText": "Descarga cancelada" if is_cancel else f"Error: {exc}",
+          "finished_at": time.time(),
+        })
+    raise
+  finally:
+    with _WHISPER_LOCK:
+      _WHISPER_CANCEL_EVENTS.pop(clean_id, None)
 
 
 def delete_model_file(model_id: str) -> bool:
@@ -131,6 +283,9 @@ def delete_model_file(model_id: str) -> bool:
       tmp_file.unlink()
     except Exception:
       pass
+
+  with _WHISPER_LOCK:
+    _WHISPER_DOWNLOADS.pop(model_id, None)
 
   return deleted
 

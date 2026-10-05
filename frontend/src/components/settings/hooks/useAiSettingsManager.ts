@@ -1,18 +1,20 @@
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useState } from 'react'
-import { api, type AISettings, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
+import { useBackgroundJobs } from '../../../context/BackgroundJobContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 
 export function useAiSettingsManager() {
   const { toast } = useToast()
+  const { jobs, registerDownloadJob, cancelJob, removeJob } = useBackgroundJobs()
 
   const [ai, setAi] = useState<AISettings | null>(null)
   const [loadingAi, setLoadingAi] = useState(true)
 
   // Provider state: 'builtin' | 'ollama' | 'groq' | 'gemini' | 'openai' | 'claude'
   const [provider, setProvider] = useState<string>('builtin')
-  const [model, setModel] = useState<string>('qwen3.5:2b')
+  const [model, setModel] = useState<string>('qwen2.5:3b')
 
   // Collapsible panels
   const [isWritingOpen, setIsWritingOpen] = useState(true)
@@ -30,11 +32,55 @@ export function useAiSettingsManager() {
   const [transcriptionOpenaiKey, setTranscriptionOpenaiKey] = useState('')
   const [showTranscriptionKey, setShowTranscriptionKey] = useState(false)
 
-  // Local Whisper models & download state
+  // Local Whisper models state
   const [localWhisperModels, setLocalWhisperModels] = useState<LocalWhisperModelInfo[]>([])
-  const [downloadingWhisperId, setDownloadingWhisperId] = useState<string | null>(null)
   const [deletingWhisperId, setDeletingWhisperId] = useState<string | null>(null)
   const [fetchingWhisperModels, setFetchingWhisperModels] = useState(false)
+
+  // Local Built-in GGUF models state
+  const [localBuiltinModels, setLocalBuiltinModels] = useState<LocalBuiltinModelInfo[]>([])
+  const [deletingBuiltinId, setDeletingBuiltinId] = useState<string | null>(null)
+  const [fetchingBuiltinModels, setFetchingBuiltinModels] = useState(false)
+
+  const downloadTasks = useMemo(() => {
+    const map: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string; status?: string }> = {}
+    for (const j of jobs) {
+      if (j.type === 'download') {
+        map[j.id] = {
+          progress: j.progress,
+          speedOrSize: j.speedOrSize,
+          stageText: j.stageText,
+          status: j.status,
+        }
+      }
+    }
+    return map
+  }, [jobs])
+
+  const downloadingBuiltinId = useMemo(() => {
+    const active = jobs.find(
+      (j) =>
+        j.type === 'download' &&
+        !['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'].includes(j.id) &&
+        j.status !== 'complete' &&
+        j.status !== 'failed' &&
+        j.status !== 'cancelled'
+    )
+    return active ? active.id : null
+  }, [jobs])
+
+  const downloadingWhisperId = useMemo(() => {
+    const active = jobs.find(
+      (j) =>
+        j.type === 'download' &&
+        ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'].includes(j.id) &&
+        j.status !== 'complete' &&
+        j.status !== 'failed' &&
+        j.status !== 'cancelled'
+    )
+    return active ? active.id : null
+  }, [jobs])
+
 
   // API Keys & credentials
   const [groqKey, setGroqKey] = useState('')
@@ -114,6 +160,20 @@ export function useAiSettingsManager() {
     }
   }, [])
 
+  const fetchLocalBuiltinModels = useCallback(async () => {
+    setFetchingBuiltinModels(true)
+    try {
+      const res = await api.listBuiltinModels()
+      if (res.ok && res.models) {
+        setLocalBuiltinModels(res.models)
+      }
+    } catch (e) {
+      console.error('Error fetching local builtin models:', e)
+    } finally {
+      setFetchingBuiltinModels(false)
+    }
+  }, [])
+
   useEffect(() => {
     let isMounted = true
     const load = async () => {
@@ -178,9 +238,10 @@ export function useAiSettingsManager() {
           setOllamaUrl('')
         }
 
-        // Fetch local Ollama and Whisper models silently in background
+        // Fetch local Ollama, Whisper and Built-in models silently in background
         void fetchOllamaModels(settings.ollama_base_url || 'http://localhost:11434', false)
         void fetchLocalWhisperModels()
+        void fetchLocalBuiltinModels()
       } catch (err) {
         if (isMounted) {
           toast.error(err instanceof Error ? err.message : 'Error al cargar la configuración del sistema')
@@ -196,22 +257,24 @@ export function useAiSettingsManager() {
     return () => {
       isMounted = false
     }
-  }, [fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
+  }, [fetchLocalBuiltinModels, fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
 
   const handleDownloadWhisperModel = async (modelId: string) => {
-    setDownloadingWhisperId(modelId)
+    const cleanId = modelId.replace('whisper-', '').trim()
+    registerDownloadJob(cleanId, `Descargando Whisper ${cleanId.toUpperCase()}`)
     try {
-      toast.info(`Iniciando descarga de Whisper ${modelId}... Esto puede demorar según tu conexión.`)
-      const res = await api.downloadWhisperModel(modelId)
+      toast.info(`Iniciando descarga de Whisper ${cleanId}... Esto puede demorar según tu conexión.`)
+      const res = await api.downloadWhisperModel(cleanId)
       if (res.ok) {
-        toast.success(res.message || `Modelo Whisper ${modelId} descargado correctamente.`)
+        toast.success(res.message || `Modelo Whisper ${cleanId} descargado correctamente.`)
         await fetchLocalWhisperModels()
         await loadDynamicCatalog(true)
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
-    } finally {
-      setDownloadingWhisperId(null)
+      const isCancelled = err instanceof Error && (err.message.toLowerCase().includes('cancel') || err.message.toLowerCase().includes('abort'))
+      if (!isCancelled) {
+        toast.error(err instanceof Error ? err.message : `Error descargando modelo ${cleanId}`)
+      }
     }
   }
 
@@ -228,6 +291,54 @@ export function useAiSettingsManager() {
       toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
     } finally {
       setDeletingWhisperId(null)
+    }
+  }
+
+  const handleDownloadBuiltinModel = async (modelId: string) => {
+    registerDownloadJob(modelId, `Descargando ${modelId}`)
+    try {
+      const res = await api.downloadBuiltinModel(modelId)
+      if (res.ok) {
+        toast.success(res.message || `Modelo ${modelId} descargado correctamente en tu disco.`)
+        await fetchLocalBuiltinModels()
+        await loadDynamicCatalog(true)
+      } else {
+        toast.error(res.message || `Error al descargar modelo ${modelId}`)
+      }
+    } catch (err) {
+      const isCancelled = err instanceof Error && (err.message.toLowerCase().includes('cancel') || err.message.toLowerCase().includes('abort'))
+      if (!isCancelled) {
+        toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
+      }
+    }
+  }
+
+  const handleCancelBuiltinDownload = useCallback(async (modelId: string) => {
+    await cancelJob(modelId)
+    void fetchLocalBuiltinModels()
+    void fetchLocalWhisperModels()
+  }, [cancelJob, fetchLocalBuiltinModels, fetchLocalWhisperModels])
+
+  const handleDismissDownloadTask = useCallback((taskId: string) => {
+    removeJob(taskId)
+  }, [removeJob])
+
+
+  const handleDeleteBuiltinModel = async (modelId: string) => {
+    setDeletingBuiltinId(modelId)
+    try {
+      const res = await api.deleteBuiltinModel(modelId)
+      if (res.ok) {
+        toast.success(res.message || `Modelo ${modelId} eliminado del disco.`)
+        await fetchLocalBuiltinModels()
+        await loadDynamicCatalog(true)
+      } else {
+        toast.error(res.message || `Error al eliminar modelo ${modelId}`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
+    } finally {
+      setDeletingBuiltinId(null)
     }
   }
 
@@ -462,6 +573,16 @@ export function useAiSettingsManager() {
     fetchLocalWhisperModels,
     handleDownloadWhisperModel,
     handleDeleteWhisperModel,
+    localBuiltinModels,
+    downloadingBuiltinId,
+    deletingBuiltinId,
+    fetchingBuiltinModels,
+    fetchLocalBuiltinModels,
+    handleDownloadBuiltinModel,
+    handleDeleteBuiltinModel,
+    handleCancelBuiltinDownload,
+    handleDismissDownloadTask,
+    downloadTasks,
     savingAi,
     testingConnection,
     handleAiSave,
@@ -469,3 +590,4 @@ export function useAiSettingsManager() {
     handleVoiceAudioSave,
   }
 }
+

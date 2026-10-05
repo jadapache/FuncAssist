@@ -29,7 +29,10 @@ export { UploadArea } from './components/UploadArea'
 export { ActiveTranscriptionItem } from './components/ActiveTranscriptionItem'
 export { RecentTranscriptionItem } from './components/RecentTranscriptionItem'
 export { TranscriptionProgressModal } from './components/TranscriptionProgressModal'
-export { FloatingTranscriptionToast } from './components/FloatingTranscriptionToast'
+export {
+  FloatingJobToast as FloatingTranscriptionToast,
+  type FloatingJobToastProps as FloatingTranscriptionToastProps,
+} from '../../components/common/FloatingJobToast'
 export { SummaryModal } from './components/SummaryModal'
 export { GenerateModal } from './components/GenerateModal'
 
