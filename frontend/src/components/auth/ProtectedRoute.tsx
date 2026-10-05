@@ -1,16 +1,31 @@
 import { Navigate, Outlet } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
-import { AppLoader } from '../common/AppLoader'
+import { useUser, type UserRole } from '../../context/UserContext'
+import { FirstTimeSetup } from '../setup/FirstTimeSetup'
 
-export const ProtectedRoute = () => {
-  const { isAuthenticated, isLoading } = useAuth()
+interface ProtectedRouteProps {
+  allowedRoles?: UserRole[]
+}
+
+export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
+  const { user, isLoading, isFirstTimeSetup } = useUser()
 
   if (isLoading) {
-    return <AppLoader fullScreen message="Verificando sesión segura..." submessage="Validando credenciales y permisos del sistema" />
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+          <p className="text-slate-600 font-medium">Cargando...</p>
+        </div>
+      </div>
+    )
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+  if (isFirstTimeSetup) {
+    return <FirstTimeSetup />
+  }
+
+  if (allowedRoles && user && !allowedRoles.includes(user.user_role)) {
+    return <Navigate to="/" replace />
   }
 
   return <Outlet />

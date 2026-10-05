@@ -5,7 +5,7 @@
 
 export * from './client'
 export { api, apiClient } from './client'
-export { authApi } from './modules/auth'
+export { userApi } from './modules/user'
 export { knowledgeApi } from './modules/knowledge'
 export { aiSettingsApi } from './modules/aiSettings'
 export { featuresApi } from './modules/features'

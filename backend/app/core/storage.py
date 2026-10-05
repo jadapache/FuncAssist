@@ -94,6 +94,7 @@ def connection_exists(integration_id: str) -> bool:
 
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
   "display_name": "Usuario",
+  "user_role": "admin",
   "theme": "command-center",
   "selected_repos": [],
 }
@@ -107,6 +108,10 @@ def load_app_settings() -> dict[str, Any]:
   try:
     stored = json.loads(path.read_text(encoding="utf-8"))
     res = {**DEFAULT_APP_SETTINGS, **stored}
+    if "user_role" not in res or not res["user_role"]:
+      res["user_role"] = "admin"
+    if "display_name" not in res or not res["display_name"]:
+      res["display_name"] = "Usuario"
     if "ai" in res and isinstance(res["ai"], dict):
       res["ai"] = decrypt_ai_settings(res["ai"])
     return res

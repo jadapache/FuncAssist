@@ -1,4 +1,4 @@
-import { API_BASE, getAuthHeaders, handleResponse } from '../../../api/client'
+import { API_BASE, handleResponse } from '../../../api/client'
 
 
 export type MediaMetadata = {
@@ -154,9 +154,7 @@ export const transcriptionApi = {
   },
 
   async getAvailableModels(): Promise<AvailableModelsInfo> {
-    const response = await fetch(`${API_BASE}/api/transcription/available-models`, {
-      headers: getAuthHeaders(),
-    })
+    const response = await fetch(`${API_BASE}/api/transcription/available-models`)
     return handleResponse(response)
   },
 
@@ -169,7 +167,6 @@ export const transcriptionApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify(options || {}),
     })
@@ -177,9 +174,7 @@ export const transcriptionApi = {
   },
 
   async getTranscriptionStatus(transcriptionId: string): Promise<TranscriptionProgress> {
-    const response = await fetch(`${API_BASE}/api/transcription/status/${transcriptionId}`, {
-      headers: getAuthHeaders(),
-    })
+    const response = await fetch(`${API_BASE}/api/transcription/status/${transcriptionId}`)
     return handleResponse(response)
   },
 
@@ -188,16 +183,13 @@ export const transcriptionApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
     })
     return handleResponse(response)
   },
 
   async getTranscriptionResult(transcriptionId: string): Promise<TranscriptionResult> {
-    const response = await fetch(`${API_BASE}/api/transcription/result/${transcriptionId}`, {
-      headers: getAuthHeaders(),
-    })
+    const response = await fetch(`${API_BASE}/api/transcription/result/${transcriptionId}`)
     return handleResponse(response)
   },
 
@@ -206,7 +198,6 @@ export const transcriptionApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
     })
     return handleResponse(response)
@@ -217,7 +208,6 @@ export const transcriptionApi = {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify({ summary }),
     })
@@ -229,7 +219,6 @@ export const transcriptionApi = {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify({ speaker_map: speakerMap }),
     })
@@ -241,7 +230,6 @@ export const transcriptionApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify({ custom_tags: customTags }),
     })
@@ -249,16 +237,13 @@ export const transcriptionApi = {
   },
 
   async listTranscriptions(): Promise<{ transcriptions: TranscriptionResult[] }> {
-    const response = await fetch(`${API_BASE}/api/transcription/list`, {
-      headers: getAuthHeaders(),
-    })
+    const response = await fetch(`${API_BASE}/api/transcription/list`)
     return handleResponse(response)
   },
 
   async deleteTranscription(transcriptionId: string): Promise<{ ok: boolean; message: string }> {
     const response = await fetch(`${API_BASE}/api/transcription/${transcriptionId}`, {
       method: 'DELETE',
-      headers: getAuthHeaders(),
     })
     return handleResponse(response)
   },
@@ -268,7 +253,6 @@ export const transcriptionApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify({ content, title }),
     })
@@ -283,7 +267,6 @@ export const transcriptionApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
       },
       body: JSON.stringify({ content, title }),
     })
@@ -292,4 +275,5 @@ export const transcriptionApi = {
     }
     return response.blob()
   },
+
 }

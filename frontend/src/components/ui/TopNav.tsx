@@ -15,7 +15,6 @@ import {
   GitCompareArrows,
   Layers,
   LayoutDashboard,
-  LogOut,
   Mic,
   Rocket,
   Settings,
@@ -28,8 +27,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { toolsGroupLabel } from '../../constants/app'
-import { useAuth } from '../../context/AuthContext'
-
+import { useUser, type UserRole } from '../../context/UserContext'
 
 type NavItem = {
   to: string
@@ -235,6 +233,13 @@ const NavDropdown = ({ group }: { group: NavGroup }) => {
   )
 }
 
+const roleLabels: Record<UserRole, string> = {
+  admin: 'Administrador',
+  pm: 'Project Manager',
+  funcional: 'Analista Funcional',
+  qa: 'Tester',
+}
+
 const UserDropdown = ({ displayName }: { displayName: string }) => {
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<MenuPosition | null>(null)
@@ -277,9 +282,9 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
     }
   }, [open])
 
-  const { user, logout } = useAuth()
-  const activeName = user?.full_name || user?.username || displayName
-  const activeEmail = user?.email || (user?.username ? `${user.username.toLowerCase()}@fcv.org` : 'danielpacheco@fcv.org')
+  const { user } = useUser()
+  const activeName = user?.display_name || displayName
+  const roleLabel = roleLabels[user?.user_role || 'admin']
 
   const getInitials = (nameStr: string) => {
     const parts = nameStr.trim().split(/\s+/).filter(Boolean)
@@ -303,7 +308,7 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
         style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 9999 }}
         role="menu"
       >
-        {/* Cabecera estilo tarjeta de perfil */}
+        {/* Profile Card */}
         <div className="flex items-center gap-3.5 p-2 rounded-xl">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#002777] to-[#004497] text-white font-extrabold text-sm shadow-md shadow-[#002777]/20">
             {initials}
@@ -316,17 +321,17 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
               {activeName}
             </p>
             <p
-              className="text-xs text-slate-500 truncate max-w-[175px] mt-0.5"
-              title={activeEmail}
+              className="text-xs text-blue-700 font-semibold truncate max-w-[175px] mt-0.5"
+              title={roleLabel}
             >
-              {activeEmail}
+              {roleLabel}
             </p>
           </div>
         </div>
 
         <div className="border-t border-slate-100 my-1.5" />
 
-        {/* Opciones del menú */}
+        {/* Menu Options */}
         <div className="space-y-0.5">
           <NavLink
             to="/profile"
@@ -361,20 +366,6 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
             <Settings className="h-4 w-4 shrink-0 text-slate-500" />
             <span>Configuración</span>
           </NavLink>
-
-          <div className="border-t border-slate-100 my-1" />
-
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false)
-              logout()
-            }}
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span>Cerrar Sesión</span>
-          </button>
         </div>
       </div>,
       document.body,
@@ -388,7 +379,7 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
         type="button"
         onClick={handleToggle}
         className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#002777] to-[#004497] text-white text-xs font-extrabold shadow-md shadow-[#002777]/20 ring-2 ring-blue-100 transition-transform hover:scale-105 hover:ring-blue-300 focus:outline-none focus:ring-2 focus:ring-[#002777] cursor-pointer"
-        title={`${activeName} - Menú de opciones`}
+        title={`${activeName} (${roleLabel}) - Menú de opciones`}
         aria-label={`Menú de usuario para ${activeName}`}
         aria-haspopup="true"
         aria-expanded={open}
@@ -402,7 +393,16 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
 }
 
 export const TopNav = ({ displayName }: TopNavProps) => {
-  const PM_GROUP = buildPmGroup(displayName)
+  const { user } = useUser()
+  const role: UserRole = user?.user_role || 'admin'
+  const activeDisplayName = user?.display_name || displayName
+
+  const PM_GROUP = buildPmGroup(activeDisplayName)
+
+  const showPm = ['admin', 'pm'].includes(role)
+  const showFuncional = ['admin', 'funcional'].includes(role)
+  const showQa = ['admin', 'qa'].includes(role)
+  const showKnowledge = ['admin', 'pm', 'qa', 'funcional'].includes(role)
 
   return (
     <header className="sticky top-0 z-40 overflow-visible border-b border-[var(--color-border)] bg-white/90 backdrop-blur-xl">
@@ -432,17 +432,16 @@ export const TopNav = ({ displayName }: TopNavProps) => {
             <span>Inicio</span>
           </NavLink>
 
-          <NavDropdown group={PM_GROUP} />
-          <NavDropdown group={FUNCIONAL_GROUP} />
-          <NavDropdown group={QA_GROUP} />
-          <NavDropdown group={KNOWLEDGE_GROUP} />
+          {showPm && <NavDropdown group={PM_GROUP} />}
+          {showFuncional && <NavDropdown group={FUNCIONAL_GROUP} />}
+          {showQa && <NavDropdown group={QA_GROUP} />}
+          {showKnowledge && <NavDropdown group={KNOWLEDGE_GROUP} />}
         </nav>
 
         <div className="flex shrink-0 items-center gap-2.5">
-          <UserDropdown displayName={displayName} />
+          <UserDropdown displayName={activeDisplayName} />
         </div>
       </div>
     </header>
   )
 }
-

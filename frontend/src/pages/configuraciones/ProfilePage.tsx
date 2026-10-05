@@ -5,16 +5,13 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
-  Eye,
-  EyeOff,
-  Lock,
-  Mail,
+  Pencil,
   Shield,
   Sparkles,
-  User,
+  X,
 } from 'lucide-react'
 import { api } from '../../api/client'
-import { useAuth } from '../../context/AuthContext'
+import { useUser, type UserRole } from '../../context/UserContext'
 import { useToast } from '../../context/ToastContext'
 
 type OutletContext = {
@@ -22,36 +19,35 @@ type OutletContext = {
   setDisplayName: (name: string) => void
 }
 
+const roleLabels: Record<UserRole, string> = {
+  admin: 'Administrador',
+  pm: 'Project Manager',
+  funcional: 'Analista Funcional',
+  qa: 'Tester',
+}
+
 export const ProfilePage = () => {
   const { displayName, setDisplayName } = useOutletContext<OutletContext>()
-  const { user, updateUser } = useAuth()
+  const { user, updateProfile } = useUser()
   const { toast } = useToast()
 
-  // Form Fields
-  const [fullName, setFullName] = useState(user?.full_name || displayName)
-  const [email, setEmail] = useState(
-    user?.email || (user?.username ? `${user.username.toLowerCase()}@fcv.org` : 'danielpacheco@fcv.org'),
-  )
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-
-  // Validation Errors
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  // Inline editing state for name
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState(user?.display_name || displayName || 'Usuario')
+  const [savingName, setSavingName] = useState(false)
 
   // Standup Rubric State
   const [standupRubric, setStandupRubric] = useState('')
+  const [savingRubric, setSavingRubric] = useState(false)
 
   // Status & Feedback
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [savingProfile, setSavingProfile] = useState(false)
-  const [savingRubric, setSavingRubric] = useState(false)
 
-  const activeFullName = user?.full_name || fullName || displayName
-  const activeEmail = user?.email || email
-  const activeRole = user?.role ? (user.role === 'admin' ? 'Administrador' : 'Usuario') : 'Usuario'
+  const activeName = user?.display_name || nameInput
+  const activeRole: UserRole = user?.user_role || 'admin'
+  const activeRoleLabel = roleLabels[activeRole] || 'Usuario'
+  const isPmUser = activeRole === 'pm' || activeRole === 'admin'
 
   const getInitials = (nameStr: string) => {
     const parts = nameStr.trim().split(/\s+/).filter(Boolean)
@@ -60,20 +56,16 @@ export const ProfilePage = () => {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
   }
 
-  const initials = getInitials(activeFullName)
+  const initials = getInitials(activeName)
 
   useEffect(() => {
-    if (user?.full_name) {
-      setFullName(user.full_name)
-    } else if (displayName) {
-      setFullName(displayName)
+    if (user?.display_name) {
+      setNameInput(user.display_name)
     }
-    if (user?.email) {
-      setEmail(user.email)
-    }
-  }, [user, displayName])
+  }, [user])
 
   useEffect(() => {
+    if (!isPmUser) return
     const load = async () => {
       try {
         const rubric = await api.getRubric('standup')
@@ -83,91 +75,33 @@ export const ProfilePage = () => {
       }
     }
     void load()
-  }, [])
+  }, [isPmUser])
 
-  const validateForm = (): boolean => {
-    const errors: Record<string, string> = {}
-
-    // 1. Validar Nombres
-    const cleanName = fullName.trim()
-    if (!cleanName) {
-      errors.fullName = 'El nombre completo es obligatorio.'
-    } else if (cleanName.length < 3) {
-      errors.fullName = 'El nombre debe tener al menos 3 caracteres.'
-    }
-
-    // 2. Validar Correo Electrónico
-    const cleanEmail = email.trim()
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!cleanEmail) {
-      errors.email = 'El correo electrónico es obligatorio.'
-    } else if (!emailRegex.test(cleanEmail)) {
-      errors.email = 'Por favor ingresa un correo electrónico válido (ej. usuario@fcv.org).'
-    }
-
-    // 3. Validar Contraseña (si se proporciona)
-    if (password) {
-      if (password.length < 6) {
-        errors.password = 'La nueva contraseña debe tener al menos 6 caracteres.'
-      }
-      if (password !== confirmPassword) {
-        errors.confirmPassword = 'Las contraseñas no coinciden.'
-      }
-    } else if (confirmPassword) {
-      errors.password = 'Ingresa la nueva contraseña antes de confirmarla.'
-    }
-
-    setFormErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const handleProfileSubmit = async (event: FormEvent) => {
-    event.preventDefault()
-    setError(null)
-    setMessage(null)
-
-    if (!validateForm()) {
-      toast.warning('Por favor corrige los campos marcados en rojo.')
+  const handleSaveName = async () => {
+    if (!nameInput.trim()) {
+      toast.warning('El nombre es obligatorio.')
       return
     }
 
-    setSavingProfile(true)
+    setSavingName(true)
+    setError(null)
+    setMessage(null)
+
     try {
-      const payload: { full_name: string; email: string; password?: string } = {
-        full_name: fullName.trim(),
-        email: email.trim(),
-      }
-      if (password.trim()) {
-        payload.password = password.trim()
-      }
-
-      // 1. Actualizar perfil y credenciales en backend
-      const res = await api.updateProfile(payload)
-
-      // 2. Actualizar contexto de sesión
-      if (res.user) {
-        updateUser(res.user)
-      }
-
-      // 3. Sincronizar display_name general
-      const updatedSettings = await api.updateSettings({ display_name: fullName.trim() })
-      if (updatedSettings.display_name) {
-        setDisplayName(updatedSettings.display_name)
-      }
-
-      // Limpiar campos de contraseña tras guardado exitoso
-      setPassword('')
-      setConfirmPassword('')
-      setFormErrors({})
-      const successMsg = 'Datos del perfil y credenciales actualizados exitosamente.'
+      await updateProfile({
+        display_name: nameInput.trim(),
+      })
+      setDisplayName(nameInput.trim())
+      setIsEditingName(false)
+      const successMsg = 'Nombre de usuario actualizado exitosamente.'
       setMessage(successMsg)
       toast.success(successMsg)
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Error al actualizar el perfil de usuario'
+      const errMsg = err instanceof Error ? err.message : 'Error al actualizar el nombre'
       setError(errMsg)
       toast.error(errMsg)
     } finally {
-      setSavingProfile(false)
+      setSavingName(false)
     }
   }
 
@@ -199,11 +133,11 @@ export const ProfilePage = () => {
       {/* Header */}
       <header className="space-y-2">
         <div className="flex items-center gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[#002777]">Cuenta & Usuario</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#002777]">Cuenta & Perfil</p>
         </div>
-        <h1 className="page-title">Perfil & Preferencias</h1>
+        <h1 className="page-title">Perfil de Usuario</h1>
         <p className="page-subtitle">
-          Administra tus datos personales, correo, credenciales de acceso y configuración de rúbricas de evaluación.
+          Visualiza tu cuenta local y personaliza tu nombre de usuario.
         </p>
       </header>
 
@@ -222,285 +156,133 @@ export const ProfilePage = () => {
         </div>
       ) : null}
 
-      {/* Tarjeta de Identidad de Usuario (Estilo Dropdown & Perfil) */}
+      {/* Profile Card */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">
           <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#002777] to-[#004497] text-white font-extrabold text-2xl shadow-lg shadow-[#002777]/25 ring-4 ring-blue-100">
             {initials}
           </div>
           <div className="space-y-1.5 flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2
-                className="text-2xl font-bold text-slate-900 truncate"
-                title={user?.username ? `${activeFullName} (${user.username})` : activeFullName}
-              >
-                {activeFullName}{user?.username ? ` (${user.username})` : ''}
-              </h2>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-3 py-0.5 text-xs font-semibold text-[#002777]">
-                <Shield className="h-3 w-3" /> {activeRole}
+            <div className="flex flex-wrap items-center gap-3">
+              {isEditingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Tu nombre"
+                    className="px-3 py-1.5 text-xl font-bold text-slate-900 border border-blue-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 shadow-inner"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleSaveName()
+                      if (e.key === 'Escape') {
+                        setNameInput(user?.display_name || displayName || 'Usuario')
+                        setIsEditingName(false)
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveName()}
+                    disabled={savingName || !nameInput.trim()}
+                    className="p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer shadow-sm transition"
+                    title="Guardar nombre"
+                    aria-label="Guardar nombre"
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameInput(user?.display_name || displayName || 'Usuario')
+                      setIsEditingName(false)
+                    }}
+                    className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer transition"
+                    title="Cancelar"
+                    aria-label="Cancelar"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-2xl font-bold text-slate-900 truncate" title={activeName}>
+                    {activeName}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingName(true)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer"
+                    title="Editar nombre"
+                    aria-label="Editar nombre"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-xs font-semibold text-[#002777]">
+                <Shield className="h-3.5 w-3.5" /> {activeRoleLabel}
               </span>
             </div>
-            <p className="text-sm text-slate-500 flex items-center gap-2 truncate" title={activeEmail}>
-              <Mail className="h-4 w-4 text-slate-400 shrink-0" />
-              <span>{activeEmail}</span>
+
+            <p className="text-sm text-slate-500">
+              Perfil local almacenado en <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-mono text-xs">app.json</code>
             </p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* PANEL: MODIFICACIÓN DE DATOS CON VALIDACIONES (Nombres, Correo, Contraseña) */}
-        <form
-          onSubmit={(e) => void handleProfileSubmit(e)}
-          className="card space-y-5 border border-slate-200 bg-white p-6 md:p-8 shadow-sm rounded-2xl flex flex-col justify-between"
-        >
-          <div className="space-y-5">
-            <div className="flex items-center gap-2.5 border-b border-slate-100 pb-4">
-              <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
-                <User className="h-5 w-5" />
+      {/* Standup Rubric Form - Only visible to PM / Admin role */}
+      {isPmUser && (
+        <div className="max-w-2xl">
+          <form
+            onSubmit={(e) => void handleRubricSubmit(e)}
+            className="card space-y-5 border border-slate-200 bg-white p-6 md:p-8 shadow-sm rounded-2xl flex flex-col justify-between"
+          >
+            <div className="space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 pb-4">
+                <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Rúbrica de Evaluación Standup</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Criterios utilizados para validar la completitud del resumen diario.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Datos Personales y Credenciales</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Actualiza tu nombre completo, correo corporativo y contraseña de acceso.
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-800 block">
+                  Criterios (uno por línea)
+                </label>
+                <textarea
+                  value={standupRubric}
+                  onChange={(e) => setStandupRubric(e.target.value)}
+                  rows={7}
+                  placeholder="Un criterio por línea..."
+                  className="input-field font-mono text-xs leading-relaxed border border-slate-300 rounded-xl"
+                />
+                <p className="text-[11px] text-slate-400">
+                  El agente de IA evaluará las respuestas del standup comparándolas contra estas pautas.
                 </p>
               </div>
             </div>
 
-            {/* Campo: Nombres */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-800 flex items-center justify-between">
-                <span>Nombres y Apellidos *</span>
-                {formErrors.fullName && (
-                  <span className="text-[11px] font-medium text-red-600 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" /> {formErrors.fullName}
-                  </span>
-                )}
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => {
-                    setFullName(e.target.value)
-                    if (formErrors.fullName) {
-                      setFormErrors((prev) => {
-                        const next = { ...prev }
-                        delete next.fullName
-                        return next
-                      })
-                    }
-                  }}
-                  placeholder="Ej. Daniel Pacheco"
-                  className={[
-                    'input-field text-sm font-medium text-slate-900 border rounded-xl transition',
-                    formErrors.fullName
-                      ? 'border-red-400 focus:border-red-500 focus:ring-red-200 bg-red-50/20'
-                      : 'border-slate-300 focus:border-blue-500',
-                  ].join(' ')}
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Visible en saludos y encabezados (ej. Herramientas de {fullName.trim() || displayName}).
-              </p>
+            <div className="flex justify-end pt-4 border-t border-slate-100">
+              <button
+                type="submit"
+                disabled={savingRubric}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer text-sm"
+              >
+                <Check className="h-4 w-4" />
+                <span>{savingRubric ? 'Guardando...' : 'Guardar Rúbrica'}</span>
+              </button>
             </div>
-
-            {/* Campo: Correo Electrónico */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-800 flex items-center justify-between">
-                <span>Correo Electrónico *</span>
-                {formErrors.email && (
-                  <span className="text-[11px] font-medium text-red-600 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" /> {formErrors.email}
-                  </span>
-                )}
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    if (formErrors.email) {
-                      setFormErrors((prev) => {
-                        const next = { ...prev }
-                        delete next.email
-                        return next
-                      })
-                    }
-                  }}
-                  placeholder="ejemplo@fcv.org"
-                  className={[
-                    'input-field text-sm font-medium text-slate-900 border rounded-xl transition',
-                    formErrors.email
-                      ? 'border-red-400 focus:border-red-500 focus:ring-red-200 bg-red-50/20'
-                      : 'border-slate-300 focus:border-blue-500',
-                  ].join(' ')}
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Utilizado para inicio de sesión, notificaciones y solicitudes de acceso.
-              </p>
-            </div>
-
-            {/* Separador de Seguridad */}
-            <div className="pt-2 border-t border-slate-100">
-              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mb-3">
-                <Lock className="h-3.5 w-3.5 text-[#002777]" /> Modificar Contraseña (Opcional)
-              </span>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {/* Campo: Nueva Contraseña */}
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 block">
-                    Nueva Contraseña
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value)
-                        if (formErrors.password) {
-                          setFormErrors((prev) => {
-                            const next = { ...prev }
-                            delete next.password
-                            return next
-                          })
-                        }
-                      }}
-                      placeholder="••••••••"
-                      className={[
-                        'input-field pr-9 text-sm font-mono border rounded-xl transition',
-                        formErrors.password
-                          ? 'border-red-400 focus:border-red-500 bg-red-50/20'
-                          : 'border-slate-300 focus:border-blue-500',
-                      ].join(' ')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
-                      title={showPassword ? 'Ocultar' : 'Mostrar'}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  {formErrors.password && (
-                    <p className="text-[11px] font-medium text-red-600 mt-0.5">
-                      {formErrors.password}
-                    </p>
-                  )}
-                </div>
-
-                {/* Campo: Confirmar Contraseña */}
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 block">
-                    Confirmar Contraseña
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={(e) => {
-                        setConfirmPassword(e.target.value)
-                        if (formErrors.confirmPassword) {
-                          setFormErrors((prev) => {
-                            const next = { ...prev }
-                            delete next.confirmPassword
-                            return next
-                          })
-                        }
-                      }}
-                      placeholder="••••••••"
-                      className={[
-                        'input-field pr-9 text-sm font-mono border rounded-xl transition',
-                        formErrors.confirmPassword
-                          ? 'border-red-400 focus:border-red-500 bg-red-50/20'
-                          : 'border-slate-300 focus:border-blue-500',
-                      ].join(' ')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
-                      title={showConfirmPassword ? 'Ocultar' : 'Mostrar'}
-                    >
-                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  {formErrors.confirmPassword && (
-                    <p className="text-[11px] font-medium text-red-600 mt-0.5">
-                      {formErrors.confirmPassword}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">
-                Deja los campos de contraseña en blanco si deseas conservar tu contraseña actual.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-4 border-t border-slate-100">
-            <button
-              type="submit"
-              disabled={savingProfile}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer text-sm"
-            >
-              <Check className="h-4 w-4" />
-              <span>{savingProfile ? 'Guardando...' : 'Guardar Cambios de Perfil'}</span>
-            </button>
-          </div>
-        </form>
-
-        {/* Formulario de Rúbricas de Evaluación Standup */}
-        <form
-          onSubmit={(e) => void handleRubricSubmit(e)}
-          className="card space-y-5 border border-slate-200 bg-white p-6 md:p-8 shadow-sm rounded-2xl flex flex-col justify-between"
-        >
-          <div className="space-y-4">
-            <div className="flex items-center gap-2.5 border-b border-slate-100 pb-4">
-              <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Rúbrica de Evaluación Standup</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Criterios utilizados para validar la completitud del resumen diario.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-800 block">
-                Criterios (uno por línea)
-              </label>
-              <textarea
-                value={standupRubric}
-                onChange={(e) => setStandupRubric(e.target.value)}
-                rows={9}
-                placeholder="Un criterio por línea..."
-                className="input-field font-mono text-xs leading-relaxed border border-slate-300 rounded-xl"
-              />
-              <p className="text-[11px] text-slate-400">
-                El agente de IA evaluará las respuestas del standup comparándolas contra estas pautas.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-4 border-t border-slate-100">
-            <button
-              type="submit"
-              disabled={savingRubric}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer text-sm"
-            >
-              <Check className="h-4 w-4" />
-              <span>{savingRubric ? 'Guardando...' : 'Guardar Rúbrica'}</span>
-            </button>
-          </div>
-        </form>
-      </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
