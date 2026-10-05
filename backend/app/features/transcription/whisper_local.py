@@ -73,8 +73,17 @@ _WHISPER_LOCK = threading.Lock()
 
 
 def get_active_whisper_downloads() -> List[Dict[str, Any]]:
-  """Returns active Whisper download tasks."""
+  """Returns active Whisper download tasks and purges finished tasks after 5 seconds."""
+  now = time.time()
   with _WHISPER_LOCK:
+    to_purge = [
+      cid for cid, task in _WHISPER_DOWNLOADS.items()
+      if task.get("status") in ("complete", "cancelled", "failed")
+      and (now - task.get("finished_at", 0) > 5.0)
+    ]
+    for cid in to_purge:
+      _WHISPER_DOWNLOADS.pop(cid, None)
+      _WHISPER_CANCEL_EVENTS.pop(cid, None)
     return list(_WHISPER_DOWNLOADS.values())
 
 
@@ -107,6 +116,7 @@ def cancel_whisper_download(model_id: str) -> bool:
         _WHISPER_DOWNLOADS[clean]["status"] = "cancelled"
         _WHISPER_DOWNLOADS[clean]["progress"] = 0
         _WHISPER_DOWNLOADS[clean]["stageText"] = "Descarga cancelada por el usuario"
+        _WHISPER_DOWNLOADS[clean]["finished_at"] = time.time()
       logger.info(f"Cancellation requested for Whisper model {clean}")
 
       cache_dir = get_whisper_cache_dir()
@@ -225,6 +235,7 @@ def download_model_file(
           "stageText": "Descarga completada con éxito",
           "speedOrSize": "Listo",
           "eta": None,
+          "finished_at": time.time(),
         })
 
     logger.info(f"Whisper model {clean_id} downloaded successfully to {target_file}")
@@ -243,6 +254,7 @@ def download_model_file(
         _WHISPER_DOWNLOADS[clean_id].update({
           "status": "cancelled" if is_cancel else "failed",
           "stageText": "Descarga cancelada" if is_cancel else f"Error: {exc}",
+          "finished_at": time.time(),
         })
     raise
   finally:

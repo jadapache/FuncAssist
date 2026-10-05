@@ -58,8 +58,17 @@ _DOWNLOAD_LOCK = threading.Lock()
 
 
 def get_active_downloads_status() -> List[Dict[str, Any]]:
-    """Returns status of all ongoing built-in model downloads."""
+    """Returns status of all ongoing built-in model downloads and purges finished tasks after 5 seconds."""
+    now = time.time()
     with _DOWNLOAD_LOCK:
+        to_purge = [
+            cid for cid, task in _ACTIVE_DOWNLOADS.items()
+            if task.get("status") in ("complete", "cancelled", "failed")
+            and (now - task.get("finished_at", 0) > 5.0)
+        ]
+        for cid in to_purge:
+            _ACTIVE_DOWNLOADS.pop(cid, None)
+            _CANCEL_EVENTS.pop(cid, None)
         return list(_ACTIVE_DOWNLOADS.values())
 
 
@@ -101,6 +110,7 @@ def cancel_builtin_model_download(model_id: str) -> bool:
                 _ACTIVE_DOWNLOADS[clean_id]["status"] = "cancelled"
                 _ACTIVE_DOWNLOADS[clean_id]["progress"] = 0
                 _ACTIVE_DOWNLOADS[clean_id]["stageText"] = "Descarga cancelada por el usuario"
+                _ACTIVE_DOWNLOADS[clean_id]["finished_at"] = time.time()
             logger.info(f"Cancellation requested for built-in model download: {clean_id}")
 
             # Eagerly delete partial .download file if present
@@ -275,6 +285,7 @@ def download_builtin_model_file(
                     "stageText": "Descarga completada con éxito",
                     "speedOrSize": "Listo",
                     "eta": None,
+                    "finished_at": time.time(),
                 })
 
         logger.info(f"Built-in model '{canonical_id}' downloaded successfully to {target_file}")
@@ -294,6 +305,7 @@ def download_builtin_model_file(
                 _ACTIVE_DOWNLOADS[canonical_id].update({
                     "status": "cancelled" if is_cancel else "failed",
                     "stageText": "Descarga cancelada" if is_cancel else f"Error: {exc}",
+                    "finished_at": time.time(),
                 })
         raise
     finally:

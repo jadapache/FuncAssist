@@ -71,6 +71,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   const sseConnectionsRef = useRef<Record<string, EventSource>>({})
 
   const dismissTimersRef = useRef<Record<string, number>>({})
+  const dismissedJobsRef = useRef<Set<string>>(new Set())
 
   // 1. Helper to add or update any job
   const addOrUpdateJob = useCallback((job: BackgroundJobItem) => {
@@ -85,6 +86,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // 2. Helper to remove a job (dismiss)
   const removeJob = useCallback((id: string) => {
+    dismissedJobsRef.current.add(id)
     if (dismissTimersRef.current[id]) {
       window.clearTimeout(dismissTimersRef.current[id])
       delete dismissTimersRef.current[id]
@@ -154,6 +156,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   // 4. Register a download job immediately
   const registerDownloadJob = useCallback(
     (modelId: string, title?: string) => {
+      dismissedJobsRef.current.delete(modelId)
       // Clear any pending dismissal timeout
       if (dismissTimersRef.current[modelId]) {
         window.clearTimeout(dismissTimersRef.current[modelId])
@@ -162,18 +165,16 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       // **COMPLETELY RESET** the job - remove any stale state (cancelled, failed, etc.)
       // This ensures a fresh start when retrying a download
       setJobsMap((prev) => {
-        // Remove the old entry completely first
         const copy = { ...prev }
         delete copy[modelId]
         
-        // Then add fresh job
         return {
           ...copy,
           [modelId]: {
             id: modelId,
             type: 'download',
             title: title || `Descargando modelo ${modelId}`,
-            progress: 1,
+            progress: 0,
             status: 'uploading',
             stageText: 'Iniciando descarga en segundo plano...',
             speedOrSize: 'Iniciando...',
@@ -236,14 +237,41 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
 
             for (const t of res.tasks) {
               const current = prev[t.id]
+              const isComplete = t.status === 'complete'
+              const isFailed = t.status === 'failed'
+              const isCancelled = t.status === 'cancelled'
+
+              // If task was already dismissed and is not actively downloading, do not resurrect it
+              if (dismissedJobsRef.current.has(t.id) && (isComplete || isFailed || isCancelled)) {
+                continue
+              }
+
               // If local job was cancelled by user, avoid reverting to uploading
               if (current?.status === 'cancelled' && t.status === 'downloading') {
                 continue
               }
 
-              const isComplete = t.status === 'complete'
-              const isFailed = t.status === 'failed'
-              const isCancelled = t.status === 'cancelled'
+              // Auto-dismiss completed job after 4 seconds
+              if (isComplete && current?.status !== 'complete') {
+                if (dismissTimersRef.current[t.id]) {
+                  window.clearTimeout(dismissTimersRef.current[t.id])
+                }
+                dismissTimersRef.current[t.id] = window.setTimeout(() => {
+                  removeJob(t.id)
+                  delete dismissTimersRef.current[t.id]
+                }, 4000)
+              }
+
+              // Auto-dismiss cancelled job after 3 seconds
+              if (isCancelled && current?.status !== 'cancelled') {
+                if (dismissTimersRef.current[t.id]) {
+                  window.clearTimeout(dismissTimersRef.current[t.id])
+                }
+                dismissTimersRef.current[t.id] = window.setTimeout(() => {
+                  removeJob(t.id)
+                  delete dismissTimersRef.current[t.id]
+                }, 3000)
+              }
 
               const newStatus: BackgroundJobItem['status'] = isComplete
                 ? 'complete'
