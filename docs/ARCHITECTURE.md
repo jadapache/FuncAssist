@@ -270,23 +270,19 @@ Resolución dinámica: `resolve_provider()` → retorna el proveedor configurado
 ### Entidades Principales
 
 ```
-User
-├─ id: str (UUID)
-├─ username: str (unique)
-├─ email: str
-├─ password_hash: str
-├─ password_salt: str
-├─ full_name: str
-├─ role: str ("user" | "admin")
-└─ status: str ("approved" | "pending" | "rejected")
+UserProfile (en local/settings/app.json)
+├─ display_name: str ("Juan Pérez")
+├─ user_role: str ("admin" | "pm" | "funcional" | "dev" | "qa")
+├─ theme: str ("command-center")
+└─ ai: dict (Encrypted API keys and model choices)
 
-ChatMessage
+ChatMessage (en local/history/chat_{session_id}.json)
 ├─ id: str (UUID)
 ├─ session_id: str
 ├─ role: str ("user" | "assistant")
 ├─ content: str
-├─ context_sources: list[str]
-└─ timestamp: str
+├─ context_sources: list[dict]
+└─ created_at: str
 
 Standup
 ├─ id: str (UUID)

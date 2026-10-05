@@ -134,14 +134,14 @@ http://localhost:5173
 
 ### Primera vez
 
-1. **Pantalla de Login**: Crea una cuenta de administrador (la primera es auto-aprobada).
-   - Username: `admin` (o tu nombre)
-   - Password: `password123` (o la que elijas)
+1. **Configuración Inicial**: Al abrir la app por primera vez, verás un modal de bienvenida.
+   - Ingresa tu nombre (ej: "María González")
+   - Selecciona tu rol (`Director de Proyecto`, `Analista Funcional`, `Tester`)
+   - Haz clic en "Comenzar"
 
-2. **Dashboard**: Verás el estado del sistema con información sobre:
-   - Proveedor AI actual
-   - Integraciones conectadas
-   - Último uso de features
+2. **Dashboard**: Accederás directamente al dashboard con las secciones visibles filtradas según tu rol.
+
+3. **Cambio de Nombre**: Puedes cambiar tu nombre cualquier momento desde Perfil.
 
 ---
 

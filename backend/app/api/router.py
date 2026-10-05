@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
 from app.api import (
-  auth,
   document_agent,
   history,
   integrations,
@@ -9,6 +8,7 @@ from app.api import (
   settings as settings_api,
   transcription,
   transcription_stream,
+  user,
 )
 from app.api.routers import (
   ai_management,
@@ -21,7 +21,7 @@ from app.api.routers import (
 )
 
 api_router = APIRouter(prefix="/api")
-api_router.include_router(auth.router)
+api_router.include_router(user.router)
 api_router.include_router(integrations.router)
 api_router.include_router(settings_api.router)
 api_router.include_router(knowledge.router)

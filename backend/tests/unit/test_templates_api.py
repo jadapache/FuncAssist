@@ -11,7 +11,7 @@ from app.ai.templates import (
     save_prompt,
     save_rubric,
 )
-from app.api.features import (
+from app.api.routers.ai_templates import (
     TemplateUpdate,
     RubricUpdate,
     update_prompt,

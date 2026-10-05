@@ -9,7 +9,7 @@ from app.api.deps import (
     get_standup_repository,
 )
 from app.api.middleware.error_handlers import handle_grounded_errors
-from app.db.interfaces import IChatRepository, IPRDRepository, IStandupRepository
+from app.core.json_history import JsonChatRepository, JsonPRDRepository, JsonStandupRepository
 from app.features.change_impact.service import analyze_change_impact
 from app.features.prd_checker.service import review_prd
 from app.features.standup.service import generate_standup
@@ -35,7 +35,7 @@ class FeatureWorkspaceRequest(BaseModel):
 @handle_grounded_errors
 async def standup(
     body: GroundedRequest = Body(default_factory=GroundedRequest),
-    standup_repo: IStandupRepository = Depends(get_standup_repository),
+    standup_repo: JsonStandupRepository = Depends(get_standup_repository),
 ) -> dict[str, Any]:
     res = await generate_standup(body.query)
     if isinstance(res, dict) and "markdown" in res:
@@ -51,7 +51,7 @@ async def standup(
 @handle_grounded_errors
 async def ask_product(
     body: GroundedRequest = Body(...),
-    chat_repo: IChatRepository = Depends(get_chat_repository),
+    chat_repo: JsonChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
     if not body.query.strip():
         raise HTTPException(status_code=400, detail="Query is required.")
@@ -81,7 +81,7 @@ async def ask_product(
 @handle_grounded_errors
 async def prd_checker(
     body: FeatureWorkspaceRequest = Body(...),
-    prd_repo: IPRDRepository = Depends(get_prd_repository),
+    prd_repo: JsonPRDRepository = Depends(get_prd_repository),
 ) -> dict[str, Any]:
     if not body.document_ids:
         raise HTTPException(status_code=400, detail="Upload at least one PRD or spec file.")

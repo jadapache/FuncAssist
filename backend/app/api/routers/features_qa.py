@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from app.ai.runner import run_grounded_feature
 from app.api.deps import get_test_plan_repository
 from app.api.middleware.error_handlers import handle_grounded_errors
-from app.db.interfaces import ITestPlanRepository
+from app.core.json_history import JsonTestPlanRepository
 
 router = APIRouter(prefix="/features", tags=["qa-features"])
 
@@ -38,7 +38,7 @@ class FeatureWorkspaceRequest(BaseModel):
 async def qa_feature(
     feature_key: str,
     body: FeatureWorkspaceRequest = Body(...),
-    test_plan_repo: ITestPlanRepository = Depends(get_test_plan_repository),
+    test_plan_repo: JsonTestPlanRepository = Depends(get_test_plan_repository),
 ) -> dict[str, Any]:
     if feature_key not in QA_FEATURE_KEYS:
         raise HTTPException(status_code=404, detail=f"Unknown QA feature: {feature_key}")

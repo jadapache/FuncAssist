@@ -8,19 +8,16 @@ from pydantic import BaseModel, Field
 from app.api.deps import (
     get_chat_repository,
     get_prd_repository,
-    get_settings_repository,
     get_standup_repository,
     get_test_plan_repository,
-    get_user_repository,
 )
-from app.db.interfaces import (
-    IChatRepository,
-    IPRDRepository,
-    ISettingsRepository,
-    IStandupRepository,
-    ITestPlanRepository,
-    IUserRepository,
+from app.core.json_history import (
+    JsonChatRepository,
+    JsonPRDRepository,
+    JsonStandupRepository,
+    JsonTestPlanRepository,
 )
+from app.core.storage import load_app_settings, save_app_settings
 
 router = APIRouter(tags=["db-history"])
 
@@ -45,41 +42,32 @@ class SettingSetRequest(BaseModel):
 
 # --- Users Endpoints ---
 @router.get("/users")
-async def get_users(repo: IUserRepository = Depends(get_user_repository)) -> dict[str, Any]:
-    users = await repo.get_all()
-    return {"users": users}
+async def get_users() -> dict[str, Any]:
+    settings = load_app_settings()
+    return {
+        "users": [
+            {
+                "id": "local",
+                "username": settings.get("display_name", "Usuario"),
+                "display_name": settings.get("display_name", "Usuario"),
+                "role": settings.get("user_role", "admin"),
+            }
+        ]
+    }
 
 
-@router.post("/users")
-async def create_new_user(
-    body: UserCreate,
-    repo: IUserRepository = Depends(get_user_repository),
-) -> dict[str, Any]:
-    existing = await repo.get_by_username(body.username)
-    if existing:
-        raise HTTPException(status_code=400, detail=f"User {body.username} already exists.")
-    user = await repo.create_user(
-        username=body.username,
-        email=body.email,
-        full_name=body.full_name,
-        role=body.role,
-    )
-    return {"user": user}
-
-
-# --- Settings Endpoints (SQLite) ---
+# --- Settings Endpoints ---
 @router.get("/db/settings")
-async def get_db_settings(repo: ISettingsRepository = Depends(get_settings_repository)) -> dict[str, Any]:
-    all_settings = await repo.get_all_settings()
+async def get_db_settings() -> dict[str, Any]:
+    all_settings = load_app_settings()
     return {"settings": all_settings}
 
 
 @router.post("/db/settings")
-async def set_db_setting(
-    body: SettingSetRequest,
-    repo: ISettingsRepository = Depends(get_settings_repository),
-) -> dict[str, Any]:
-    await repo.set_setting(body.key, body.value)
+async def set_db_setting(body: SettingSetRequest) -> dict[str, Any]:
+    settings = load_app_settings()
+    settings[body.key] = body.value
+    save_app_settings(settings)
     return {"ok": True, "key": body.key, "value": body.value}
 
 
@@ -88,7 +76,7 @@ async def set_db_setting(
 async def get_chat_messages(
     session_id: str,
     limit: int = 50,
-    repo: IChatRepository = Depends(get_chat_repository),
+    repo: JsonChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
     history = await repo.get_session_messages(session_id, limit=limit)
     return {"session_id": session_id, "messages": history}
@@ -98,7 +86,7 @@ async def get_chat_messages(
 async def post_chat_message(
     session_id: str,
     body: ChatMessageCreate,
-    repo: IChatRepository = Depends(get_chat_repository),
+    repo: JsonChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
     message = await repo.save_message(
         session_id=session_id,
@@ -112,7 +100,7 @@ async def post_chat_message(
 @router.delete("/chat/history/{session_id}")
 async def delete_chat_messages(
     session_id: str,
-    repo: IChatRepository = Depends(get_chat_repository),
+    repo: JsonChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
     await repo.clear_session(session_id)
     return {"ok": True, "session_id": session_id}
@@ -122,7 +110,7 @@ async def delete_chat_messages(
 @router.get("/history/standups")
 async def get_standup_history(
     limit: int = 20,
-    repo: IStandupRepository = Depends(get_standup_repository),
+    repo: JsonStandupRepository = Depends(get_standup_repository),
 ) -> dict[str, Any]:
     items = await repo.get_all_standups(limit=limit)
     return {"standups": items}
@@ -131,7 +119,7 @@ async def get_standup_history(
 @router.get("/history/prd-reviews")
 async def get_prd_history(
     limit: int = 20,
-    repo: IPRDRepository = Depends(get_prd_repository),
+    repo: JsonPRDRepository = Depends(get_prd_repository),
 ) -> dict[str, Any]:
     items = await repo.get_all_prd_reviews(limit=limit)
     return {"prd_reviews": items}
@@ -140,7 +128,7 @@ async def get_prd_history(
 @router.get("/history/test-plans")
 async def get_test_plan_history(
     limit: int = 20,
-    repo: ITestPlanRepository = Depends(get_test_plan_repository),
+    repo: JsonTestPlanRepository = Depends(get_test_plan_repository),
 ) -> dict[str, Any]:
     items = await repo.get_all_test_plans(limit=limit)
     return {"test_plans": items}

@@ -28,7 +28,7 @@ export const ApiKeyInput = ({
         </span>
         {hasSavedKey && !value && (
           <span className="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-            ✓ Clave guardada en servidor
+            ✓ Configurada
           </span>
         )}
       </label>

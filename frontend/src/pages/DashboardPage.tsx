@@ -3,15 +3,21 @@ import {
   ArrowRight,
   Bot,
   Brain,
+  ClipboardCheck,
+  ClipboardList,
+  Eye,
   FileSearch,
+  FileText,
   GitBranch,
   GitCompareArrows,
   Kanban,
   LayoutGrid,
   MessageSquare,
+  Mic,
   Plug,
   Sparkles,
   Sun,
+  TestTube2,
   Zap,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -20,6 +26,7 @@ import { api } from '../api/client'
 import { IntegrationTile } from '../components/ui/IntegrationTile'
 import { QuickActionCard } from '../components/ui/QuickActionCard'
 import { StatCard } from '../components/ui/StatCard'
+import { useUser } from '../context/UserContext'
 import type { IntegrationInfo } from '../types'
 
 type OutletContext = {
@@ -64,13 +71,16 @@ export const DashboardPage = () => {
   const totalIntegrations = integrations.length
 
   const readiness = useMemo(() => {
-    let score = 20
+    let score = 10
     if (backendOk) score += 25
-    if (jira?.status === 'connected') score += 25
-    if (github?.status === 'connected') score += 20
-    if (aiConfigured) score += 10
+    if (jira?.status === 'connected') score += 15
+    if (connectedCount > 2) score += 30
+    if (aiConfigured) score += 20
     return Math.min(score, 100)
-  }, [backendOk, jira, github, aiConfigured])
+  }, [backendOk, jira, connectedCount, aiConfigured])
+
+  const { user } = useUser()
+  const role = user?.user_role || 'admin'
 
   return (
     <div className={`space-y-8 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
@@ -81,10 +91,6 @@ export const DashboardPage = () => {
 
         <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium backdrop-blur-sm">
-              <Sparkles className="h-3.5 w-3.5 text-amber-200" aria-hidden />
-              {displayName} / QA Project MGMT
-            </div>
             <h1 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">
               {getGreeting()}, {displayName}
             </h1>
@@ -93,14 +99,18 @@ export const DashboardPage = () => {
             </p>
           </div>
 
-          <div className="flex shrink-0 flex-col items-start gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-md md:items-end">
-            <div className="flex items-center gap-2 text-sm text-blue-100">
-              <Bot className="h-4 w-4" aria-hidden />
+          <div className="flex shrink-0 flex-col items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-md">
+            <div className="w-full text-center text-sm font-medium text-blue-100">
               Estado del sistema
             </div>
-            <div className="flex items-end gap-2">
-              <span className="text-4xl font-bold">{readiness}%</span>
-              <span className="mb-1 text-xs text-blue-200">listo</span>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-cyan-300 shadow-sm backdrop-blur-sm">
+                <Bot className="h-6 w-6" aria-hidden />
+              </div>
+              <div className="flex items-end gap-1.5">
+                <span className="text-4xl font-bold">{readiness}%</span>
+                <span className="mb-1 text-xs text-blue-200">listo</span>
+              </div>
             </div>
             <div className="h-2 w-full min-w-[180px] overflow-hidden rounded-full bg-white/20">
               <div
@@ -156,30 +166,85 @@ export const DashboardPage = () => {
           <span className="text-xs text-[var(--color-ink-muted)]">Flujos de trabajo en un clic</span>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <QuickActionCard
-            to="/pm/standup"
-            title="Generar Standup"
-            description="Ayer, hoy, bloqueos — obtenido automáticamente de Jira y GitHub."
-            icon={Sun}
-            badge="En vivo"
-            gradient="from-[#002777] to-[#004497]"
-          />
-          <QuickActionCard
-            to="/pm/prd-checker"
-            title="Revisor de PRD"
-            description="Analiza especificaciones, revisa vacíos y evalúa criterios."
-            icon={FileSearch}
-            badge="Nuevo"
-            gradient="from-[#004497] to-blue-600"
-          />
-          <QuickActionCard
-            to="/pm/change-impact"
-            title="Impacto de Cambios"
-            description="Mapea tickets, Pull Requests y documentos afectados por un cambio."
-            icon={GitCompareArrows}
-            badge="Nuevo"
-            gradient="from-blue-900 to-[#002777]"
-          />
+          {role === 'funcional' ? (
+            <>
+              <QuickActionCard
+                to="/funcional/transcripciones"
+                title="Transcripción de Reuniones"
+                description="Convierte audio de reuniones en notas y especificaciones funcionales."
+                icon={Mic}
+                badge="Nuevo"
+                gradient="from-[#002777] to-[#004497]"
+              />
+              <QuickActionCard
+                to="/funcional/inventario"
+                title="Inventario"
+                description="Catálogo de componentes, módulos y funcionalidades."
+                icon={FileText}
+                gradient="from-[#004497] to-blue-600"
+              />
+              <QuickActionCard
+                to="/funcional/levantamiento"
+                title="Levantamiento"
+                description="Estructuración y desglose de requerimientos del cliente."
+                icon={ClipboardList}
+                gradient="from-blue-900 to-[#002777]"
+              />
+            </>
+          ) : role === 'qa' ? (
+            <>
+              <QuickActionCard
+                to="/qa/regression"
+                title="Regresión QA"
+                description="Ejecuta y valida casos de prueba de regresión automatizados."
+                icon={TestTube2}
+                badge="En vivo"
+                gradient="from-[#002777] to-[#004497]"
+              />
+              <QuickActionCard
+                to="/qa/api-qa"
+                title="QA de API"
+                description="Pruebas de contratos, validación de endpoints y respuestas JSON."
+                icon={ClipboardCheck}
+                badge="Nuevo"
+                gradient="from-[#004497] to-blue-600"
+              />
+              <QuickActionCard
+                to="/qa/visual-qa"
+                title="QA Visual"
+                description="Inspección visual de interfaces y análisis de discrepancias."
+                icon={Eye}
+                gradient="from-blue-900 to-[#002777]"
+              />
+            </>
+          ) : (
+            <>
+              <QuickActionCard
+                to="/pm/standup"
+                title="Generar Standup"
+                description="Ayer, hoy, bloqueos — obtenido automáticamente de Jira y GitHub."
+                icon={Sun}
+                badge="En vivo"
+                gradient="from-[#002777] to-[#004497]"
+              />
+              <QuickActionCard
+                to="/pm/prd-checker"
+                title="Revisor de PRD"
+                description="Analiza especificaciones, revisa vacíos y evalúa criterios."
+                icon={FileSearch}
+                badge="Nuevo"
+                gradient="from-[#004497] to-blue-600"
+              />
+              <QuickActionCard
+                to="/pm/change-impact"
+                title="Impacto de Cambios"
+                description="Mapea tickets, Pull Requests y documentos afectados por un cambio."
+                icon={GitCompareArrows}
+                badge="Nuevo"
+                gradient="from-blue-900 to-[#002777]"
+              />
+            </>
+          )}
           <QuickActionCard
             to="/knowledge/ask"
             title="Consultar Producto"
@@ -192,8 +257,8 @@ export const DashboardPage = () => {
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <QuickActionCard
             to="/knowledge"
-            title="Cargar Conocimiento"
-            description="Sube documentos, especificaciones y requerimientos para RAG."
+            title="Biblioteca & Documentos"
+            description="Explora o sube documentos, especificaciones y requerimientos para RAG."
             icon={LayoutGrid}
             gradient="from-teal-600 to-emerald-600"
           />
@@ -279,10 +344,22 @@ export const DashboardPage = () => {
             </ul>
 
             <div className="mt-6 flex flex-wrap gap-3 border-t border-[var(--color-border)] pt-5">
-              <Link to="/pm/standup" className="btn-primary gap-2">
-                <Sun className="h-4 w-4" aria-hidden />
-                Probar Standup
-              </Link>
+              {role === 'funcional' ? (
+                <Link to="/funcional/transcripciones" className="btn-primary gap-2">
+                  <Mic className="h-4 w-4" aria-hidden />
+                  Transcripciones
+                </Link>
+              ) : role === 'qa' ? (
+                <Link to="/qa/regression" className="btn-primary gap-2">
+                  <TestTube2 className="h-4 w-4" aria-hidden />
+                  Probar Regresión
+                </Link>
+              ) : (
+                <Link to="/pm/standup" className="btn-primary gap-2">
+                  <Sun className="h-4 w-4" aria-hidden />
+                  Probar Standup
+                </Link>
+              )}
               <Link to="/settings" className="btn-secondary gap-2">
                 Configurar IA
                 <ArrowRight className="h-4 w-4" aria-hidden />

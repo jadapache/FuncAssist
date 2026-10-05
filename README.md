@@ -76,8 +76,8 @@ La documentación técnica completa está disponible en **[`docs/`](./docs/)**:
 | **Frontend** | React, TypeScript, Vite, Tailwind CSS v4, React Router | 19 / 6 / 8 / 4 / 7 |
 | **Backend** | Python, FastAPI, Pydantic | 3.11+ / 0.111+ / 2.8+ |
 | **IA & RAG** | LiteLLM, BM25, pypdf, python-docx | 1.35+ / 0.2.2 / 5.4 / 1.1 |
-| **Almacenamiento** | SQLite (aiosqlite), JSON, Fernet encryption | 3.8+ / 0.20 |
-| **Seguridad** | cryptography, keyring | 44+ / 25.6+ |
+| **Almacenamiento** | Local JSON (`app.json`), Fernet encryption, local history | JSON-only |
+| **Seguridad & Acceso** | Rol de usuario local (`admin`, `pm`, `funcional`, `dev`, `qa`), cryptography, keyring | 44+ / 25.6+ |
 
 ---
 

@@ -1,6 +1,5 @@
 import {
   API_BASE,
-  getAuthHeaders,
   handleResponse,
   type AgenticPromptResponse,
 } from '../client'
@@ -16,7 +15,7 @@ export const docAgentApi = {
   }): Promise<AgenticPromptResponse> =>
     fetch(`${API_BASE}/api/doc-agent/agentic-prompt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,
@@ -55,7 +54,7 @@ export const docAgentApi = {
   ): Promise<AgenticPromptResponse> => {
     const res = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt-stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,

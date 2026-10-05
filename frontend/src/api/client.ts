@@ -1,5 +1,3 @@
-import { AUTH_TOKEN_KEY } from '../constants/app'
-import { authApi } from './modules/auth'
 import { knowledgeApi } from './modules/knowledge'
 import { aiSettingsApi } from './modules/aiSettings'
 import { featuresApi } from './modules/features'
@@ -7,6 +5,8 @@ import { docAgentApi } from './modules/docAgent'
 import { integrationsApi } from './modules/integrations'
 import { templatesApi } from './modules/templates'
 import { settingsApi } from './modules/settings'
+import { userApi } from './modules/user'
+import type { UserProfile, UserRole } from './modules/user'
 import { transcriptionApi } from '../features/transcription/api/transcriptionApi'
 
 export type { AppSettings, IntegrationInfo, TestConnectionResult } from '../types'
@@ -18,13 +18,9 @@ export type {
   TranscriptionResult,
   TranscribeOptions,
 } from '../features/transcription/api/transcriptionApi'
+export type { UserProfile, UserRole }
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? ''
-
-export const getAuthHeaders = (): Record<string, string> => {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY)
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
 
 export const handleResponse = async <T,>(response: Response): Promise<T> => {
   if (!response.ok) {
@@ -41,23 +37,6 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
     return undefined as T
   }
   return response.json() as Promise<T>
-}
-
-export type AuthUser = {
-  id: string
-  username: string
-  email?: string
-  full_name?: string
-  role?: string
-  status?: string
-  created_at?: string
-}
-
-export type AuthResponse = {
-  token?: string
-  status?: string
-  message?: string
-  user: AuthUser
 }
 
 export type KnowledgeDocument = {
@@ -233,7 +212,7 @@ export type AIRubric = {
 }
 
 export const api = {
-  ...authApi,
+  ...userApi,
   ...knowledgeApi,
   ...aiSettingsApi,
   ...featuresApi,

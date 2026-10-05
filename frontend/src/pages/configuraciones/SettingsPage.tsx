@@ -1,21 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Cpu, FileText, Layers, ShieldCheck } from 'lucide-react'
+import { Cpu, FileText, Layers } from 'lucide-react'
 import { AiModelsPanel } from '../../components/settings/AiModelsPanel'
 import { IntegrationsPanel } from '../../components/settings/IntegrationsPanel'
-import { UserApprovalsPanel } from '../../components/settings/UserApprovalsPanel'
 import { TemplatesPanel } from '../../components/settings/TemplatesPanel'
 import { useIntegrationsManager } from '../../components/settings/hooks/useIntegrationsManager'
-import { useUserApprovalsManager } from '../../components/settings/hooks/useUserApprovalsManager'
 import type { SettingsTabItem, TabType } from '../../components/settings/types'
+import { useUser } from '../../context/UserContext'
 
 export const SettingsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { user } = useUser()
+  const role = user?.user_role || 'admin'
 
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const t = new URLSearchParams(window.location.search).get('tab')
-    if (t === 'integrations' || t === 'user_approvals' || t === 'ai_models' || t === 'templates') {
-      return t
+    if (t === 'integrations' || t === 'ai_models' || t === 'templates') {
+      return t as TabType
     }
     if (
       window.location.search.includes('jira=') ||
@@ -27,23 +28,20 @@ export const SettingsPage = () => {
     return 'ai_models'
   })
 
-  // Domain managers for integrations & access requests (shared to populate badges without duplicate fetches)
+  // Integrations manager to populate badge count
   const integrationsManager = useIntegrationsManager()
-  const userApprovalsManager = useUserApprovalsManager()
 
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (
-      tab === 'integrations' ||
-      tab === 'user_approvals' ||
-      tab === 'ai_models' ||
-      tab === 'templates'
-    ) {
-      setActiveTab(tab)
+    if (tab === 'integrations' || tab === 'ai_models' || tab === 'templates') {
+      setActiveTab(tab as TabType)
     } else if (searchParams.get('jira') || searchParams.get('github') || searchParams.get('gitlab')) {
       setActiveTab('integrations')
     }
   }, [searchParams])
+
+  // Filter tabs based on role (integrations accessible to admin, pm, funcional, qa)
+  const canSeeIntegrations = ['admin', 'pm', 'funcional', 'qa'].includes(role)
 
   const TABS: SettingsTabItem[] = [
     {
@@ -58,20 +56,17 @@ export const SettingsPage = () => {
       subtitle: 'Plantillas corporativas (.doc, .docx, .xlsx)',
       icon: FileText,
     },
-    {
-      id: 'integrations',
-      label: 'Integraciones',
-      subtitle: 'Jira Software, GitHub, GitLab',
-      icon: Layers,
-      badgeCount: integrationsManager.connectedCount,
-    },
-    {
-      id: 'user_approvals',
-      label: 'Aprobación de Usuarios',
-      subtitle: 'Solicitudes de acceso pendientes',
-      icon: ShieldCheck,
-      badgeCount: userApprovalsManager.pendingRequests.length,
-    },
+    ...(canSeeIntegrations
+      ? [
+          {
+            id: 'integrations' as TabType,
+            label: 'Integraciones',
+            subtitle: 'Jira Software, GitHub, GitLab',
+            icon: Layers,
+            badgeCount: integrationsManager.connectedCount,
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -83,11 +78,11 @@ export const SettingsPage = () => {
         </div>
         <h1 className="page-title">Configuración del Sistema</h1>
         <p className="page-subtitle">
-          Administra los modelos de IA, integraciones con repositorios, aprobación de accesos y preferencias.
+          Administra los modelos de IA, plantillas corporativas e integraciones con repositorios.
         </p>
       </header>
 
-      {/* Meetily-Style Nav Tabs Bar */}
+      {/* Nav Tabs Bar */}
       <nav className="flex flex-wrap gap-2 rounded-2xl border border-[var(--color-border)] bg-slate-100/70 p-1.5 shadow-sm">
         {TABS.map((t) => {
           const Icon = t.icon
@@ -133,9 +128,10 @@ export const SettingsPage = () => {
 
       {/* Tab Panels */}
       {activeTab === 'ai_models' && <AiModelsPanel />}
-      {activeTab === 'integrations' && <IntegrationsPanel integrationsManager={integrationsManager} />}
-      {activeTab === 'user_approvals' && <UserApprovalsPanel userApprovalsManager={userApprovalsManager} />}
       {activeTab === 'templates' && <TemplatesPanel />}
+      {activeTab === 'integrations' && canSeeIntegrations && (
+        <IntegrationsPanel integrationsManager={integrationsManager} />
+      )}
     </div>
   )
 }
