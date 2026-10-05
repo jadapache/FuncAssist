@@ -147,11 +147,11 @@ export function useAiSettingsManager() {
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
         }
 
-        if (settings.transcription_provider || settings.voice_command_provider) {
-          const savedProvider = (settings.transcription_provider || settings.voice_command_provider)!
+        if (settings.transcription_provider) {
+          const savedProvider = settings.transcription_provider
           setVoiceAudioProvider(savedProvider)
 
-          const savedModel = settings.transcription_model || settings.voice_command_model
+          const savedModel = settings.transcription_model
           if (savedModel) {
             setVoiceAudioModel(savedModel)
           } else {
@@ -306,13 +306,11 @@ export function useAiSettingsManager() {
     setSavingAi(true)
 
     const payload: Record<string, string> = {
-      provider,
-      model: model.trim(),
+      inference_provider: provider,
+      inference_model: model.trim(),
       ollama_base_url: normalizeOllamaUrl(ollamaUrl),
       transcription_provider: voiceAudioProvider,
       transcription_model: voiceAudioModel.trim(),
-      voice_command_provider: voiceAudioProvider,
-      voice_command_model: voiceAudioModel.trim(),
     }
 
     if (groqKey.trim()) payload.groq_api_key = groqKey.trim()
@@ -386,8 +384,6 @@ export function useAiSettingsManager() {
     const payload: Record<string, string> = {
       transcription_provider: voiceAudioProvider,
       transcription_model: voiceAudioModel.trim(),
-      voice_command_provider: voiceAudioProvider,
-      voice_command_model: voiceAudioModel.trim(),
     }
 
     if (transcriptionGroqKey.trim()) {

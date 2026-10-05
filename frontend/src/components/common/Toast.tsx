@@ -50,6 +50,8 @@ export const ToastItem: React.FC<ToastItemProps> = ({ toast, onDismiss }) => {
   const lastTickRef = useRef<number>(Date.now())
 
   useEffect(() => {
+    remainingTimeRef.current = duration
+    setProgress(100)
     lastTickRef.current = Date.now()
 
     const interval = setInterval(() => {
@@ -74,7 +76,7 @@ export const ToastItem: React.FC<ToastItemProps> = ({ toast, onDismiss }) => {
     }, 50)
 
     return () => clearInterval(interval)
-  }, [toast.id, duration, isPaused, onDismiss])
+  }, [toast.id, toast.count, duration, isPaused, onDismiss])
 
   const style = TOAST_STYLES[toast.type]
   const Icon = TOAST_ICONS[toast.type]
@@ -99,9 +101,16 @@ export const ToastItem: React.FC<ToastItemProps> = ({ toast, onDismiss }) => {
 
         {/* Content */}
         <div className="min-w-0 flex-1 pt-0.5 space-y-0.5">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-900 leading-tight">
-            {title}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-900 leading-tight">
+              {title}
+            </p>
+            {toast.count && toast.count > 1 ? (
+              <span className="inline-flex items-center rounded-full bg-slate-900/90 px-2 py-0.5 text-[10px] font-extrabold text-white shadow-sm shrink-0">
+                x{toast.count}
+              </span>
+            ) : null}
+          </div>
           <p className="text-xs text-slate-600 leading-relaxed break-words">
             {toast.message}
           </p>

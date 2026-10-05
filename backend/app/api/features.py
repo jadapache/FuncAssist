@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 import httpx
@@ -35,6 +33,7 @@ from app.api.deps import (
   get_standup_repository,
   get_test_plan_repository,
 )
+from app.api.middleware.error_handlers import handle_grounded_errors
 from app.core.storage import load_app_settings, save_app_settings
 from app.db.interfaces import (
   IChatRepository,
@@ -65,9 +64,15 @@ class AISettingsUpdate(BaseModel):
   ollama_base_url: str | None = None
 
 
+AISettingsUpdate.model_rebuild()
+
+
 class OllamaPullRequest(BaseModel):
   name: str = Field(min_length=1)
   base_url: str | None = None
+
+
+OllamaPullRequest.model_rebuild()
 
 
 class GroundedRequest(BaseModel):
@@ -77,11 +82,17 @@ class GroundedRequest(BaseModel):
   chat_context: str | None = None
 
 
+GroundedRequest.model_rebuild()
+
+
 class FeatureWorkspaceRequest(BaseModel):
   query: str = Field(min_length=1)
   sources: list[str] | None = None
   document_ids: list[str] = Field(default_factory=list)
   chat_context: str | None = None
+
+
+FeatureWorkspaceRequest.model_rebuild()
 
 
 class TemplateUpdate(BaseModel):
@@ -91,9 +102,15 @@ class TemplateUpdate(BaseModel):
   allowed_sources: list[str] | None = None
 
 
+TemplateUpdate.model_rebuild()
+
+
 class RubricUpdate(BaseModel):
   model_config = ConfigDict(extra="allow")
   criteria: list[str]
+
+
+RubricUpdate.model_rebuild()
 
 
 @router.get("/ai/models/catalog")
@@ -108,6 +125,7 @@ async def ai_models_catalog(
 
 @router.get("/ai/settings")
 async def ai_settings() -> dict[str, Any]:
+  """Get current AI configuration"""
   import os
   from app.ai.providers.registry import find_provider_spec
 
@@ -147,11 +165,18 @@ async def ai_settings() -> dict[str, Any]:
 
 @router.put("/ai/settings")
 async def update_ai_settings(body: AISettingsUpdate) -> dict[str, Any]:
+  """Update AI settings - merges new values with existing ones"""
   current = load_app_settings()
   ai = dict(current.get("ai") or {})
+  
+  # Merge new values into existing AI settings
   for key, value in body.model_dump(exclude_none=True).items():
-    ai[key] = value
+    if value is not None:  # Only update non-None values
+      ai[key] = value
+  
+  # Save merged settings
   save_app_settings({"ai": ai})
+  
   return await ai_settings()
 
 
@@ -161,6 +186,9 @@ class AITestConnectionRequest(BaseModel):
   model: str | None = None
   api_key: str | None = None
   ollama_base_url: str | None = None
+
+
+AITestConnectionRequest.model_rebuild()
 
 
 @router.post("/ai/test-connection")
@@ -354,87 +382,76 @@ async def ai_logs(limit: int = 20) -> dict[str, Any]:
 
 
 @router.post("/features/standup")
+@handle_grounded_errors
 async def standup(
   body: GroundedRequest = GroundedRequest(),
   standup_repo: IStandupRepository = Depends(get_standup_repository),
 ) -> dict[str, Any]:
-  try:
-    res = await generate_standup(body.query)
-    if isinstance(res, dict) and "markdown" in res:
-      await standup_repo.create_standup(
-        title=f"Standup {res.get('date', '')}".strip(),
-        content=res["markdown"],
-        sources=body.sources or [],
-      )
-    return res
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  res = await generate_standup(body.query)
+  if isinstance(res, dict) and "markdown" in res:
+    await standup_repo.create_standup(
+      title=f"Standup {res.get('date', '')}".strip(),
+      content=res["markdown"],
+      sources=body.sources or [],
+    )
+  return res
 
 
 @router.post("/features/ask")
+@handle_grounded_errors
 async def ask_product(
   body: GroundedRequest,
   chat_repo: IChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
   if not body.query.strip():
     raise HTTPException(status_code=400, detail="Query is required.")
-  try:
-    res = await run_grounded_feature(
-      feature="ask_product",
-      query=body.query,
-      sources=body.sources,
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
+  res = await run_grounded_feature(
+    feature="ask_product",
+    query=body.query,
+    sources=body.sources,
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
+  if isinstance(res, dict) and "markdown" in res:
+    await chat_repo.save_message(
+      session_id="default",
+      role="user",
+      content=body.query,
     )
-    if isinstance(res, dict) and "markdown" in res:
-      await chat_repo.save_message(
-        session_id="default",
-        role="user",
-        content=body.query,
-      )
-      await chat_repo.save_message(
-        session_id="default",
-        role="assistant",
-        content=res["markdown"],
-        context_sources=res.get("context_sources") or [],
-      )
-    return res
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+    await chat_repo.save_message(
+      session_id="default",
+      role="assistant",
+      content=res["markdown"],
+      context_sources=res.get("context_sources") or [],
+    )
+  return res
 
 
 @router.post("/features/prd-checker")
+@handle_grounded_errors
 async def prd_checker(
   body: FeatureWorkspaceRequest,
   prd_repo: IPRDRepository = Depends(get_prd_repository),
 ) -> dict[str, Any]:
   if not body.document_ids:
     raise HTTPException(status_code=400, detail="Upload at least one PRD or spec file.")
-  try:
-    res = await run_grounded_feature(
-      feature="prd_checker",
-      query=body.query,
-      sources=body.sources or ["knowledge"],
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
+  res = await run_grounded_feature(
+    feature="prd_checker",
+    query=body.query,
+    sources=body.sources or ["knowledge"],
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
+  if isinstance(res, dict) and "markdown" in res:
+    await prd_repo.create_prd_review(
+      prd_title="Auditoría PRD",
+      content=res["markdown"],
     )
-    if isinstance(res, dict) and "markdown" in res:
-      await prd_repo.create_prd_review(
-        prd_title="Auditoría PRD",
-        content=res["markdown"],
-      )
-    return res
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  return res
 
 
 @router.post("/features/change-impact")
+@handle_grounded_errors
 async def change_impact(body: FeatureWorkspaceRequest) -> dict[str, Any]:
   sources = body.sources or []
   if not body.document_ids and not sources:
@@ -442,18 +459,13 @@ async def change_impact(body: FeatureWorkspaceRequest) -> dict[str, Any]:
       status_code=400,
       detail="Upload files and/or enable live sources (Jira, GitHub, GitLab).",
     )
-  try:
-    return await run_grounded_feature(
-      feature="change_impact",
-      query=body.query,
-      sources=body.sources or ["jira", "github", "knowledge"],
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
-    )
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  return await run_grounded_feature(
+    feature="change_impact",
+    query=body.query,
+    sources=body.sources or ["jira", "github", "knowledge"],
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
 
 
 QA_FEATURE_KEYS = {
@@ -474,6 +486,7 @@ QA_DEFAULT_SOURCES: dict[str, list[str]] = {
 
 
 @router.post("/features/qa/{feature_key}")
+@handle_grounded_errors
 async def qa_feature(
   feature_key: str,
   body: FeatureWorkspaceRequest,
@@ -484,73 +497,56 @@ async def qa_feature(
   sources = body.sources or QA_DEFAULT_SOURCES.get(feature_key, ["knowledge"])
   if not body.document_ids and not sources:
     raise HTTPException(status_code=400, detail="Upload files and/or enable live sources.")
-  try:
-    res = await run_grounded_feature(
-      feature=feature_key,
-      query=body.query,
-      sources=sources,
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
+  res = await run_grounded_feature(
+    feature=feature_key,
+    query=body.query,
+    sources=sources,
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
+  if isinstance(res, dict) and "markdown" in res:
+    await test_plan_repo.create_test_plan(
+      feature_name=feature_key,
+      content=res["markdown"],
+      test_type=feature_key,
     )
-    if isinstance(res, dict) and "markdown" in res:
-      await test_plan_repo.create_test_plan(
-        feature_name=feature_key,
-        content=res["markdown"],
-        test_type=feature_key,
-      )
-    return res
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  return res
 
 
 @router.post("/features/mejoras")
+@handle_grounded_errors
 async def mejoras_doc(body: FeatureWorkspaceRequest) -> dict[str, Any]:
-  try:
-    return await run_grounded_feature(
-      feature="mejoras_doc",
-      query=body.query,
-      sources=body.sources or ["jira", "github", "gitlab", "knowledge"],
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
-    )
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  return await run_grounded_feature(
+    feature="mejoras_doc",
+    query=body.query,
+    sources=body.sources or ["jira", "github", "gitlab", "knowledge"],
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
 
 
 @router.post("/features/inventario")
+@handle_grounded_errors
 async def inventario_doc_endpoint(body: FeatureWorkspaceRequest) -> dict[str, Any]:
-  try:
-    return await run_grounded_feature(
-      feature="inventario_doc",
-      query=body.query,
-      sources=body.sources or ["knowledge", "jira", "github"],
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
-    )
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  return await run_grounded_feature(
+    feature="inventario_doc",
+    query=body.query,
+    sources=body.sources or ["knowledge", "jira", "github"],
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
 
 
 @router.post("/features/levantamiento")
+@handle_grounded_errors
 async def levantamiento_doc_endpoint(body: FeatureWorkspaceRequest) -> dict[str, Any]:
-  try:
-    return await run_grounded_feature(
-      feature="levantamiento_doc",
-      query=body.query,
-      sources=body.sources or ["knowledge", "jira", "github"],
-      document_ids=body.document_ids,
-      chat_context=body.chat_context,
-    )
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-  except Exception as exc:
-    raise HTTPException(status_code=502, detail=str(exc)) from exc
+  return await run_grounded_feature(
+    feature="levantamiento_doc",
+    query=body.query,
+    sources=body.sources or ["knowledge", "jira", "github"],
+    document_ids=body.document_ids,
+    chat_context=body.chat_context,
+  )
 
 
 class TemplateMetadataUpdate(BaseModel):

@@ -8,6 +8,7 @@ export interface Toast {
   message: string
   title?: string
   duration?: number
+  count?: number
 }
 
 interface ToastContextValue {
@@ -25,7 +26,12 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined)
 
-export const DEFAULT_TOAST_DURATION = 10000 // 10 seconds auto-dismiss
+export const DEFAULT_TOAST_DURATIONS: Record<ToastType, number> = {
+  success: 4000,
+  info: 4000,
+  warning: 6000,
+  error: 7000,
+}
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -35,20 +41,40 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [])
 
   const showToast = useCallback(
-    ({ type, message, title, duration = DEFAULT_TOAST_DURATION }: Omit<Toast, 'id'>) => {
+    ({ type, message, title, duration }: Omit<Toast, 'id'>) => {
+      const actualDuration = duration || DEFAULT_TOAST_DURATIONS[type] || 4000
       const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      const newToast: Toast = {
-        id,
-        type,
-        message,
-        title,
-        duration,
-      }
 
       setToasts((prev) => {
-        // Limit to max 5 simultaneous toasts to avoid screen clutter
-        const updated = [...prev, newToast]
-        return updated.slice(-5)
+        // Group & stack duplicates (same type, title, and message)
+        const existingIdx = prev.findIndex(
+          (t) => t.type === type && t.message === message && (t.title || '') === (title || ''),
+        )
+
+        if (existingIdx !== -1) {
+          const updated = [...prev]
+          const existing = updated[existingIdx]
+          updated[existingIdx] = {
+            ...existing,
+            id, // Refresh ID to restart countdown timer
+            count: (existing.count || 1) + 1,
+            duration: actualDuration,
+          }
+          return updated
+        }
+
+        const newToast: Toast = {
+          id,
+          type,
+          message,
+          title,
+          duration: actualDuration,
+          count: 1,
+        }
+
+        // Limit visible toasts to max 3 simultaneous cards to prevent UI blockage
+        const nextToasts = [...prev, newToast]
+        return nextToasts.slice(-3)
       })
 
       return id

@@ -16,6 +16,7 @@ from app.api.transcription_stream import emit_progress
 from app.features.inventario.xlsx_builder import create_inventario_xlsx
 from app.features.levantamiento.docx_builder import create_levantamiento_docx
 from app.features.transcription.service import transcription_service
+from app.features.transcription.summarizer import summarize_transcript
 from app.features.transcription.storage import (
   delete_transcription_record,
   get_media_destination,

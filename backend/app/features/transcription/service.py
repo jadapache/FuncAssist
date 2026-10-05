@@ -266,6 +266,8 @@ class TranscriptionService:
       if transcription_id in _CANCELLED_JOBS:
         raise asyncio.CancelledError(f"Job {transcription_id} was cancelled by user.")
 
+    media_title = media_entry.get("title", "Reunión de Requerimientos")
+
     try:
       # 1. Start Preprocessing
       _check_cancelled()
@@ -273,6 +275,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="preprocessing",
           stage="preprocessing",
           progress=15,
@@ -294,6 +297,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="transcribing",
           stage="transcribing",
           progress=20,
@@ -308,6 +312,7 @@ class TranscriptionService:
           _ACTIVE_JOBS[transcription_id].progress = prog_pct
           _ACTIVE_JOBS[transcription_id].message = message
           _ACTIVE_JOBS[transcription_id].eta = eta_str
+          _ACTIVE_JOBS[transcription_id].title = media_title
           save_active_job_progress(_ACTIVE_JOBS[transcription_id].model_dump())
           emit_progress_sync(transcription_id, _ACTIVE_JOBS[transcription_id].model_dump())
 
@@ -348,6 +353,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="diarizing",
           stage="diarizing",
           progress=75,
@@ -370,6 +376,7 @@ class TranscriptionService:
         TranscriptionProgress(
           id=transcription_id,
           media_id=media_id,
+          title=media_title,
           status="summarizing",
           stage="summarizing",
           progress=88,
@@ -430,6 +437,7 @@ class TranscriptionService:
       final_prog = TranscriptionProgress(
         id=transcription_id,
         media_id=media_id,
+        title=media_title,
         status="complete",
         stage="complete",
         progress=100,
@@ -485,32 +493,36 @@ class TranscriptionService:
     summary = record.get("summary") or {}
     segments = record.get("segments", [])
 
-    lines = [f"# Transcripción de Reunión: {title}\n"]
+    lines = [f"Transcripción de Reunión: {title}\n"]
     if summary:
-      lines.append("## Resumen Ejecutivo\n")
+      lines.append("Resumen Ejecutivo")
+      lines.append("-" * 60)
       if summary.get("participants"):
-        lines.append(f"**Participantes:** {', '.join(summary['participants'])}\n")
+        lines.append(f"Participantes: {', '.join(summary['participants'])}")
       if summary.get("topics"):
-        lines.append(f"**Temas:** {', '.join(summary['topics'])}\n")
+        lines.append(f"Temas: {', '.join(summary['topics'])}")
       if summary.get("decisions"):
-        lines.append(f"**Decisiones:** {', '.join(summary['decisions'])}\n")
+        lines.append(f"Decisiones: {', '.join(summary['decisions'])}")
       if summary.get("requirements"):
-        lines.append(f"**Requerimientos:** {', '.join(summary['requirements'])}\n")
+        lines.append(f"Requerimientos: {', '.join(summary['requirements'])}")
       if summary.get("action_items"):
-        lines.append(f"**Compromisos:** {', '.join(summary['action_items'])}\n")
+        lines.append(f"Compromisos: {', '.join(summary['action_items'])}")
+      lines.append("")
 
-    lines.append("## Diálogo Completo Transcrito\n")
+    lines.append("Diálogo Completo Transcrito")
+    lines.append("-" * 60)
     for s in segments:
       mins = int(s.get("start", 0) // 60)
       secs = int(s.get("start", 0) % 60)
       lines.append(f"[{mins:02d}:{secs:02d}] {s.get('speaker', 'Participante')}: {s.get('text', '')}")
 
-    full_md = "\n".join(lines)
-    tags = ["reunion", "transcripcion", "minuta"] + (custom_tags or [])
-    safe_title = re.sub(r"[^a-zA-Z0-9_\-]", "_", title) or "Reunion"
+    full_txt = "\n".join(lines)
+    tags = ["reunion", "transcripcion"] + (custom_tags or [])
+    clean_filename = title if title.lower().endswith(".txt") else f"{title}.txt"
+
     doc_entry = ingest_document(
-      filename=f"Minuta_{safe_title}.md",
-      raw=full_md.encode("utf-8"),
+      filename=clean_filename,
+      raw=full_txt.encode("utf-8"),
       tags=list(set(tags)),
     )
 

@@ -100,6 +100,7 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
 
 
 def load_app_settings() -> dict[str, Any]:
+  """Load application settings from disk"""
   path = _settings_path()
   if not path.exists():
     return dict(DEFAULT_APP_SETTINGS)
@@ -114,6 +115,7 @@ def load_app_settings() -> dict[str, Any]:
 
 
 def save_app_settings(payload: dict[str, Any]) -> dict[str, Any]:
+  """Save application settings to disk - merges with existing settings"""
   current = load_app_settings()
   current.update(payload)
 
