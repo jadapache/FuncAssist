@@ -2,11 +2,12 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
-import type { BackgroundTaskItem } from '../../../features/transcription/components/FloatingTranscriptionToast'
+import { useBackgroundJobs, type BackgroundJobItem } from '../../../context/BackgroundJobContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 
 export function useAiSettingsManager() {
   const { toast } = useToast()
+  const { registerDownloadJob } = useBackgroundJobs()
 
   const [ai, setAi] = useState<AISettings | null>(null)
   const [loadingAi, setLoadingAi] = useState(true)
@@ -42,7 +43,7 @@ export function useAiSettingsManager() {
   const [downloadingBuiltinId, setDownloadingBuiltinId] = useState<string | null>(null)
   const [deletingBuiltinId, setDeletingBuiltinId] = useState<string | null>(null)
   const [fetchingBuiltinModels, setFetchingBuiltinModels] = useState(false)
-  const [downloadTasks, setDownloadTasks] = useState<Record<string, BackgroundTaskItem>>({})
+  const [downloadTasks, setDownloadTasks] = useState<Record<string, BackgroundJobItem>>({})
   const downloadPollTimerRef = useRef<number | null>(null)
 
 
@@ -339,7 +340,9 @@ export function useAiSettingsManager() {
 
   const handleDownloadBuiltinModel = async (modelId: string) => {
     setDownloadingBuiltinId(modelId)
-    // Register initial task for immediate feedback in floating toast
+    // Register in global BackgroundJobContext so it floats across all app views
+    registerDownloadJob(modelId, `Descargando ${modelId}`)
+    // Register initial task for immediate feedback in local state
     setDownloadTasks((prev) => ({
       ...prev,
       [modelId]: {

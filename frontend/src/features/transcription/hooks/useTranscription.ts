@@ -6,11 +6,13 @@ import {
   type TranscriptionResult,
 } from '../api/transcriptionApi'
 import { useToast } from '../../../context/ToastContext'
+import { useBackgroundJobs } from '../../../context/BackgroundJobContext'
 
 const LOCAL_STORAGE_ACTIVE_JOBS = 'qa_active_transcription_jobs'
 
 export function useTranscription() {
   const { toast } = useToast()
+  const { addOrUpdateJob } = useBackgroundJobs()
 
   // View mode
   const [viewMode, setViewMode] = useState<'dashboard' | 'studio'>('dashboard')
@@ -215,32 +217,50 @@ export function useTranscription() {
       setIsUploading(true)
       setActiveMeetingTitle(title)
 
+      const initialUploadJob = {
+        id: tempId,
+        media_id: '',
+        title,
+        status: 'uploading' as const,
+        stage: 'uploading',
+        progress: 5,
+        message: `Iniciando subida de "${file.name}"...`,
+        model_info: availableModels?.active_model_label || 'Whisper Auto',
+      }
       setActiveJobs((prev) => ({
         ...prev,
-        [tempId]: {
-          id: tempId,
-          media_id: '',
-          title,
-          status: 'uploading',
-          stage: 'uploading',
-          progress: 5,
-          message: `Iniciando subida de "${file.name}"...`,
-          model_info: availableModels?.active_model_label || 'Whisper Auto',
-        },
+        [tempId]: initialUploadJob,
       }))
+      addOrUpdateJob({
+        id: tempId,
+        type: 'transcription',
+        title,
+        progress: 5,
+        status: 'uploading',
+        stageText: `Iniciando subida de "${file.name}"...`,
+      })
 
       // 1. Upload media with real-time XMLHttpRequest progress
       const uploadRes = await transcriptionApi.uploadMediaWithProgress(file, title, description, (prog, msg) => {
+        const calculatedProgress = Math.min(10, Math.max(5, Math.round(prog / 10)))
         setActiveJobs((prev) => {
           if (!prev[tempId]) return prev
           return {
             ...prev,
             [tempId]: {
               ...prev[tempId],
-              progress: Math.min(10, Math.max(5, Math.round(prog / 10))), // 0-10% range
+              progress: calculatedProgress,
               message: msg,
             },
           }
+        })
+        addOrUpdateJob({
+          id: tempId,
+          type: 'transcription',
+          title,
+          progress: calculatedProgress,
+          status: 'uploading',
+          stageText: msg,
         })
       })
 
@@ -248,21 +268,31 @@ export function useTranscription() {
       const transcriptionId = uploadRes.transcription_id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `trans_${Date.now()}`)
 
       // Replace tempId with actual transcriptionId
+      const newTranscriptionJob = {
+        id: transcriptionId,
+        media_id: mediaId,
+        title,
+        status: 'preprocessing' as const,
+        stage: 'preprocessing',
+        progress: 15,
+        message: 'Archivo cargado. Extrayendo audio...',
+        eta: '~45 s',
+        model_info: availableModels?.active_model_label || 'Whisper Auto',
+      }
       setActiveJobs((prev) => {
         const next = { ...prev }
         delete next[tempId]
-        next[transcriptionId] = {
-          id: transcriptionId,
-          media_id: mediaId,
-          title,
-          status: 'preprocessing',
-          stage: 'preprocessing',
-          progress: 15,
-          message: 'Archivo cargado. Extrayendo audio...',
-          eta: '~45 s',
-          model_info: availableModels?.active_model_label || 'Whisper Auto',
-        }
+        next[transcriptionId] = newTranscriptionJob
         return next
+      })
+      addOrUpdateJob({
+        id: transcriptionId,
+        type: 'transcription',
+        title,
+        progress: 15,
+        status: 'preprocessing',
+        stageText: 'Archivo cargado. Extrayendo audio...',
+        eta: '~45 s',
       })
 
       setSelectedTranscriptionId(transcriptionId)
