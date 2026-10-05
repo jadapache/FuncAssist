@@ -2,11 +2,10 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/AppLayout'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { ToastContainer } from './components/common/Toast'
-import { AuthProvider } from './context/AuthContext'
+import { UserProvider } from './context/UserContext'
 import { ToastProvider } from './context/ToastContext'
 import { ErrorBoundary } from './core/providers/ErrorBoundary'
 import { DashboardPage } from './pages/DashboardPage'
-import { LoginPage } from './pages/LoginPage'
 import { AskProductPage } from './pages/conocimiento/AskProductPage'
 import { KnowledgePage } from './pages/conocimiento/KnowledgePage'
 import { ProfilePage } from './pages/configuraciones/ProfilePage'
@@ -24,24 +23,41 @@ export const App = () => {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <AuthProvider>
+        <UserProvider>
           <BrowserRouter>
             <ToastContainer />
             <Routes>
-              <Route path="/login" element={<LoginPage />} />
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
+                  {/* Dashboard - all roles */}
                   <Route index element={<DashboardPage />} />
-                  <Route path="pm/standup" element={<StandupPage />} />
-                  <Route path="pm/:slug" element={<PmFeaturePage />} />
-                  <Route path="funcional/transcripciones" element={<TranscripcionesPage />} />
-                  <Route path="funcional/inventario" element={<InventarioPage />} />
-                  <Route path="funcional/levantamiento" element={<LevantamientoPage />} />
-                  <Route path="funcional/mejoras" element={<MejorasPage />} />
-                  <Route path="funcional/:slug" element={<FuncionalFeaturePage />} />
-                  <Route path="qa/:slug" element={<QaFeaturePage />} />
-                  <Route path="knowledge" element={<KnowledgePage />} />
-                  <Route path="knowledge/ask" element={<AskProductPage />} />
+
+                  {/* PM Routes - admin, pm, qa */}
+                  <Route element={<ProtectedRoute allowedRoles={['admin', 'pm', 'qa']} />}>
+                    <Route path="pm/standup" element={<StandupPage />} />
+                    <Route path="pm/:slug" element={<PmFeaturePage />} />
+                  </Route>
+
+                  {/* Funcional Routes - admin, funcional */}
+                  <Route element={<ProtectedRoute allowedRoles={['admin', 'funcional']} />}>
+                    <Route path="funcional/transcripciones" element={<TranscripcionesPage />} />
+                    <Route path="funcional/inventario" element={<InventarioPage />} />
+                    <Route path="funcional/levantamiento" element={<LevantamientoPage />} />
+                    <Route path="funcional/mejoras" element={<MejorasPage />} />
+                    <Route path="funcional/:slug" element={<FuncionalFeaturePage />} />
+                  </Route>
+
+                  {/* QA Routes - admin, qa */}
+                  <Route element={<ProtectedRoute allowedRoles={['admin', 'qa']} />}>
+                    <Route path="qa/:slug" element={<QaFeaturePage />} />
+                  </Route>
+
+                  {/* Knowledge Routes - admin, pm, dev, qa */}
+                  <Route element={<ProtectedRoute allowedRoles={['admin', 'pm', 'dev', 'qa']} />}>
+                    <Route path="knowledge" element={<KnowledgePage />} />
+                    <Route path="knowledge/ask" element={<AskProductPage />} />
+                  </Route>
+
                   <Route path="integrations" element={<Navigate to="/settings?tab=integrations" replace />} />
                   <Route path="profile" element={<ProfilePage />} />
                   <Route path="settings" element={<SettingsPage />} />
@@ -50,7 +66,7 @@ export const App = () => {
               </Route>
             </Routes>
           </BrowserRouter>
-        </AuthProvider>
+        </UserProvider>
       </ToastProvider>
     </ErrorBoundary>
   )

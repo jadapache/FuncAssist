@@ -1,6 +1,6 @@
 import type { Cpu } from 'lucide-react'
 
-export type TabType = 'ai_models' | 'integrations' | 'user_approvals' | 'templates'
+export type TabType = 'ai_models' | 'integrations' | 'templates'
 
 export type BuiltInModel = {
   id: string
