@@ -16,7 +16,6 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { AISettings, LocalWhisperModelInfo, ModelCatalogItem } from '../../api/client'
-import { BUILT_IN_WHISPER_MODELS } from './constants'
 
 export type VoiceAudioSectionProps = {
   ai: AISettings | null
@@ -42,6 +41,7 @@ export type VoiceAudioSectionProps = {
   fetchLocalWhisperModels?: () => Promise<void>
   handleDownloadWhisperModel?: (modelId: string) => Promise<void>
   handleDeleteWhisperModel?: (modelId: string) => Promise<void>
+  downloadTasks?: Record<string, any>
 }
 
 export const VoiceAudioSection = ({
@@ -68,6 +68,7 @@ export const VoiceAudioSection = ({
   fetchLocalWhisperModels,
   handleDownloadWhisperModel,
   handleDeleteWhisperModel,
+  downloadTasks = {},
 }: VoiceAudioSectionProps) => {
   const isGroq = voiceAudioProvider === 'groq'
   const isOpenAI = voiceAudioProvider === 'openai'
@@ -83,7 +84,32 @@ export const VoiceAudioSection = ({
   const builtinFromCatalog = catalogModels.filter(
     (m) => m.task_type === 'transcription' && (m.provider === 'builtin' || m.provider === 'local'),
   )
-  const localList = builtinFromCatalog.length > 0 ? builtinFromCatalog : BUILT_IN_WHISPER_MODELS
+  const localList = builtinFromCatalog.length > 0
+    ? builtinFromCatalog
+    : (localWhisperModels && localWhisperModels.length > 0)
+      ? localWhisperModels.map((wm) => ({
+          id: wm.id,
+          raw_id: wm.id,
+          name: wm.name,
+          provider: 'builtin',
+          provider_name: 'Whisper Integrado (Local)',
+          description: wm.description,
+          context_window: 'Audio local',
+          context_length: 0,
+          task_type: 'transcription' as const,
+          task_label: 'Transcripción y Voz',
+          tier_type: 'free' as const,
+          pricing_prompt: 0,
+          pricing_completion: 0,
+          pricing_label: '$0.00 (Ejecución Local)',
+          rate_limits: 'Ilimitado',
+          is_free: true,
+          size: wm.size,
+          accuracy: wm.accuracy,
+          is_downloaded: wm.is_downloaded,
+          disk_size_mb: wm.disk_size_mb,
+        }))
+      : []
 
   const cloudModels = catalogModels.filter(
     (m) => m.task_type === 'transcription' && m.provider === voiceAudioProvider,
@@ -272,24 +298,29 @@ export const VoiceAudioSection = ({
                         ) : (
                           <>
                             {handleDownloadWhisperModel && (
-                              <button
-                                type="button"
-                                disabled={isDownloading}
-                                onClick={() => void handleDownloadWhisperModel(cleanId)}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-[#002777] bg-blue-50 hover:bg-blue-100 border border-blue-200 transition cursor-pointer disabled:opacity-50"
-                              >
-                                {isDownloading ? (
-                                  <>
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[#002777]" />
-                                    Descargando...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="h-3.5 w-3.5 text-[#002777]" />
-                                    Descargar ({m.size || 'Modelo'})
-                                  </>
-                                )}
-                              </button>
+                              isDownloading ? (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#002777] bg-blue-50 border border-blue-200"
+                                >
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#002777]" />
+                                  <span>
+                                    {downloadTasks[cleanId]?.progress || downloadTasks[m.id]?.progress
+                                      ? `${downloadTasks[cleanId]?.progress || downloadTasks[m.id]?.progress}%`
+                                      : 'Descargando…'}
+                                  </span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDownloadWhisperModel(cleanId)}
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-[#002777] bg-blue-50 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
+                                >
+                                  <Download className="h-3.5 w-3.5 text-[#002777]" />
+                                  <span>Descargar ({m.size || 'Modelo'})</span>
+                                </button>
+                              )
                             )}
 
                             <button

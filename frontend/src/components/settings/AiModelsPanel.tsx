@@ -24,11 +24,8 @@ export const AiModelsPanel = () => {
     fetchOllamaModels,
     isPulling,
     pullingModelTag,
-    deletingModelTag,
     pullStatusMsg,
     handlePullModel,
-    handleDeleteModel,
-    isModelDownloaded,
     catalogModels,
     catalogError,
     loadDynamicCatalog,
@@ -66,7 +63,16 @@ export const AiModelsPanel = () => {
     fetchLocalWhisperModels,
     handleDownloadWhisperModel,
     handleDeleteWhisperModel,
+    localBuiltinModels,
+    downloadingBuiltinId,
+    deletingBuiltinId,
+    fetchingBuiltinModels,
+    fetchLocalBuiltinModels,
+    handleDownloadBuiltinModel,
+    handleDeleteBuiltinModel,
+    downloadTasks,
   } = useAiSettingsManager()
+
 
   if (loadingAi) {
     return <AiModelsSkeleton />
@@ -123,11 +129,16 @@ export const AiModelsPanel = () => {
         fetchOllamaModels={fetchOllamaModels}
         isPulling={isPulling}
         pullingModelTag={pullingModelTag}
-        deletingModelTag={deletingModelTag}
         pullStatusMsg={pullStatusMsg}
         handlePullModel={handlePullModel}
-        handleDeleteModel={handleDeleteModel}
-        isModelDownloaded={isModelDownloaded}
+        localBuiltinModels={localBuiltinModels}
+        downloadingBuiltinId={downloadingBuiltinId}
+        deletingBuiltinId={deletingBuiltinId}
+        fetchingBuiltinModels={fetchingBuiltinModels}
+        fetchLocalBuiltinModels={fetchLocalBuiltinModels}
+        handleDownloadBuiltinModel={handleDownloadBuiltinModel}
+        handleDeleteBuiltinModel={handleDeleteBuiltinModel}
+        downloadTasks={downloadTasks}
         catalogModels={catalogModels}
         groqKey={groqKey}
         setGroqKey={setGroqKey}
@@ -170,7 +181,9 @@ export const AiModelsPanel = () => {
         fetchLocalWhisperModels={fetchLocalWhisperModels}
         handleDownloadWhisperModel={handleDownloadWhisperModel}
         handleDeleteWhisperModel={handleDeleteWhisperModel}
+        downloadTasks={downloadTasks}
       />
     </div>
   )
 }
+

@@ -153,6 +153,18 @@ export type LocalWhisperModelInfo = {
   file_path?: string | null
 }
 
+export type LocalBuiltinModelInfo = {
+  id: string
+  name: string
+  size: string
+  tokens?: string
+  description: string
+  filename?: string
+  is_downloaded: boolean
+  disk_size_mb: number
+  file_path?: string | null
+}
+
 export type ModelCatalogResponse = {
   updated_at: string
   source: string

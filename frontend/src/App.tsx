@@ -2,8 +2,10 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/AppLayout'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { ToastContainer } from './components/common/Toast'
+import { FloatingJobToast } from './components/common/FloatingJobToast'
 import { UserProvider } from './context/UserContext'
 import { ToastProvider } from './context/ToastContext'
+import { BackgroundJobProvider, useBackgroundJobs } from './context/BackgroundJobContext'
 import { ErrorBoundary } from './core/providers/ErrorBoundary'
 import { DashboardPage } from './pages/DashboardPage'
 import { AskProductPage } from './pages/conocimiento/AskProductPage'
@@ -19,14 +21,27 @@ import { PmFeaturePage } from './pages/pm/PmFeaturePage'
 import { StandupPage } from './pages/pm/StandupPage'
 import { QaFeaturePage } from './pages/qa/QaFeaturePage'
 
+const GlobalFloatingJobs: React.FC = () => {
+  const { jobs, cancelJob, removeJob } = useBackgroundJobs()
+  return (
+    <FloatingJobToast
+      jobs={jobs}
+      onCancelJob={(id) => void cancelJob(id)}
+      onDismissJob={(id) => removeJob(id)}
+    />
+  )
+}
+
 export const App = () => {
   return (
     <ErrorBoundary>
       <ToastProvider>
         <UserProvider>
           <BrowserRouter>
-            <ToastContainer />
-            <Routes>
+            <BackgroundJobProvider>
+              <ToastContainer />
+              <GlobalFloatingJobs />
+              <Routes>
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
                   {/* Dashboard - all roles */}
@@ -65,6 +80,7 @@ export const App = () => {
                 </Route>
               </Route>
             </Routes>
+            </BackgroundJobProvider>
           </BrowserRouter>
         </UserProvider>
       </ToastProvider>

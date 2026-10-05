@@ -72,6 +72,18 @@ async def get_model_catalog(
             m.is_downloaded = is_dl
             m.disk_size_mb = round(target_pt.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
 
+    # Dynamically enrich builtin chat_writing LLM models with local download state
+    from app.ai.builtin_local import get_builtin_cache_dir, resolve_model_meta
+    builtin_cache = get_builtin_cache_dir()
+    for m in models:
+        if m.provider == "builtin" and m.task_type == "chat_writing":
+            meta = resolve_model_meta(m.id)
+            if meta:
+                target_gguf = builtin_cache / meta["filename"]
+                is_dl = target_gguf.exists() and target_gguf.stat().st_size > 10 * 1024 * 1024
+                m.is_downloaded = is_dl
+                m.disk_size_mb = round(target_gguf.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
+
     # Filter by provider
     if provider and provider != "all":
         prov_key = provider.lower()
