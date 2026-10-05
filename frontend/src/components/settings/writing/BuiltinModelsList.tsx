@@ -21,7 +21,6 @@ export interface BuiltinModelsListProps {
   fetchLocalBuiltinModels?: () => Promise<void>
   handleDownloadBuiltinModel?: (modelId: string) => Promise<void>
   handleDeleteBuiltinModel?: (modelId: string) => Promise<void>
-  handleCancelBuiltinDownload?: (modelId: string) => Promise<void>
   downloadTasks?: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string }>
 }
 
@@ -36,7 +35,6 @@ export const BuiltinModelsList = ({
   fetchLocalBuiltinModels,
   handleDownloadBuiltinModel,
   handleDeleteBuiltinModel,
-  handleCancelBuiltinDownload,
   downloadTasks = {},
 }: BuiltinModelsListProps) => {
   return (
@@ -159,29 +157,16 @@ export const BuiltinModelsList = ({
                   <>
                     {handleDownloadBuiltinModel && (
                       isDownloading ? (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            disabled
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#002777] bg-blue-50 border border-blue-200"
-                          >
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#002777]" />
-                            <span>
-                              {downloadTasks[m.id]?.progress ? `${downloadTasks[m.id].progress}%` : 'Descargando…'}
-                            </span>
-                          </button>
-
-                          {handleCancelBuiltinDownload && (
-                            <button
-                              type="button"
-                              onClick={() => void handleCancelBuiltinDownload(m.id)}
-                              title="Cancelar descarga del modelo"
-                              className="px-2.5 py-2 rounded-xl text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition cursor-pointer"
-                            >
-                              Cancelar
-                            </button>
-                          )}
-                        </div>
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#002777] bg-blue-50 border border-blue-200"
+                        >
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#002777]" />
+                          <span>
+                            {downloadTasks[m.id]?.progress ? `${downloadTasks[m.id].progress}%` : 'Descargando…'}
+                          </span>
+                        </button>
                       ) : (
                         <button
                           type="button"

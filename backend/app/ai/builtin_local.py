@@ -63,22 +63,58 @@ def get_active_downloads_status() -> List[Dict[str, Any]]:
         return list(_ACTIVE_DOWNLOADS.values())
 
 
+def prepare_builtin_download(model_id: str) -> Optional[str]:
+    """Synchronously initializes download tracking to 0% before background thread starts."""
+    meta = resolve_model_meta(model_id)
+    if not meta:
+        return None
+    canonical_id = meta["id"]
+    with _DOWNLOAD_LOCK:
+        _CANCEL_EVENTS.pop(canonical_id, None)
+        _ACTIVE_DOWNLOADS[canonical_id] = {
+            "id": canonical_id,
+            "title": f"Descargando {meta['name']}",
+            "filename": meta["filename"],
+            "progress": 0,
+            "status": "downloading",
+            "stageText": "Conectando con el repositorio...",
+            "speedOrSize": "0 MB",
+            "eta": None,
+        }
+    return canonical_id
+
+
 def cancel_builtin_model_download(model_id: str) -> bool:
-    """Signals cancellation to an active download."""
+    """Signals cancellation to an active download and cleans up partial download files."""
     clean_id = model_id.strip()
     with _DOWNLOAD_LOCK:
         event = _CANCEL_EVENTS.get(clean_id)
+        if not event:
+            meta = resolve_model_meta(model_id)
+            if meta and meta.get("id") in _CANCEL_EVENTS:
+                clean_id = meta["id"]
+                event = _CANCEL_EVENTS.get(clean_id)
+
         if event:
             event.set()
             if clean_id in _ACTIVE_DOWNLOADS:
                 _ACTIVE_DOWNLOADS[clean_id]["status"] = "cancelled"
-                _ACTIVE_DOWNLOADS[clean_id]["stageText"] = "Cancelando descarga..."
+                _ACTIVE_DOWNLOADS[clean_id]["progress"] = 0
+                _ACTIVE_DOWNLOADS[clean_id]["stageText"] = "Descarga cancelada por el usuario"
             logger.info(f"Cancellation requested for built-in model download: {clean_id}")
-            return True
-        # Check by filename / alias if necessary
-        meta = resolve_model_meta(model_id)
-        if meta and meta.get("id") in _CANCEL_EVENTS:
-            _CANCEL_EVENTS[meta["id"]].set()
+
+            # Eagerly delete partial .download file if present
+            meta = resolve_model_meta(clean_id)
+            if meta:
+                cache_dir = get_builtin_cache_dir()
+                filename = meta["filename"]
+                tmp_file = cache_dir / f"{filename}.download"
+                if tmp_file.exists():
+                    try:
+                        tmp_file.unlink()
+                        logger.info(f"Removed partial download file: {tmp_file}")
+                    except Exception:
+                        pass
             return True
     return False
 
@@ -149,6 +185,12 @@ def download_builtin_model_file(
         logger.info(f"Built-in model '{model_id}' already exists at {target_file}")
         return target_file
 
+    if tmp_file.exists():
+        try:
+            tmp_file.unlink()
+        except Exception:
+            pass
+
     cancel_event = threading.Event()
     start_time = time.time()
     last_update_time = 0.0
@@ -193,7 +235,7 @@ def download_builtin_model_file(
                     downloaded += len(chunk)
 
                     now = time.time()
-                    if now - last_update_time >= 0.4:
+                    if now - last_update_time >= 0.2:
                         last_update_time = now
                         elapsed = max(0.1, now - start_time)
                         speed_mb = (downloaded / (1024 * 1024)) / elapsed
@@ -286,5 +328,10 @@ def delete_builtin_model_file(model_id: str) -> bool:
             tmp_file.unlink()
         except Exception:
             pass
+
+    with _DOWNLOAD_LOCK:
+        _ACTIVE_DOWNLOADS.pop(model_id, None)
+        if meta and meta.get("id"):
+            _ACTIVE_DOWNLOADS.pop(meta["id"], None)
 
     return deleted

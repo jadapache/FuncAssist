@@ -39,7 +39,6 @@ export type WritingModelSectionProps = {
   fetchLocalBuiltinModels?: () => Promise<void>
   handleDownloadBuiltinModel?: (modelId: string) => Promise<void>
   handleDeleteBuiltinModel?: (modelId: string) => Promise<void>
-  handleCancelBuiltinDownload?: (modelId: string) => Promise<void>
   downloadTasks?: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string }>
   catalogModels: ModelCatalogItem[]
   groqKey: string
@@ -85,7 +84,6 @@ export const WritingModelSection = ({
   fetchLocalBuiltinModels,
   handleDownloadBuiltinModel,
   handleDeleteBuiltinModel,
-  handleCancelBuiltinDownload,
   downloadTasks,
 
   catalogModels,
@@ -217,7 +215,6 @@ export const WritingModelSection = ({
               fetchLocalBuiltinModels={fetchLocalBuiltinModels}
               handleDownloadBuiltinModel={handleDownloadBuiltinModel}
               handleDeleteBuiltinModel={handleDeleteBuiltinModel}
-              handleCancelBuiltinDownload={handleCancelBuiltinDownload}
               downloadTasks={downloadTasks}
             />
           )}

@@ -69,7 +69,8 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   // Dynamic jobs collection in memory
   const [jobsMap, setJobsMap] = useState<Record<string, BackgroundJobItem>>({})
   const sseConnectionsRef = useRef<Record<string, EventSource>>({})
-  const pollTimerRef = useRef<number | null>(null)
+
+  const dismissTimersRef = useRef<Record<string, number>>({})
 
   // 1. Helper to add or update any job
   const addOrUpdateJob = useCallback((job: BackgroundJobItem) => {
@@ -84,6 +85,10 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // 2. Helper to remove a job (dismiss)
   const removeJob = useCallback((id: string) => {
+    if (dismissTimersRef.current[id]) {
+      window.clearTimeout(dismissTimersRef.current[id])
+      delete dismissTimersRef.current[id]
+    }
     setJobsMap((prev) => {
       const copy = { ...prev }
       delete copy[id]
@@ -98,30 +103,30 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   // 3. Cancel a job by ID
   const cancelJob = useCallback(
     async (id: string) => {
-      const current = jobsMap[id]
-      if (!current) return
+      const current = jobsMapRef.current[id]
 
-      // Set cancelled status immediately in UI
+      // Set cancelled status immediately in UI and reset progress
       setJobsMap((prev) => {
         if (!prev[id]) return prev
         return {
           ...prev,
           [id]: {
             ...prev[id],
+            progress: 0,
             status: 'cancelled',
-            stageText: 'Operación cancelada por el usuario',
+            stageText: 'Descarga cancelada por el usuario',
           },
         }
       })
 
-      if (current.type === 'download') {
+      if (current?.type === 'download' || !current) {
         try {
           await api.cancelBuiltinModelDownload(id)
           toast.info(`Descarga del modelo ${id} cancelada.`)
         } catch (e) {
           console.warn(`Error al cancelar descarga ${id}:`, e)
         }
-      } else if (current.type === 'transcription') {
+      } else if (current?.type === 'transcription') {
         try {
           await transcriptionApi.cancelTranscription(id)
           toast.info('Transcripción cancelada.')
@@ -135,29 +140,50 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       // Auto-remove cancelled job card after 3 seconds if not dismissed manually
-      setTimeout(() => {
+      if (dismissTimersRef.current[id]) {
+        window.clearTimeout(dismissTimersRef.current[id])
+      }
+      dismissTimersRef.current[id] = window.setTimeout(() => {
         removeJob(id)
+        delete dismissTimersRef.current[id]
       }, 3000)
     },
-    [jobsMap, toast]
+    [removeJob, toast]
   )
 
   // 4. Register a download job immediately
   const registerDownloadJob = useCallback(
     (modelId: string, title?: string) => {
-      addOrUpdateJob({
-        id: modelId,
-        type: 'download',
-        title: title || `Descargando modelo ${modelId}`,
-        progress: 1,
-        status: 'uploading',
-        stageText: 'Iniciando descarga en segundo plano...',
-        speedOrSize: 'Iniciando...',
-        onCancel: () => void cancelJob(modelId),
-        onDismiss: () => removeJob(modelId),
+      // Clear any pending dismissal timeout
+      if (dismissTimersRef.current[modelId]) {
+        window.clearTimeout(dismissTimersRef.current[modelId])
+        delete dismissTimersRef.current[modelId]
+      }
+      // **COMPLETELY RESET** the job - remove any stale state (cancelled, failed, etc.)
+      // This ensures a fresh start when retrying a download
+      setJobsMap((prev) => {
+        // Remove the old entry completely first
+        const copy = { ...prev }
+        delete copy[modelId]
+        
+        // Then add fresh job
+        return {
+          ...copy,
+          [modelId]: {
+            id: modelId,
+            type: 'download',
+            title: title || `Descargando modelo ${modelId}`,
+            progress: 1,
+            status: 'uploading',
+            stageText: 'Iniciando descarga en segundo plano...',
+            speedOrSize: 'Iniciando...',
+            onCancel: () => void cancelJob(modelId),
+            onDismiss: () => removeJob(modelId),
+          },
+        }
       })
     },
-    [addOrUpdateJob, cancelJob, removeJob]
+    [cancelJob, removeJob]
   )
 
   // 5. Restore active transcription jobs from localStorage on first mount
@@ -190,78 +216,86 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [addOrUpdateJob, cancelJob, navigate, removeJob])
 
+  const jobsMapRef = useRef(jobsMap)
+  jobsMapRef.current = jobsMap
+
   // 6. Polling loop for active model downloads
   useEffect(() => {
-    const hasActiveDownloads = Object.values(jobsMap).some(
-      (j) => j.type === 'download' && j.status !== 'complete' && j.status !== 'failed' && j.status !== 'cancelled'
-    )
+    const pollInterval = window.setInterval(async () => {
+      const hasActive = Object.values(jobsMapRef.current).some(
+        (j) => j.type === 'download' && j.status !== 'complete' && j.status !== 'failed' && j.status !== 'cancelled'
+      )
+      if (!hasActive) return
 
-    if (!hasActiveDownloads) {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current)
-        pollTimerRef.current = null
-      }
-      return
-    }
-
-    const pollDownloads = async () => {
       try {
         const res = await api.getBuiltinDownloadTasks()
         if (res.ok && Array.isArray(res.tasks)) {
-          for (const t of res.tasks) {
-            setJobsMap((prev) => {
-              const existing = prev[t.id]
-              // If user cancelled locally or backend returned cancelled, do not revert to uploading
-              if (existing?.status === 'cancelled' && t.status === 'downloading') {
-                return prev
+          setJobsMap((prev) => {
+            const next = { ...prev }
+            let hasChanges = false
+
+            for (const t of res.tasks) {
+              const current = prev[t.id]
+              // If local job was cancelled by user, avoid reverting to uploading
+              if (current?.status === 'cancelled' && t.status === 'downloading') {
+                continue
               }
+
               const isComplete = t.status === 'complete'
               const isFailed = t.status === 'failed'
-              const isCancelled = t.status === 'cancelled' || existing?.status === 'cancelled'
+              const isCancelled = t.status === 'cancelled'
 
-              return {
-                ...prev,
-                [t.id]: {
+              const newStatus: BackgroundJobItem['status'] = isComplete
+                ? 'complete'
+                : isFailed
+                ? 'failed'
+                : isCancelled
+                ? 'cancelled'
+                : 'uploading'
+              const newProgress = isComplete ? 100 : Math.max(0, t.progress)
+              const newStageText = isCancelled
+                ? 'Descarga cancelada por el usuario'
+                : t.stageText || 'Descargando modelo...'
+              const newSpeedOrSize = t.speedOrSize || current?.speedOrSize || null
+              const newEta = isCancelled || isComplete ? null : t.eta
+
+              if (
+                !current ||
+                current.progress !== newProgress ||
+                current.status !== newStatus ||
+                current.stageText !== newStageText ||
+                current.speedOrSize !== newSpeedOrSize ||
+                current.eta !== newEta
+              ) {
+                next[t.id] = {
+                  ...(current || {}),
                   id: t.id,
                   type: 'download',
-                  title: t.title,
-                  progress: isComplete ? 100 : t.progress,
-                  status: isComplete
-                    ? 'complete'
-                    : isFailed
-                    ? 'failed'
-                    : isCancelled
-                    ? 'cancelled'
-                    : 'uploading',
-                  stageText: isCancelled
-                    ? 'Descarga cancelada por el usuario'
-                    : t.stageText || 'Descargando modelo...',
-                  speedOrSize: t.speedOrSize,
-                  eta: isCancelled || isComplete ? null : t.eta,
+                  title: current?.title || t.title,
+                  progress: newProgress,
+                  status: newStatus,
+                  stageText: newStageText,
+                  speedOrSize: newSpeedOrSize,
+                  eta: newEta,
                   onCancel: () => void cancelJob(t.id),
                   onDismiss: () => removeJob(t.id),
-                },
+                }
+                hasChanges = true
               }
-            })
-          }
+            }
+
+            return hasChanges ? next : prev
+          })
         }
       } catch {
         // silent polling catch
       }
-    }
-
-    pollTimerRef.current = window.setInterval(() => {
-      void pollDownloads()
-    }, 800)
-    void pollDownloads()
+    }, 500)
 
     return () => {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current)
-        pollTimerRef.current = null
-      }
+      window.clearInterval(pollInterval)
     }
-  }, [addOrUpdateJob, cancelJob, jobsMap, removeJob])
+  }, [cancelJob, removeJob])
 
   // 7. SSE management for active transcriptions
   useEffect(() => {

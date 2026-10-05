@@ -78,8 +78,26 @@ def get_active_whisper_downloads() -> List[Dict[str, Any]]:
     return list(_WHISPER_DOWNLOADS.values())
 
 
+def prepare_whisper_download(model_id: str) -> str:
+  """Synchronously initializes Whisper download tracking to 0% before background thread starts."""
+  clean_id = model_id.replace("whisper-", "").strip().lower()
+  with _WHISPER_LOCK:
+    _WHISPER_CANCEL_EVENTS.pop(clean_id, None)
+    _WHISPER_DOWNLOADS[clean_id] = {
+      "id": clean_id,
+      "title": f"Descargando Whisper {clean_id.title()}",
+      "type": "download",
+      "progress": 0,
+      "status": "downloading",
+      "stageText": "Conectando con el repositorio...",
+      "speedOrSize": "0 MB",
+      "eta": None,
+    }
+  return clean_id
+
+
 def cancel_whisper_download(model_id: str) -> bool:
-  """Cancels an active Whisper model download."""
+  """Cancels an active Whisper model download and removes partial download files."""
   clean = model_id.replace("whisper-", "").strip().lower()
   with _WHISPER_LOCK:
     event = _WHISPER_CANCEL_EVENTS.get(clean)
@@ -87,8 +105,18 @@ def cancel_whisper_download(model_id: str) -> bool:
       event.set()
       if clean in _WHISPER_DOWNLOADS:
         _WHISPER_DOWNLOADS[clean]["status"] = "cancelled"
+        _WHISPER_DOWNLOADS[clean]["progress"] = 0
         _WHISPER_DOWNLOADS[clean]["stageText"] = "Descarga cancelada por el usuario"
       logger.info(f"Cancellation requested for Whisper model {clean}")
+
+      cache_dir = get_whisper_cache_dir()
+      tmp_file = cache_dir / f"{clean}.pt.download"
+      if tmp_file.exists():
+        try:
+          tmp_file.unlink()
+          logger.info(f"Removed partial Whisper download file: {tmp_file}")
+        except Exception:
+          pass
       return True
   return False
 
@@ -112,6 +140,12 @@ def download_model_file(
   if target_file.exists() and target_file.stat().st_size > 1024 * 1024:
     logger.info(f"Whisper model {clean_id} already exists at {target_file}")
     return target_file
+
+  if tmp_file.exists():
+    try:
+      tmp_file.unlink()
+    except Exception:
+      pass
 
   cancel_event = threading.Event()
   start_time = time.time()
@@ -152,7 +186,7 @@ def download_model_file(
           downloaded += len(chunk)
 
           now = time.time()
-          if now - last_update_time >= 0.4:
+          if now - last_update_time >= 0.2:
             last_update_time = now
             elapsed = max(0.1, now - start_time)
             speed_mb = (downloaded / (1024 * 1024)) / elapsed
@@ -237,6 +271,9 @@ def delete_model_file(model_id: str) -> bool:
       tmp_file.unlink()
     except Exception:
       pass
+
+  with _WHISPER_LOCK:
+    _WHISPER_DOWNLOADS.pop(model_id, None)
 
   return deleted
 

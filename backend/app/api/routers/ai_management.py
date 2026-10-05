@@ -13,6 +13,7 @@ from app.features.transcription.whisper_local import (
     download_model_file,
     get_active_whisper_downloads,
     get_local_models_info,
+    prepare_whisper_download,
 )
 from app.ai.builtin_local import (
     cancel_builtin_model_download,
@@ -21,6 +22,7 @@ from app.ai.builtin_local import (
     get_active_downloads_status,
     get_builtin_cache_dir,
     get_builtin_models_info,
+    prepare_builtin_download,
     resolve_model_meta,
 )
 
@@ -182,8 +184,9 @@ async def list_whisper_models() -> dict[str, Any]:
 @handle_grounded_errors
 async def download_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
     """Download a local Whisper model to disk cache."""
+    clean_id = model_id.replace("whisper-", "").strip().lower()
+    prepare_whisper_download(clean_id)
     try:
-        clean_id = model_id.replace("whisper-", "")
         path = await asyncio.to_thread(download_model_file, clean_id)
         return {
             "ok": True,
@@ -245,6 +248,7 @@ async def cancel_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
 @handle_grounded_errors
 async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
     """Download a local built-in LLM model directly from Hugging Face into disk cache without Ollama."""
+    prepare_builtin_download(model_id)
     try:
         path = await asyncio.to_thread(download_builtin_model_file, model_id)
         return {

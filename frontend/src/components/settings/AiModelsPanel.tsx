@@ -70,7 +70,6 @@ export const AiModelsPanel = () => {
     fetchLocalBuiltinModels,
     handleDownloadBuiltinModel,
     handleDeleteBuiltinModel,
-    handleCancelBuiltinDownload,
     downloadTasks,
   } = useAiSettingsManager()
 
@@ -139,7 +138,6 @@ export const AiModelsPanel = () => {
         fetchLocalBuiltinModels={fetchLocalBuiltinModels}
         handleDownloadBuiltinModel={handleDownloadBuiltinModel}
         handleDeleteBuiltinModel={handleDeleteBuiltinModel}
-        handleCancelBuiltinDownload={handleCancelBuiltinDownload}
         downloadTasks={downloadTasks}
         catalogModels={catalogModels}
         groqKey={groqKey}
@@ -183,6 +181,7 @@ export const AiModelsPanel = () => {
         fetchLocalWhisperModels={fetchLocalWhisperModels}
         handleDownloadWhisperModel={handleDownloadWhisperModel}
         handleDeleteWhisperModel={handleDeleteWhisperModel}
+        downloadTasks={downloadTasks}
       />
     </div>
   )
