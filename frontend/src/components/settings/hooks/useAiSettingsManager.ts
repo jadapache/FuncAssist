@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type AISettings, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
+import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 
@@ -12,7 +12,7 @@ export function useAiSettingsManager() {
 
   // Provider state: 'builtin' | 'ollama' | 'groq' | 'gemini' | 'openai' | 'claude'
   const [provider, setProvider] = useState<string>('builtin')
-  const [model, setModel] = useState<string>('qwen3.5:2b')
+  const [model, setModel] = useState<string>('qwen2.5:3b')
 
   // Collapsible panels
   const [isWritingOpen, setIsWritingOpen] = useState(true)
@@ -35,6 +35,12 @@ export function useAiSettingsManager() {
   const [downloadingWhisperId, setDownloadingWhisperId] = useState<string | null>(null)
   const [deletingWhisperId, setDeletingWhisperId] = useState<string | null>(null)
   const [fetchingWhisperModels, setFetchingWhisperModels] = useState(false)
+
+  // Local Built-in GGUF models & download state (standalone without Ollama)
+  const [localBuiltinModels, setLocalBuiltinModels] = useState<LocalBuiltinModelInfo[]>([])
+  const [downloadingBuiltinId, setDownloadingBuiltinId] = useState<string | null>(null)
+  const [deletingBuiltinId, setDeletingBuiltinId] = useState<string | null>(null)
+  const [fetchingBuiltinModels, setFetchingBuiltinModels] = useState(false)
 
   // API Keys & credentials
   const [groqKey, setGroqKey] = useState('')
@@ -114,6 +120,20 @@ export function useAiSettingsManager() {
     }
   }, [])
 
+  const fetchLocalBuiltinModels = useCallback(async () => {
+    setFetchingBuiltinModels(true)
+    try {
+      const res = await api.listBuiltinModels()
+      if (res.ok && res.models) {
+        setLocalBuiltinModels(res.models)
+      }
+    } catch (e) {
+      console.error('Error fetching local builtin models:', e)
+    } finally {
+      setFetchingBuiltinModels(false)
+    }
+  }, [])
+
   useEffect(() => {
     let isMounted = true
     const load = async () => {
@@ -178,9 +198,10 @@ export function useAiSettingsManager() {
           setOllamaUrl('')
         }
 
-        // Fetch local Ollama and Whisper models silently in background
+        // Fetch local Ollama, Whisper and Built-in models silently in background
         void fetchOllamaModels(settings.ollama_base_url || 'http://localhost:11434', false)
         void fetchLocalWhisperModels()
+        void fetchLocalBuiltinModels()
       } catch (err) {
         if (isMounted) {
           toast.error(err instanceof Error ? err.message : 'Error al cargar la configuración del sistema')
@@ -196,7 +217,7 @@ export function useAiSettingsManager() {
     return () => {
       isMounted = false
     }
-  }, [fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
+  }, [fetchLocalBuiltinModels, fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
 
   const handleDownloadWhisperModel = async (modelId: string) => {
     setDownloadingWhisperId(modelId)
@@ -228,6 +249,43 @@ export function useAiSettingsManager() {
       toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
     } finally {
       setDeletingWhisperId(null)
+    }
+  }
+
+  const handleDownloadBuiltinModel = async (modelId: string) => {
+    setDownloadingBuiltinId(modelId)
+    try {
+      toast.info(`Iniciando descarga de modelo ${modelId} a disco local.`)
+      const res = await api.downloadBuiltinModel(modelId)
+      if (res.ok) {
+        toast.success(res.message || `Modelo ${modelId} descargado correctamente en tu disco.`)
+        await fetchLocalBuiltinModels()
+        await loadDynamicCatalog(true)
+      } else {
+        toast.error(res.message || `Error al descargar modelo ${modelId}`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
+    } finally {
+      setDownloadingBuiltinId(null)
+    }
+  }
+
+  const handleDeleteBuiltinModel = async (modelId: string) => {
+    setDeletingBuiltinId(modelId)
+    try {
+      const res = await api.deleteBuiltinModel(modelId)
+      if (res.ok) {
+        toast.success(res.message || `Modelo ${modelId} eliminado del disco.`)
+        await fetchLocalBuiltinModels()
+        await loadDynamicCatalog(true)
+      } else {
+        toast.error(res.message || `Error al eliminar modelo ${modelId}`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
+    } finally {
+      setDeletingBuiltinId(null)
     }
   }
 
@@ -462,6 +520,13 @@ export function useAiSettingsManager() {
     fetchLocalWhisperModels,
     handleDownloadWhisperModel,
     handleDeleteWhisperModel,
+    localBuiltinModels,
+    downloadingBuiltinId,
+    deletingBuiltinId,
+    fetchingBuiltinModels,
+    fetchLocalBuiltinModels,
+    handleDownloadBuiltinModel,
+    handleDeleteBuiltinModel,
     savingAi,
     testingConnection,
     handleAiSave,

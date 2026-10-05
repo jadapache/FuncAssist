@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Zap,
 } from 'lucide-react'
-import type { AISettings, ModelCatalogItem } from '../../api/client'
+import type { AISettings, LocalBuiltinModelInfo, ModelCatalogItem } from '../../api/client'
 import { BUILT_IN_MODELS } from './constants'
 import { BuiltinModelsList } from './writing/BuiltinModelsList'
 import { CloudModelSelector } from './writing/CloudModelSelector'
@@ -31,11 +31,15 @@ export type WritingModelSectionProps = {
   fetchOllamaModels: (url?: string, isUserAction?: boolean) => Promise<void>
   isPulling: boolean
   pullingModelTag: string | null
-  deletingModelTag?: string | null
   pullStatusMsg: string | null
   handlePullModel: (tag: string) => Promise<void>
-  handleDeleteModel?: (tag: string) => Promise<void>
-  isModelDownloaded: (tag: string) => boolean
+  localBuiltinModels?: LocalBuiltinModelInfo[]
+  downloadingBuiltinId?: string | null
+  deletingBuiltinId?: string | null
+  fetchingBuiltinModels?: boolean
+  fetchLocalBuiltinModels?: () => Promise<void>
+  handleDownloadBuiltinModel?: (modelId: string) => Promise<void>
+  handleDeleteBuiltinModel?: (modelId: string) => Promise<void>
   catalogModels: ModelCatalogItem[]
   groqKey: string
   setGroqKey: (k: string) => void
@@ -71,11 +75,15 @@ export const WritingModelSection = ({
   fetchOllamaModels,
   isPulling,
   pullingModelTag,
-  deletingModelTag,
   pullStatusMsg,
   handlePullModel,
-  handleDeleteModel,
-  isModelDownloaded,
+  localBuiltinModels,
+  downloadingBuiltinId,
+  deletingBuiltinId,
+  fetchingBuiltinModels,
+  fetchLocalBuiltinModels,
+  handleDownloadBuiltinModel,
+  handleDeleteBuiltinModel,
   catalogModels,
   groqKey,
   setGroqKey,
@@ -194,13 +202,13 @@ export const WritingModelSection = ({
               builtinModelsList={builtinModelsList}
               model={model}
               setModel={setModel}
-              isPulling={isPulling}
-              pullingModelTag={pullingModelTag}
-              deletingModelTag={deletingModelTag}
-              pullStatusMsg={pullStatusMsg}
-              handlePullModel={handlePullModel}
-              handleDeleteModel={handleDeleteModel}
-              isModelDownloaded={isModelDownloaded}
+              localBuiltinModels={localBuiltinModels}
+              downloadingBuiltinId={downloadingBuiltinId}
+              deletingBuiltinId={deletingBuiltinId}
+              fetchingBuiltinModels={fetchingBuiltinModels}
+              fetchLocalBuiltinModels={fetchLocalBuiltinModels}
+              handleDownloadBuiltinModel={handleDownloadBuiltinModel}
+              handleDeleteBuiltinModel={handleDeleteBuiltinModel}
             />
           )}
 

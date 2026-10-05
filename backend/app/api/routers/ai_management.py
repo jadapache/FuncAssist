@@ -12,6 +12,13 @@ from app.features.transcription.whisper_local import (
     download_model_file,
     get_local_models_info,
 )
+from app.ai.builtin_local import (
+    delete_builtin_model_file,
+    download_builtin_model_file,
+    get_builtin_cache_dir,
+    get_builtin_models_info,
+    resolve_model_meta,
+)
 
 router = APIRouter(prefix="/ai", tags=["ai-management"])
 
@@ -49,6 +56,31 @@ async def test_ai_connection(body: AITestConnectionRequest = Body(...)) -> dict[
         return {
             "ok": False,
             "message": f"No hay un modelo especificado para el proveedor '{provider_name}'.",
+        }
+
+    if provider_name == "builtin":
+        meta = resolve_model_meta(model_name)
+        if not meta:
+            return {
+                "ok": False,
+                "message": f"Modelo integrado '{model_name}' no reconocido en el catálogo.",
+            }
+        cache_dir = get_builtin_cache_dir()
+        target_file = cache_dir / meta["filename"]
+        if not target_file.exists() or target_file.stat().st_size < 10 * 1024 * 1024:
+            return {
+                "ok": False,
+                "message": (
+                    f"El modelo local '{meta['name']}' no está descargado todavía en disco. "
+                    "Haz clic en el botón 'Descargar' en la sección de Modelos Integrados para instalarlo."
+                ),
+            }
+        disk_size = round(target_file.stat().st_size / (1024 * 1024), 1)
+        return {
+            "ok": True,
+            "message": f"Modelo integrado '{meta['name']}' verificado en disco ({disk_size} MB) y listo para uso local.",
+            "provider": "builtin",
+            "model": meta["id"],
         }
 
     test_messages = [AIMessage(role="user", content="Hola, responde únicamente con la palabra 'OK'.")]
@@ -171,3 +203,41 @@ async def delete_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
         return {"ok": True, "message": f"Modelo Whisper {clean_id} eliminado del disco con éxito."}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error eliminando modelo Whisper {model_id}: {exc}") from exc
+
+
+@router.get("/builtin/models")
+@handle_grounded_errors
+async def list_builtin_models() -> dict[str, Any]:
+    """List all local built-in LLM models and their download status on disk (without Ollama)."""
+    models = get_builtin_models_info()
+    return {"ok": True, "models": models}
+
+
+@router.post("/builtin/download/{model_id:path}")
+@handle_grounded_errors
+async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
+    """Download a local built-in LLM model directly from Hugging Face into disk cache without Ollama."""
+    try:
+        path = await asyncio.to_thread(download_builtin_model_file, model_id)
+        return {
+            "ok": True,
+            "model_id": model_id,
+            "file_path": str(path),
+            "message": f"Modelo {model_id} descargado y listo para uso local.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error descargando modelo built-in {model_id}: {exc}") from exc
+
+
+@router.delete("/builtin/{model_id:path}")
+@handle_grounded_errors
+async def delete_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
+    """Delete a downloaded local built-in LLM model from disk to free space."""
+    try:
+        deleted = delete_builtin_model_file(model_id)
+        if not deleted:
+            return {"ok": True, "message": f"El modelo {model_id} no estaba descargado."}
+        return {"ok": True, "message": f"Modelo {model_id} eliminado del disco con éxito."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error eliminando modelo built-in {model_id}: {exc}") from exc
+
