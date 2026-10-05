@@ -237,8 +237,7 @@ const roleLabels: Record<UserRole, string> = {
   admin: 'Administrador',
   pm: 'Project Manager',
   funcional: 'Analista Funcional',
-  dev: 'Desarrollador',
-  qa: 'QA Engineer',
+  qa: 'Tester',
 }
 
 const UserDropdown = ({ displayName }: { displayName: string }) => {
@@ -348,7 +347,7 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
             }
           >
             <User className="h-4 w-4 shrink-0 text-slate-500" />
-            <span>Perfil & Rol</span>
+            <span>Perfil</span>
           </NavLink>
 
           <NavLink
@@ -400,10 +399,10 @@ export const TopNav = ({ displayName }: TopNavProps) => {
 
   const PM_GROUP = buildPmGroup(activeDisplayName)
 
-  const showPm = ['admin', 'pm', 'qa'].includes(role)
+  const showPm = ['admin', 'pm'].includes(role)
   const showFuncional = ['admin', 'funcional'].includes(role)
   const showQa = ['admin', 'qa'].includes(role)
-  const showKnowledge = ['admin', 'pm', 'dev', 'qa'].includes(role)
+  const showKnowledge = ['admin', 'pm', 'qa', 'funcional'].includes(role)
 
   return (
     <header className="sticky top-0 z-40 overflow-visible border-b border-[var(--color-border)] bg-white/90 backdrop-blur-xl">

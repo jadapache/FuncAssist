@@ -32,8 +32,8 @@ export const App = () => {
                   {/* Dashboard - all roles */}
                   <Route index element={<DashboardPage />} />
 
-                  {/* PM Routes - admin, pm, qa */}
-                  <Route element={<ProtectedRoute allowedRoles={['admin', 'pm', 'qa']} />}>
+                  {/* PM Routes - admin, pm */}
+                  <Route element={<ProtectedRoute allowedRoles={['admin', 'pm']} />}>
                     <Route path="pm/standup" element={<StandupPage />} />
                     <Route path="pm/:slug" element={<PmFeaturePage />} />
                   </Route>
@@ -52,8 +52,8 @@ export const App = () => {
                     <Route path="qa/:slug" element={<QaFeaturePage />} />
                   </Route>
 
-                  {/* Knowledge Routes - admin, pm, dev, qa */}
-                  <Route element={<ProtectedRoute allowedRoles={['admin', 'pm', 'dev', 'qa']} />}>
+                  {/* Knowledge Routes - admin, pm, dev, qa, funcional */}
+                  <Route element={<ProtectedRoute allowedRoles={['admin', 'pm', 'qa', 'funcional']} />}>
                     <Route path="knowledge" element={<KnowledgePage />} />
                     <Route path="knowledge/ask" element={<AskProductPage />} />
                   </Route>

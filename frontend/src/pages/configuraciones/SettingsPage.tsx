@@ -40,8 +40,8 @@ export const SettingsPage = () => {
     }
   }, [searchParams])
 
-  // Filter tabs based on role if needed (e.g. integrations for admin & pm)
-  const canSeeIntegrations = ['admin', 'pm'].includes(role)
+  // Filter tabs based on role (integrations accessible to admin, pm, funcional, qa)
+  const canSeeIntegrations = ['admin', 'pm', 'funcional', 'qa'].includes(role)
 
   const TABS: SettingsTabItem[] = [
     {

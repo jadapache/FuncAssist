@@ -23,8 +23,7 @@ const roleLabels: Record<UserRole, string> = {
   admin: 'Administrador',
   pm: 'Project Manager',
   funcional: 'Analista Funcional',
-  dev: 'Desarrollador',
-  qa: 'QA Engineer',
+  qa: 'Tester',
 }
 
 export const ProfilePage = () => {

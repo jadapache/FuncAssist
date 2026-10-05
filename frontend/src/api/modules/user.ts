@@ -1,6 +1,6 @@
 import { API_BASE, handleResponse } from '../client'
 
-export type UserRole = 'admin' | 'pm' | 'funcional' | 'dev' | 'qa'
+export type UserRole = 'admin' | 'pm' | 'funcional' | 'qa'
 
 export interface UserProfile {
   display_name: string
