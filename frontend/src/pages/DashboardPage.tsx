@@ -71,13 +71,13 @@ export const DashboardPage = () => {
   const totalIntegrations = integrations.length
 
   const readiness = useMemo(() => {
-    let score = 20
+    let score = 10
     if (backendOk) score += 25
-    if (jira?.status === 'connected') score += 25
-    if (github?.status === 'connected') score += 20
-    if (aiConfigured) score += 10
+    if (jira?.status === 'connected') score += 15
+    if (connectedCount > 2) score += 30
+    if (aiConfigured) score += 20
     return Math.min(score, 100)
-  }, [backendOk, jira, github, aiConfigured])
+  }, [backendOk, jira, connectedCount, aiConfigured])
 
   const { user } = useUser()
   const role = user?.user_role || 'admin'
@@ -99,14 +99,18 @@ export const DashboardPage = () => {
             </p>
           </div>
 
-          <div className="flex shrink-0 flex-col items-start gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-md md:items-end">
-            <div className="flex items-center gap-2 text-sm text-blue-100">
-              <Bot className="h-4 w-4" aria-hidden />
+          <div className="flex shrink-0 flex-col items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-md">
+            <div className="w-full text-center text-sm font-medium text-blue-100">
               Estado del sistema
             </div>
-            <div className="flex items-end gap-2">
-              <span className="text-4xl font-bold">{readiness}%</span>
-              <span className="mb-1 text-xs text-blue-200">listo</span>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-cyan-300 shadow-sm backdrop-blur-sm">
+                <Bot className="h-6 w-6" aria-hidden />
+              </div>
+              <div className="flex items-end gap-1.5">
+                <span className="text-4xl font-bold">{readiness}%</span>
+                <span className="mb-1 text-xs text-blue-200">listo</span>
+              </div>
             </div>
             <div className="h-2 w-full min-w-[180px] overflow-hidden rounded-full bg-white/20">
               <div
