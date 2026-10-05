@@ -225,17 +225,22 @@ export function useAiSettingsManager() {
   }, [fetchLocalBuiltinModels, fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
 
   const handleDownloadWhisperModel = async (modelId: string) => {
-    setDownloadingWhisperId(modelId)
+    const cleanId = modelId.replace('whisper-', '').trim()
+    setDownloadingWhisperId(cleanId)
+    registerDownloadJob(cleanId, `Descargando Whisper ${cleanId.toUpperCase()}`)
     try {
-      toast.info(`Iniciando descarga de Whisper ${modelId}... Esto puede demorar según tu conexión.`)
-      const res = await api.downloadWhisperModel(modelId)
+      toast.info(`Iniciando descarga de Whisper ${cleanId}... Esto puede demorar según tu conexión.`)
+      const res = await api.downloadWhisperModel(cleanId)
       if (res.ok) {
-        toast.success(res.message || `Modelo Whisper ${modelId} descargado correctamente.`)
+        toast.success(res.message || `Modelo Whisper ${cleanId} descargado correctamente.`)
         await fetchLocalWhisperModels()
         await loadDynamicCatalog(true)
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
+      const isCancelled = err instanceof Error && err.message.toLowerCase().includes('cancel')
+      if (!isCancelled) {
+        toast.error(err instanceof Error ? err.message : `Error descargando modelo ${cleanId}`)
+      }
     } finally {
       setDownloadingWhisperId(null)
     }

@@ -8,8 +8,10 @@ from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import get_ai_settings, resolve_provider
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.features.transcription.whisper_local import (
+    cancel_whisper_download,
     delete_model_file,
     download_model_file,
+    get_active_whisper_downloads,
     get_local_models_info,
 )
 from app.ai.builtin_local import (
@@ -218,16 +220,19 @@ async def list_builtin_models() -> dict[str, Any]:
 @router.get("/builtin/tasks")
 @handle_grounded_errors
 async def get_builtin_download_tasks() -> dict[str, Any]:
-    """Get active download tasks and progress for built-in models."""
-    tasks = get_active_downloads_status()
-    return {"ok": True, "tasks": tasks}
+    """Get active download tasks and progress for all built-in models (LLMs and Whisper)."""
+    llm_tasks = get_active_downloads_status()
+    whisper_tasks = get_active_whisper_downloads()
+    return {"ok": True, "tasks": llm_tasks + whisper_tasks}
 
 
 @router.post("/builtin/cancel/{model_id:path}")
 @handle_grounded_errors
 async def cancel_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
-    """Cancel an ongoing download of a built-in model."""
+    """Cancel an ongoing download of a built-in model (LLM or Whisper)."""
     cancelled = cancel_builtin_model_download(model_id)
+    if not cancelled:
+        cancelled = cancel_whisper_download(model_id)
     return {
         "ok": cancelled,
         "model_id": model_id,

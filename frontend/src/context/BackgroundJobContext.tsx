@@ -101,39 +101,30 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       const current = jobsMap[id]
       if (!current) return
 
+      // Set cancelled status immediately in UI
+      setJobsMap((prev) => {
+        if (!prev[id]) return prev
+        return {
+          ...prev,
+          [id]: {
+            ...prev[id],
+            status: 'cancelled',
+            stageText: 'Operación cancelada por el usuario',
+          },
+        }
+      })
+
       if (current.type === 'download') {
         try {
           await api.cancelBuiltinModelDownload(id)
-          toast.info(`Cancelando descarga del modelo ${id}...`)
-          setJobsMap((prev) => {
-            if (!prev[id]) return prev
-            return {
-              ...prev,
-              [id]: {
-                ...prev[id],
-                status: 'cancelled',
-                stageText: 'Descarga cancelada por el usuario',
-              },
-            }
-          })
+          toast.info(`Descarga del modelo ${id} cancelada.`)
         } catch (e) {
           console.warn(`Error al cancelar descarga ${id}:`, e)
         }
       } else if (current.type === 'transcription') {
         try {
           await transcriptionApi.cancelTranscription(id)
-          toast.info('Cancelando transcripción...')
-          setJobsMap((prev) => {
-            if (!prev[id]) return prev
-            return {
-              ...prev,
-              [id]: {
-                ...prev[id],
-                status: 'cancelled',
-                stageText: 'Transcripción cancelada',
-              },
-            }
-          })
+          toast.info('Transcripción cancelada.')
           if (sseConnectionsRef.current[id]) {
             sseConnectionsRef.current[id].close()
             delete sseConnectionsRef.current[id]
@@ -142,6 +133,11 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
           console.warn(`Error al cancelar transcripción ${id}:`, e)
         }
       }
+
+      // Auto-remove cancelled job card after 3 seconds if not dismissed manually
+      setTimeout(() => {
+        removeJob(id)
+      }, 3000)
     },
     [jobsMap, toast]
   )
@@ -213,17 +209,39 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
         const res = await api.getBuiltinDownloadTasks()
         if (res.ok && Array.isArray(res.tasks)) {
           for (const t of res.tasks) {
-            addOrUpdateJob({
-              id: t.id,
-              type: 'download',
-              title: t.title,
-              progress: t.progress,
-              status: (t.status === 'downloading' ? 'uploading' : t.status) as any,
-              stageText: t.stageText || 'Descargando modelo GGUF...',
-              speedOrSize: t.speedOrSize,
-              eta: t.eta,
-              onCancel: () => void cancelJob(t.id),
-              onDismiss: () => removeJob(t.id),
+            setJobsMap((prev) => {
+              const existing = prev[t.id]
+              // If user cancelled locally or backend returned cancelled, do not revert to uploading
+              if (existing?.status === 'cancelled' && t.status === 'downloading') {
+                return prev
+              }
+              const isComplete = t.status === 'complete'
+              const isFailed = t.status === 'failed'
+              const isCancelled = t.status === 'cancelled' || existing?.status === 'cancelled'
+
+              return {
+                ...prev,
+                [t.id]: {
+                  id: t.id,
+                  type: 'download',
+                  title: t.title,
+                  progress: isComplete ? 100 : t.progress,
+                  status: isComplete
+                    ? 'complete'
+                    : isFailed
+                    ? 'failed'
+                    : isCancelled
+                    ? 'cancelled'
+                    : 'uploading',
+                  stageText: isCancelled
+                    ? 'Descarga cancelada por el usuario'
+                    : t.stageText || 'Descargando modelo...',
+                  speedOrSize: t.speedOrSize,
+                  eta: isCancelled || isComplete ? null : t.eta,
+                  onCancel: () => void cancelJob(t.id),
+                  onDismiss: () => removeJob(t.id),
+                },
+              }
             })
           }
         }
