@@ -1,7 +1,8 @@
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
+import type { BackgroundTaskItem } from '../../../features/transcription/components/FloatingTranscriptionToast'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 
 export function useAiSettingsManager() {
@@ -41,6 +42,9 @@ export function useAiSettingsManager() {
   const [downloadingBuiltinId, setDownloadingBuiltinId] = useState<string | null>(null)
   const [deletingBuiltinId, setDeletingBuiltinId] = useState<string | null>(null)
   const [fetchingBuiltinModels, setFetchingBuiltinModels] = useState(false)
+  const [downloadTasks, setDownloadTasks] = useState<Record<string, BackgroundTaskItem>>({})
+  const downloadPollTimerRef = useRef<number | null>(null)
+
 
   // API Keys & credentials
   const [groqKey, setGroqKey] = useState('')
@@ -252,24 +256,155 @@ export function useAiSettingsManager() {
     }
   }
 
+  const handleCancelBuiltinDownload = useCallback(async (modelId: string) => {
+    try {
+      await api.cancelBuiltinModelDownload(modelId)
+      toast.info(`Cancelando descarga del modelo ${modelId}...`)
+      setDownloadTasks((prev) => {
+        if (!prev[modelId]) return prev
+        return {
+          ...prev,
+          [modelId]: {
+            ...prev[modelId],
+            status: 'cancelled',
+            stageText: 'Descarga cancelada por el usuario',
+          },
+        }
+      })
+      setDownloadingBuiltinId(null)
+      void fetchLocalBuiltinModels()
+    } catch (e) {
+      console.warn(`Error cancelling download for ${modelId}:`, e)
+    }
+  }, [fetchLocalBuiltinModels, toast])
+
+  const handleDismissDownloadTask = useCallback((taskId: string) => {
+    setDownloadTasks((prev) => {
+      const copy = { ...prev }
+      delete copy[taskId]
+      return copy
+    })
+  }, [])
+
+  // Poll active download tasks whenever downloadingBuiltinId is active
+  useEffect(() => {
+    if (!downloadingBuiltinId) {
+      if (downloadPollTimerRef.current) {
+        clearInterval(downloadPollTimerRef.current)
+        downloadPollTimerRef.current = null
+      }
+      return
+    }
+
+    const poll = async () => {
+      try {
+        const res = await api.getBuiltinDownloadTasks()
+        if (res.ok && Array.isArray(res.tasks)) {
+          setDownloadTasks((prev) => {
+            const next = { ...prev }
+            for (const t of res.tasks) {
+              next[t.id] = {
+                id: t.id,
+                type: 'download',
+                title: t.title,
+                progress: t.progress,
+                status: (t.status === 'downloading' ? 'uploading' : t.status) as any,
+                stageText: t.stageText || 'Descargando modelo GGUF...',
+                speedOrSize: t.speedOrSize,
+                eta: t.eta,
+                onCancel: () => void handleCancelBuiltinDownload(t.id),
+                onDismiss: () => handleDismissDownloadTask(t.id),
+              }
+            }
+            return next
+          })
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
+
+    downloadPollTimerRef.current = window.setInterval(() => {
+      void poll()
+    }, 600)
+    void poll()
+
+    return () => {
+      if (downloadPollTimerRef.current) {
+        clearInterval(downloadPollTimerRef.current)
+        downloadPollTimerRef.current = null
+      }
+    }
+  }, [downloadingBuiltinId, handleCancelBuiltinDownload, handleDismissDownloadTask])
+
   const handleDownloadBuiltinModel = async (modelId: string) => {
     setDownloadingBuiltinId(modelId)
+    // Register initial task for immediate feedback in floating toast
+    setDownloadTasks((prev) => ({
+      ...prev,
+      [modelId]: {
+        id: modelId,
+        type: 'download',
+        title: `Descargando ${modelId}`,
+        progress: 1,
+        status: 'uploading',
+        stageText: 'Conectando con el repositorio...',
+        speedOrSize: 'Iniciando...',
+        onCancel: () => void handleCancelBuiltinDownload(modelId),
+        onDismiss: () => handleDismissDownloadTask(modelId),
+      },
+    }))
+
     try {
-      toast.info(`Iniciando descarga de modelo ${modelId} a disco local.`)
       const res = await api.downloadBuiltinModel(modelId)
       if (res.ok) {
         toast.success(res.message || `Modelo ${modelId} descargado correctamente en tu disco.`)
+        setDownloadTasks((prev) => ({
+          ...prev,
+          [modelId]: {
+            ...(prev[modelId] || { id: modelId, title: modelId, type: 'download' }),
+            progress: 100,
+            status: 'complete',
+            stageText: 'Descarga completada con éxito',
+            speedOrSize: 'Listo',
+            onDismiss: () => handleDismissDownloadTask(modelId),
+          },
+        }))
         await fetchLocalBuiltinModels()
         await loadDynamicCatalog(true)
       } else {
         toast.error(res.message || `Error al descargar modelo ${modelId}`)
+        setDownloadTasks((prev) => ({
+          ...prev,
+          [modelId]: {
+            ...(prev[modelId] || { id: modelId, title: modelId, type: 'download' }),
+            progress: 0,
+            status: 'failed',
+            stageText: res.message || 'Error en descarga',
+            onDismiss: () => handleDismissDownloadTask(modelId),
+          },
+        }))
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
+      const isCancelled = err instanceof Error && err.message.toLowerCase().includes('cancel')
+      if (!isCancelled) {
+        toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
+      }
+      setDownloadTasks((prev) => ({
+        ...prev,
+        [modelId]: {
+          ...(prev[modelId] || { id: modelId, title: modelId, type: 'download' }),
+          progress: 0,
+          status: isCancelled ? 'cancelled' : 'failed',
+          stageText: isCancelled ? 'Descarga cancelada' : (err instanceof Error ? err.message : 'Error en descarga'),
+          onDismiss: () => handleDismissDownloadTask(modelId),
+        },
+      }))
     } finally {
       setDownloadingBuiltinId(null)
     }
   }
+
 
   const handleDeleteBuiltinModel = async (modelId: string) => {
     setDeletingBuiltinId(modelId)
@@ -527,6 +662,9 @@ export function useAiSettingsManager() {
     fetchLocalBuiltinModels,
     handleDownloadBuiltinModel,
     handleDeleteBuiltinModel,
+    handleCancelBuiltinDownload,
+    handleDismissDownloadTask,
+    downloadTasks,
     savingAi,
     testingConnection,
     handleAiSave,
@@ -534,3 +672,4 @@ export function useAiSettingsManager() {
     handleVoiceAudioSave,
   }
 }
+

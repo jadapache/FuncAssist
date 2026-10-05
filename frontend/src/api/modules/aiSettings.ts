@@ -91,13 +91,35 @@ export const aiSettingsApi = {
       handleResponse<{ ok: boolean; models: Array<{ id: string; name: string; size: string; tokens?: string; description: string; filename?: string; is_downloaded: boolean; disk_size_mb: number; file_path: string | null }> }>(r),
     ),
 
+  getBuiltinDownloadTasks: () =>
+    fetch(`${API_BASE}/api/ai/builtin/tasks`).then((r) =>
+      handleResponse<{
+        ok: boolean
+        tasks: Array<{
+          id: string
+          title: string
+          progress: number
+          status: string
+          stageText?: string
+          speedOrSize?: string
+          eta?: string | null
+        }>
+      }>(r),
+    ),
+
   downloadBuiltinModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/builtin/download/${encodeURIComponent(modelId)}`, {
       method: 'POST',
     }).then((r) => handleResponse<{ ok: boolean; model_id: string; file_path: string; message: string }>(r)),
+
+  cancelBuiltinModelDownload: (modelId: string) =>
+    fetch(`${API_BASE}/api/ai/builtin/cancel/${encodeURIComponent(modelId)}`, {
+      method: 'POST',
+    }).then((r) => handleResponse<{ ok: boolean; model_id: string; message: string }>(r)),
 
   deleteBuiltinModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/builtin/${encodeURIComponent(modelId)}`, {
       method: 'DELETE',
     }).then((r) => handleResponse<{ ok: boolean; message: string }>(r)),
 }
+

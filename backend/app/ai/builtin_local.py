@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import urllib.request
 
+from app.core.settings import LOCAL_DIR
+
 logger = logging.getLogger(__name__)
+
+# Dedicated local JSON catalog path for built-in models
+BUILTIN_CATALOG_FILE = LOCAL_DIR / "ai" / "builtin_models_catalog.json"
 
 # Cache directory for standalone built-in GGUF models (without Ollama)
 def get_builtin_cache_dir() -> Path:
@@ -15,78 +23,74 @@ def get_builtin_cache_dir() -> Path:
     return cache_dir
 
 
-# Catalog of built-in models with verified Hugging Face direct download URLs
-BUILTIN_LLM_CATALOG: Dict[str, Dict[str, Any]] = {
-    "qwen2.5:1.5b": {
-        "id": "qwen2.5:1.5b",
-        "name": "Qwen 2.5 1.5B (Ultra Ligero)",
-        "filename": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-        "size": "~1.0 GiB",
-        "tokens": "32k tokens",
-        "description": "Modelo ultra rápido y liviano para análisis ágil en cualquier CPU o laptop sin GPU dedicada.",
-        "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-        "aliases": ["qwen:1.5b", "qwen1.5b"],
-    },
-    "qwen2.5:3b": {
-        "id": "qwen2.5:3b",
-        "name": "Qwen 2.5 3B (Equilibrado / Recomendado)",
-        "filename": "qwen2.5-3b-instruct-q4_k_m.gguf",
-        "size": "~1.9 GiB",
-        "tokens": "32k tokens",
-        "description": "Modelo insignia equilibrado de alta fidelidad para redacción de historias de usuario y análisis QA.",
-        "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-        "aliases": ["qwen3.5:2b", "qwen:3b", "qwen3b"],
-    },
-    "llama3.2:1b": {
-        "id": "llama3.2:1b",
-        "name": "Llama 3.2 1B (Meta Instantáneo)",
-        "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        "size": "~770 MiB",
-        "tokens": "128k tokens",
-        "description": "Modelo ligero de Meta de última generación, bajo consumo de memoria y respuesta instantánea.",
-        "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        "aliases": ["llama:1b", "llama1b"],
-    },
-    "llama3.2:3b": {
-        "id": "llama3.2:3b",
-        "name": "Llama 3.2 3B (Alta Calidad)",
-        "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        "size": "~2.0 GiB",
-        "tokens": "128k tokens",
-        "description": "Alta precisión en razonamiento, casos de prueba y análisis estructurado en español e inglés.",
-        "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        "aliases": ["llama:3b", "llama3b"],
-    },
-    "deepseek-r1:1.5b": {
-        "id": "deepseek-r1:1.5b",
-        "name": "DeepSeek R1 1.5B (Razonamiento)",
-        "filename": "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-        "size": "~1.0 GiB",
-        "tokens": "64k tokens",
-        "description": "Modelo de razonamiento estructurado (Chain-of-Thought) para lógica de validación QA profunda.",
-        "url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-        "aliases": ["deepseek-r1:8b", "deepseek:1.5b"],
-    },
-    "gemma-2-2b": {
-        "id": "gemma-2-2b",
-        "name": "Gemma 2 2B (Google Open Model)",
-        "filename": "gemma-2-2b-it-Q4_K_M.gguf",
-        "size": "~1.6 GiB",
-        "tokens": "8k tokens",
-        "description": "Modelo de Google optimizado para seguimiento de instrucciones y redacción técnica concisa.",
-        "url": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-        "aliases": ["gemma3:1b", "gemma:2b"],
-    },
-}
+def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str, Dict[str, Any]]:
+    """Loads built-in models directly from local/ai/builtin_models_catalog.json file."""
+    if not BUILTIN_CATALOG_FILE.exists():
+        logger.warning(f"Built-in catalog file not found at {BUILTIN_CATALOG_FILE}")
+        return {}
+
+    try:
+        with open(BUILTIN_CATALOG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                result = {}
+                for item in data:
+                    if not isinstance(item, dict) or "id" not in item:
+                        continue
+                    if task_type is None or item.get("task_type") == task_type:
+                        result[item["id"]] = item
+                return result
+    except Exception as e:
+        logger.error(f"Error reading {BUILTIN_CATALOG_FILE}: {e}")
+
+    return {}
+
+
+
+# Dynamic catalog dictionary
+BUILTIN_LLM_CATALOG: Dict[str, Dict[str, Any]] = load_builtin_catalog()
+
+
+# --- Download Task Tracking & Cancellation State ---
+_ACTIVE_DOWNLOADS: Dict[str, Dict[str, Any]] = {}
+_CANCEL_EVENTS: Dict[str, threading.Event] = {}
+_DOWNLOAD_LOCK = threading.Lock()
+
+
+def get_active_downloads_status() -> List[Dict[str, Any]]:
+    """Returns status of all ongoing built-in model downloads."""
+    with _DOWNLOAD_LOCK:
+        return list(_ACTIVE_DOWNLOADS.values())
+
+
+def cancel_builtin_model_download(model_id: str) -> bool:
+    """Signals cancellation to an active download."""
+    clean_id = model_id.strip()
+    with _DOWNLOAD_LOCK:
+        event = _CANCEL_EVENTS.get(clean_id)
+        if event:
+            event.set()
+            if clean_id in _ACTIVE_DOWNLOADS:
+                _ACTIVE_DOWNLOADS[clean_id]["status"] = "cancelled"
+                _ACTIVE_DOWNLOADS[clean_id]["stageText"] = "Cancelando descarga..."
+            logger.info(f"Cancellation requested for built-in model download: {clean_id}")
+            return True
+        # Check by filename / alias if necessary
+        meta = resolve_model_meta(model_id)
+        if meta and meta.get("id") in _CANCEL_EVENTS:
+            _CANCEL_EVENTS[meta["id"]].set()
+            return True
+    return False
 
 
 def resolve_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
-    """Resolves model metadata by id or alias."""
+    """Resolves model metadata by id or alias from the loaded local catalog."""
+    catalog = load_builtin_catalog()
     clean = model_id.strip().lower()
-    if clean in BUILTIN_LLM_CATALOG:
-        return BUILTIN_LLM_CATALOG[clean]
-    for meta in BUILTIN_LLM_CATALOG.values():
-        if clean in meta.get("aliases", []):
+    if clean in catalog:
+        return catalog[clean]
+    for meta in catalog.values():
+        if clean in [a.lower() for a in meta.get("aliases", [])]:
             return meta
         if clean == meta.get("filename", "").lower():
             return meta
@@ -94,11 +98,12 @@ def resolve_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
 
 
 def get_builtin_models_info() -> List[Dict[str, Any]]:
-    """Inspects the local cache directory to list all built-in LLM models and their download status."""
+    """Inspects the local cache directory to list all built-in LLM models from local JSON catalog and their download status."""
+    catalog = load_builtin_catalog()
     cache_dir = get_builtin_cache_dir()
     results: List[Dict[str, Any]] = []
 
-    for model_id, meta in BUILTIN_LLM_CATALOG.items():
+    for model_id, meta in catalog.items():
         filename = meta["filename"]
         target_file = cache_dir / filename
         is_downloaded = target_file.exists() and target_file.stat().st_size > 10 * 1024 * 1024  # > 10MB
@@ -109,8 +114,8 @@ def get_builtin_models_info() -> List[Dict[str, Any]]:
             "name": meta["name"],
             "filename": filename,
             "size": meta["size"],
-            "tokens": meta["tokens"],
-            "description": meta["description"],
+            "tokens": meta.get("tokens", ""),
+            "description": meta.get("description", ""),
             "is_downloaded": is_downloaded,
             "disk_size_mb": disk_size_mb,
             "file_path": str(target_file) if is_downloaded else None,
@@ -123,14 +128,16 @@ def download_builtin_model_file(
     model_id: str,
     progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Path:
-    """Downloads a built-in GGUF model file directly from Hugging Face into the cache directory."""
+    """Downloads a built-in GGUF model file directly from Hugging Face into the cache directory with cancellation support."""
     meta = resolve_model_meta(model_id)
+    catalog = load_builtin_catalog()
     if not meta:
         raise ValueError(
             f"Modelo built-in desconocido: '{model_id}'. "
-            f"Modelos disponibles: {list(BUILTIN_LLM_CATALOG.keys())}"
+            f"Modelos disponibles en catálogo local: {list(catalog.keys())}"
         )
 
+    canonical_id = meta["id"]
     url = meta["url"]
     filename = meta["filename"]
     cache_dir = get_builtin_cache_dir()
@@ -142,7 +149,24 @@ def download_builtin_model_file(
         logger.info(f"Built-in model '{model_id}' already exists at {target_file}")
         return target_file
 
-    logger.info(f"Downloading built-in model '{model_id}' from {url} to {target_file}")
+    cancel_event = threading.Event()
+    start_time = time.time()
+    last_update_time = 0.0
+
+    with _DOWNLOAD_LOCK:
+        _CANCEL_EVENTS[canonical_id] = cancel_event
+        _ACTIVE_DOWNLOADS[canonical_id] = {
+            "id": canonical_id,
+            "title": f"Descargando {meta['name']}",
+            "filename": filename,
+            "progress": 0,
+            "status": "downloading",
+            "stageText": "Iniciando descarga...",
+            "speedOrSize": "0 MB",
+            "eta": None,
+        }
+
+    logger.info(f"Downloading built-in model '{canonical_id}' from {url} to {target_file}")
 
     # Use browser-like User-Agent to avoid HF blocks
     req = urllib.request.Request(
@@ -150,28 +174,89 @@ def download_builtin_model_file(
         headers={"User-Agent": "Mozilla/5.0 (compatible; QA-Project-MGMT/1.0; +https://github.com)"},
     )
 
-    with urllib.request.urlopen(req) as response:
-        total_size = int(response.headers.get("content-length", 0))
-        downloaded = 0
-        chunk_size = 1024 * 1024  # 1 MB chunks for speed
+    try:
+        with urllib.request.urlopen(req) as response:
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
+            chunk_size = 1024 * 1024  # 1 MB chunks for high throughput
 
-        with open(tmp_file, "wb") as f_out:
-            while True:
-                chunk = response.read(chunk_size)
-                if not chunk:
-                    break
-                f_out.write(chunk)
-                downloaded += len(chunk)
-                if total_size > 0 and progress_callback:
-                    pct = round((downloaded / total_size) * 100, 1)
-                    progress_callback(downloaded, total_size, pct)
+            with open(tmp_file, "wb") as f_out:
+                while True:
+                    if cancel_event.is_set():
+                        logger.warning(f"Download cancelled by user for model {canonical_id}")
+                        raise RuntimeError(f"Descarga de '{meta['name']}' cancelada por el usuario.")
 
-    # Atomically replace target
-    if target_file.exists():
-        target_file.unlink()
-    tmp_file.rename(target_file)
-    logger.info(f"Built-in model '{model_id}' downloaded successfully to {target_file}")
-    return target_file
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+                    downloaded += len(chunk)
+
+                    now = time.time()
+                    if now - last_update_time >= 0.4:
+                        last_update_time = now
+                        elapsed = max(0.1, now - start_time)
+                        speed_mb = (downloaded / (1024 * 1024)) / elapsed
+                        speed_str = f"{speed_mb:.1f} MB/s"
+
+                        pct = round((downloaded / total_size) * 100, 1) if total_size > 0 else 0.0
+                        dl_mb = round(downloaded / (1024 * 1024), 1)
+                        tot_mb = round(total_size / (1024 * 1024), 1) if total_size > 0 else 0.0
+
+                        eta_str = None
+                        if speed_mb > 0 and total_size > downloaded:
+                            eta_sec = int((total_size - downloaded) / (speed_mb * 1024 * 1024))
+                            eta_str = f"{eta_sec // 60}m {eta_sec % 60}s" if eta_sec >= 60 else f"{eta_sec}s"
+
+                        with _DOWNLOAD_LOCK:
+                            if canonical_id in _ACTIVE_DOWNLOADS:
+                                _ACTIVE_DOWNLOADS[canonical_id].update({
+                                    "progress": int(pct),
+                                    "stageText": f"{dl_mb} MB de {tot_mb} MB ({speed_str})",
+                                    "speedOrSize": f"{dl_mb}/{tot_mb} MB",
+                                    "eta": eta_str,
+                                })
+
+                        if progress_callback:
+                            progress_callback(downloaded, total_size, pct)
+
+        # Atomically replace target
+        if target_file.exists():
+            target_file.unlink()
+        tmp_file.rename(target_file)
+
+        with _DOWNLOAD_LOCK:
+            if canonical_id in _ACTIVE_DOWNLOADS:
+                _ACTIVE_DOWNLOADS[canonical_id].update({
+                    "progress": 100,
+                    "status": "complete",
+                    "stageText": "Descarga completada con éxito",
+                    "speedOrSize": "Listo",
+                    "eta": None,
+                })
+
+        logger.info(f"Built-in model '{canonical_id}' downloaded successfully to {target_file}")
+        return target_file
+
+    except Exception as exc:
+        # Clean up temporary download file if aborted or errored
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except Exception:
+                pass
+
+        with _DOWNLOAD_LOCK:
+            if canonical_id in _ACTIVE_DOWNLOADS:
+                is_cancel = cancel_event.is_set() or "cancelada" in str(exc).lower()
+                _ACTIVE_DOWNLOADS[canonical_id].update({
+                    "status": "cancelled" if is_cancel else "failed",
+                    "stageText": "Descarga cancelada" if is_cancel else f"Error: {exc}",
+                })
+        raise
+    finally:
+        with _DOWNLOAD_LOCK:
+            _CANCEL_EVENTS.pop(canonical_id, None)
 
 
 def delete_builtin_model_file(model_id: str) -> bool:

@@ -13,8 +13,10 @@ from app.features.transcription.whisper_local import (
     get_local_models_info,
 )
 from app.ai.builtin_local import (
+    cancel_builtin_model_download,
     delete_builtin_model_file,
     download_builtin_model_file,
+    get_active_downloads_status,
     get_builtin_cache_dir,
     get_builtin_models_info,
     resolve_model_meta,
@@ -213,6 +215,27 @@ async def list_builtin_models() -> dict[str, Any]:
     return {"ok": True, "models": models}
 
 
+@router.get("/builtin/tasks")
+@handle_grounded_errors
+async def get_builtin_download_tasks() -> dict[str, Any]:
+    """Get active download tasks and progress for built-in models."""
+    tasks = get_active_downloads_status()
+    return {"ok": True, "tasks": tasks}
+
+
+@router.post("/builtin/cancel/{model_id:path}")
+@handle_grounded_errors
+async def cancel_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
+    """Cancel an ongoing download of a built-in model."""
+    cancelled = cancel_builtin_model_download(model_id)
+    return {
+        "ok": cancelled,
+        "model_id": model_id,
+        "message": "Descarga cancelada correctamente." if cancelled else "No se encontró una descarga activa para cancelar.",
+    }
+
+
+
 @router.post("/builtin/download/{model_id:path}")
 @handle_grounded_errors
 async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
@@ -229,6 +252,7 @@ async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Error descargando modelo built-in {model_id}: {exc}") from exc
 
 
+
 @router.delete("/builtin/{model_id:path}")
 @handle_grounded_errors
 async def delete_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
@@ -240,4 +264,6 @@ async def delete_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
         return {"ok": True, "message": f"Modelo {model_id} eliminado del disco con éxito."}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error eliminando modelo built-in {model_id}: {exc}") from exc
+
+
 

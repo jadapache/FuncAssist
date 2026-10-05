@@ -1,5 +1,6 @@
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { AiModelsSkeleton } from '../common'
+import { FloatingTranscriptionToast } from '../../features/transcription/components/FloatingTranscriptionToast'
 import { useAiSettingsManager } from './hooks/useAiSettingsManager'
 import { WritingModelSection } from './WritingModelSection'
 import { VoiceAudioSection } from './VoiceAudioSection'
@@ -70,7 +71,11 @@ export const AiModelsPanel = () => {
     fetchLocalBuiltinModels,
     handleDownloadBuiltinModel,
     handleDeleteBuiltinModel,
+    handleCancelBuiltinDownload,
+    handleDismissDownloadTask,
+    downloadTasks,
   } = useAiSettingsManager()
+
 
   if (loadingAi) {
     return <AiModelsSkeleton />
@@ -136,6 +141,8 @@ export const AiModelsPanel = () => {
         fetchLocalBuiltinModels={fetchLocalBuiltinModels}
         handleDownloadBuiltinModel={handleDownloadBuiltinModel}
         handleDeleteBuiltinModel={handleDeleteBuiltinModel}
+        handleCancelBuiltinDownload={handleCancelBuiltinDownload}
+        downloadTasks={downloadTasks}
         catalogModels={catalogModels}
         groqKey={groqKey}
         setGroqKey={setGroqKey}
@@ -179,6 +186,14 @@ export const AiModelsPanel = () => {
         handleDownloadWhisperModel={handleDownloadWhisperModel}
         handleDeleteWhisperModel={handleDeleteWhisperModel}
       />
+
+      {/* Floating Toast for Built-in Models Download Progress & Cancellation */}
+      <FloatingTranscriptionToast
+        extraTasks={Object.values(downloadTasks)}
+        onCancelJob={(id) => void handleCancelBuiltinDownload(id)}
+        onDismissJob={(id) => handleDismissDownloadTask(id)}
+      />
     </div>
   )
 }
+

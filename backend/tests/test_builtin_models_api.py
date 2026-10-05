@@ -28,3 +28,22 @@ def test_delete_non_downloaded_builtin_model():
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
+
+
+def test_get_builtin_download_tasks():
+    response = client.get("/api/ai/builtin/tasks")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert "tasks" in data
+    assert isinstance(data["tasks"], list)
+
+
+def test_cancel_builtin_model_download():
+    response = client.post("/api/ai/builtin/cancel/qwen2.5:1.5b")
+    assert response.status_code == 200
+    data = response.json()
+    assert "ok" in data
+    assert data["model_id"] == "qwen2.5:1.5b"
+
+

@@ -8,7 +8,6 @@ import {
   Zap,
 } from 'lucide-react'
 import type { AISettings, LocalBuiltinModelInfo, ModelCatalogItem } from '../../api/client'
-import { BUILT_IN_MODELS } from './constants'
 import { BuiltinModelsList } from './writing/BuiltinModelsList'
 import { CloudModelSelector } from './writing/CloudModelSelector'
 import { OllamaManager } from './writing/OllamaManager'
@@ -40,6 +39,8 @@ export type WritingModelSectionProps = {
   fetchLocalBuiltinModels?: () => Promise<void>
   handleDownloadBuiltinModel?: (modelId: string) => Promise<void>
   handleDeleteBuiltinModel?: (modelId: string) => Promise<void>
+  handleCancelBuiltinDownload?: (modelId: string) => Promise<void>
+  downloadTasks?: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string }>
   catalogModels: ModelCatalogItem[]
   groqKey: string
   setGroqKey: (k: string) => void
@@ -84,6 +85,9 @@ export const WritingModelSection = ({
   fetchLocalBuiltinModels,
   handleDownloadBuiltinModel,
   handleDeleteBuiltinModel,
+  handleCancelBuiltinDownload,
+  downloadTasks,
+
   catalogModels,
   groqKey,
   setGroqKey,
@@ -100,23 +104,27 @@ export const WritingModelSection = ({
   handleAiSave,
   handleTestConnection,
 }: WritingModelSectionProps) => {
-  const builtinFromCatalog = catalogModels.filter(
-    (m) => m.provider === 'builtin' && m.task_type === 'chat_writing',
-  )
-  const builtinModelsList =
-    builtinFromCatalog.length > 0
-      ? builtinFromCatalog.map((cm) => {
-          const match = BUILT_IN_MODELS.find((bm) => bm.id === cm.id || bm.tag === cm.raw_id)
-          return {
-            id: cm.id,
-            name: cm.name,
-            tag: cm.raw_id || cm.id,
-            description: cm.description,
-            size: cm.size || match?.size || '~1.2 GiB',
-            tokens: cm.context_window || match?.tokens || '32k tokens',
-          }
-        })
-      : BUILT_IN_MODELS
+  // Modelos built-in cargados dinámicamente desde local/ai/builtin_models_catalog.json
+  const builtinModelsList = (localBuiltinModels && localBuiltinModels.length > 0)
+    ? localBuiltinModels.map((lm) => ({
+        id: lm.id,
+        name: lm.name,
+        tag: lm.id,
+        description: lm.description || '',
+        size: lm.size || '~1.2 GiB',
+        tokens: lm.tokens || '32k tokens',
+      }))
+    : catalogModels
+        .filter((m) => m.provider === 'builtin' && m.task_type === 'chat_writing')
+        .map((cm) => ({
+          id: cm.id,
+          name: cm.name,
+          tag: cm.raw_id || cm.id,
+          description: cm.description,
+          size: cm.size || '~1.2 GiB',
+          tokens: cm.context_window || '32k tokens',
+        }))
+
 
   return (
     <form
@@ -209,6 +217,8 @@ export const WritingModelSection = ({
               fetchLocalBuiltinModels={fetchLocalBuiltinModels}
               handleDownloadBuiltinModel={handleDownloadBuiltinModel}
               handleDeleteBuiltinModel={handleDeleteBuiltinModel}
+              handleCancelBuiltinDownload={handleCancelBuiltinDownload}
+              downloadTasks={downloadTasks}
             />
           )}
 
