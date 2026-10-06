@@ -1,7 +1,7 @@
 {
   "name": "qa-project-mgmt",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
