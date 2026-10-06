@@ -14,6 +14,28 @@ def test_ai_settings_endpoints():
     assert "active_api_key_set" in data
 
 
+def test_update_ai_settings_endpoints():
+    # Update with provider and model
+    res = client.put(
+        "/api/ai/settings",
+        json={"provider": "groq", "model": "llama-3.3-70b-versatile"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["provider"] == "groq"
+    assert data["model"] == "llama-3.3-70b-versatile"
+
+    # Update with inference_provider and inference_model aliases
+    res_alias = client.put(
+        "/api/ai/settings",
+        json={"inference_provider": "builtin", "inference_model": "qwen3.5:2b"},
+    )
+    assert res_alias.status_code == 200
+    data_alias = res_alias.json()
+    assert data_alias["provider"] == "builtin"
+    assert data_alias["model"] == "qwen3.5:2b"
+
+
 def test_ai_models_catalog_endpoint():
     res = client.get("/api/ai/models/catalog")
     assert res.status_code == 200

@@ -15,6 +15,8 @@ router = APIRouter(prefix="/ai", tags=["ai-settings"])
 class AISettingsUpdate(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
+    inference_provider: Optional[str] = None
+    inference_model: Optional[str] = None
     transcription_provider: Optional[str] = None
     transcription_model: Optional[str] = None
     voice_command_provider: Optional[str] = None
@@ -81,7 +83,21 @@ async def get_settings_endpoint() -> dict[str, Any]:
 async def update_ai_settings(body: AISettingsUpdate = Body(...)) -> dict[str, Any]:
     current = load_app_settings()
     ai = dict(current.get("ai") or {})
-    for key, value in body.model_dump(exclude_none=True).items():
+    data = body.model_dump(exclude_none=True)
+
+    # Normalize inference_provider -> provider
+    if "inference_provider" in data and "provider" not in data:
+        data["provider"] = data.pop("inference_provider")
+    elif "inference_provider" in data:
+        data.pop("inference_provider")
+
+    # Normalize inference_model -> model
+    if "inference_model" in data and "model" not in data:
+        data["model"] = data.pop("inference_model")
+    elif "inference_model" in data:
+        data.pop("inference_model")
+
+    for key, value in data.items():
         ai[key] = value
     save_app_settings({"ai": ai})
     return await get_settings_endpoint()
