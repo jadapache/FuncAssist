@@ -21,6 +21,9 @@ import { PmFeaturePage } from './pages/pm/PmFeaturePage'
 import { StandupPage } from './pages/pm/StandupPage'
 import { QaFeaturePage } from './pages/qa/QaFeaturePage'
 
+import { useAppUpdater } from './hooks/useAppUpdater'
+import { UpdateNotification } from './components/UpdateNotification'
+
 const GlobalFloatingJobs: React.FC = () => {
   const { jobs, cancelJob, removeJob } = useBackgroundJobs()
   return (
@@ -32,10 +35,26 @@ const GlobalFloatingJobs: React.FC = () => {
   )
 }
 
+const DesktopAppUpdater: React.FC = () => {
+  const { updateInfo, isUpdateAvailable, installUpdate, dismissUpdate, isInstalling } = useAppUpdater()
+
+  if (!isUpdateAvailable) return null
+
+  return (
+    <UpdateNotification
+      updateInfo={updateInfo}
+      onInstall={() => void installUpdate()}
+      onDismiss={dismissUpdate}
+      isInstalling={isInstalling}
+    />
+  )
+}
+
 export const App = () => {
   return (
     <ErrorBoundary>
       <ToastProvider>
+        <DesktopAppUpdater />
         <UserProvider>
           <BrowserRouter>
             <BackgroundJobProvider>
