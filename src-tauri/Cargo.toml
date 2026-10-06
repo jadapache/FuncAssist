@@ -1,9 +1,9 @@
 [package]
 name = "qa-project-mgmt"
-version = "0.2.0"
+version = "0.2.1"
 description = "QA Project Management Desktop App"
-authors = ["jadapache"]
-edition = "2021"
+authors = ["Daniel Pacheco"]
+edition = "2026"
 
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }
