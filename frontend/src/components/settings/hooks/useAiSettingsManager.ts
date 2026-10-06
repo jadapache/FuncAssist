@@ -417,6 +417,8 @@ export function useAiSettingsManager() {
     setSavingAi(true)
 
     const payload: Record<string, string> = {
+      provider,
+      model: model.trim(),
       inference_provider: provider,
       inference_model: model.trim(),
       ollama_base_url: normalizeOllamaUrl(ollamaUrl),
