@@ -16,7 +16,6 @@ interface UploadAreaProps {
 }
 
 const SUPPORTED_EXTS = ['.mp3', '.mp4', '.wav', '.m4a', '.webm', '.ogg', '.flac', '.aac', '.opus', '.mkv', '.mov']
-const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 // 2 GB
 
 export const UploadArea: React.FC<UploadAreaProps> = ({
   onUpload,
@@ -45,8 +44,8 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
       setValidationError(`Formato '${ext}' no admitido. Formatos válidos: MP3, WAV, M4A, MP4, WebM, OGG, FLAC.`)
       return
     }
-    if (file.size > MAX_FILE_SIZE) {
-      setValidationError('El archivo supera el tamaño máximo permitido de 2GB.')
+    if (file.size <= 0) {
+      setValidationError('El archivo seleccionado está vacío.')
       return
     }
 
@@ -136,7 +135,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
                   Arrastra tu grabación aquí o haz clic para explorar
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Audio o video (MP3, WAV, M4A, MP4, WebM, FLAC) hasta 2 GB
+                  Audio o video (MP3, WAV, M4A, MP4, WebM, FLAC, MKV)
                 </p>
               </div>
             </div>

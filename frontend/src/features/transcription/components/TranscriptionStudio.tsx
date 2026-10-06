@@ -16,6 +16,7 @@ interface TranscriptionStudioProps {
   activeProgress?: TranscriptionProgress | null
   onBackToDashboard: () => void
   onRefreshData?: () => void
+  onRetranscribe?: (transcriptionId: string, title?: string) => Promise<void>
 }
 
 export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
@@ -24,12 +25,14 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
   activeProgress,
   onBackToDashboard,
   onRefreshData,
+  onRetranscribe,
 }) => {
   const {
     transcriptionResult,
     importantSegments,
     isGeneratingSummary,
     isSavingKB,
+    isRetranscribing,
     hasCopiedTranscript,
     hasCopiedSummary,
     generateModalOpen,
@@ -50,6 +53,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     isSummaryReady,
     meetingTitle,
     toggleSegmentImportance,
+    handleRetranscribe,
     handleGenerateSummary,
     handleSaveToKB,
     handleSaveSpeakerNames,
@@ -59,7 +63,13 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     handleCopySummary,
     handleDownloadSummaryTxt,
     handleDownloadSummaryJson,
-  } = useTranscriptionActions(transcriptionId, activeProgress, onRefreshData, initialMeetingTitle)
+  } = useTranscriptionActions(
+    transcriptionId,
+    activeProgress,
+    onRefreshData,
+    initialMeetingTitle,
+    onRetranscribe
+  )
 
   return (
     <div className="flex flex-col h-[calc(100vh-5.5rem)] max-w-[1700px] mx-auto bg-slate-100 font-sans rounded-2xl border border-slate-300/80 shadow-md overflow-hidden animate-fade-in">
@@ -170,10 +180,12 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
           importantSegments={importantSegments}
           activeProgressMessage={activeProgress?.message}
           isJobActive={isJobActive}
+          isRetranscribing={isRetranscribing}
           hasCopiedTranscript={hasCopiedTranscript}
           showTranscriptDownloadMenu={showTranscriptDownloadMenu}
           transcriptMenuRef={transcriptMenuRef}
           onToggleDownloadMenu={() => setShowTranscriptDownloadMenu((prev) => !prev)}
+          onRetranscribe={handleRetranscribe}
           onRenameClick={() => setShowRenameModal(true)}
           onCopyTranscript={handleCopyTranscript}
           onDownloadTranscriptTxt={handleDownloadTranscriptTxt}

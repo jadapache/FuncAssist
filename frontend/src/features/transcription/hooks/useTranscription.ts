@@ -379,6 +379,56 @@ export function useTranscription() {
     }
   }
 
+  // Retranscribe with current configured model
+  const handleRetranscribe = async (transcriptionId: string, title?: string) => {
+    try {
+      const active = activeJobs[transcriptionId]
+      const recent = recentTranscriptions.find((t) => t.id === transcriptionId)
+      const jobTitle = title || active?.title || recent?.metadata?.title || activeMeetingTitle || 'Transcripción'
+
+      const retransJob: TranscriptionProgress = {
+        id: transcriptionId,
+        media_id: recent?.media_id || '',
+        title: jobTitle,
+        status: 'preprocessing',
+        stage: 'preprocessing',
+        progress: 15,
+        message: 'Iniciando regeneración con el motor configurado...',
+        eta: '~45 s',
+        model_info: availableModels?.active_model_label || 'Whisper Auto',
+      }
+      setActiveJobs((prev) => ({
+        ...prev,
+        [transcriptionId]: retransJob,
+      }))
+      addOrUpdateJob({
+        id: transcriptionId,
+        type: 'transcription',
+        title: jobTitle,
+        progress: 15,
+        status: 'preprocessing',
+        stageText: 'Iniciando regeneración con el motor configurado...',
+        eta: '~45 s',
+        onCancel: () => void handleCancelTranscription(transcriptionId),
+        onDismiss: () => handleDismissJob(transcriptionId),
+      })
+
+      await transcriptionApi.retranscribe(transcriptionId, {
+        mode: 'auto',
+        enable_diarization: true,
+      })
+      toast.info('Regeneración de transcripción iniciada.')
+    } catch (err: any) {
+      toast.error(`Error al regenerar transcripción: ${err.message}`)
+      setActiveJobs((prev) => {
+        const next = { ...prev }
+        delete next[transcriptionId]
+        return next
+      })
+      removeJob(transcriptionId)
+    }
+  }
+
   // Navigation helpers
   const openStudio = (transcriptionId: string) => {
     setSelectedTranscriptionId(transcriptionId)
@@ -448,6 +498,7 @@ export function useTranscription() {
     activeMeetingTitle,
     currentProgress,
     handleUploadAndStart,
+    handleRetranscribe,
     handleCancelTranscription,
     handleDeleteTranscription,
     handleDismissJob,

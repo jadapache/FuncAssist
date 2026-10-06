@@ -60,6 +60,7 @@ export function useTranscriptionActions(
   activeProgress?: TranscriptionProgress | null,
   onRefreshData?: () => void,
   initialMeetingTitle?: string,
+  onRetranscribe?: (transcriptionId: string, title?: string) => Promise<void>,
 ) {
   const { toast } = useToast()
 
@@ -71,6 +72,12 @@ export function useTranscriptionActions(
   const [hasCopiedTranscript, setHasCopiedTranscript] = useState(false)
   const [hasCopiedSummary, setHasCopiedSummary] = useState(false)
   const [generateModalOpen, setGenerateModalOpen] = useState(false)
+
+  const meetingTitle =
+    transcriptionResult?.metadata?.title ||
+    activeProgress?.title ||
+    initialMeetingTitle ||
+    'Transcripción de Reunión'
 
   // Download dropdown toggles
   const [showTranscriptDownloadMenu, setShowTranscriptDownloadMenu] = useState(false)
@@ -145,6 +152,29 @@ export function useTranscriptionActions(
       return next
     })
   }, [])
+
+  const [isRetranscribing, setIsRetranscribing] = useState(false)
+
+  // Handle re-transcription / regeneration with current configured model
+  const handleRetranscribe = useCallback(async () => {
+    try {
+      setIsRetranscribing(true)
+      if (onRetranscribe) {
+        await onRetranscribe(transcriptionId, meetingTitle)
+      } else {
+        await transcriptionApi.retranscribe(transcriptionId, {
+          mode: 'auto',
+          enable_diarization: true,
+        })
+        toast.info('Regeneración de transcripción iniciada.')
+        onRefreshData?.()
+      }
+    } catch (err: any) {
+      toast.error(`Error al regenerar transcripción: ${err.message}`)
+    } finally {
+      setIsRetranscribing(false)
+    }
+  }, [transcriptionId, meetingTitle, onRetranscribe, toast, onRefreshData])
 
   // Handle AI summary generation
   const handleGenerateSummary = useCallback(async () => {
@@ -291,10 +321,10 @@ export function useTranscriptionActions(
     summaryData?.key_insights && summaryData.key_insights.length > 0
       ? summaryData.key_insights
       : summaryData?.action_items && summaryData.action_items.length > 0
-      ? summaryData.action_items
-      : summaryData?.requirements && summaryData.requirements.length > 0
-      ? summaryData.requirements
-      : []
+        ? summaryData.action_items
+        : summaryData?.requirements && summaryData.requirements.length > 0
+          ? summaryData.requirements
+          : []
 
   const isSummaryReady = summaryParagraphs.length > 0 || keyInsights.length > 0
 
@@ -341,12 +371,6 @@ export function useTranscriptionActions(
     setShowSummaryDownloadMenu(false)
   }, [transcriptionResult, isSummaryReady, summaryParagraphs, keyInsights, summaryData])
 
-  const meetingTitle =
-    transcriptionResult?.metadata?.title ||
-    activeProgress?.title ||
-    initialMeetingTitle ||
-    'Transcripción de Reunión'
-
   return {
     transcriptionResult,
     importantSegments,
@@ -371,7 +395,9 @@ export function useTranscriptionActions(
     keyInsights,
     isSummaryReady,
     meetingTitle,
+    isRetranscribing,
     toggleSegmentImportance,
+    handleRetranscribe,
     handleGenerateSummary,
     handleSaveToKB,
     handleSaveSpeakerNames,

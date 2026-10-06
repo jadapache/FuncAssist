@@ -50,10 +50,15 @@ def test_file_validation():
   assert ok is False
   assert "no soportado" in err
 
-  # Exceeding size
+  # Large files
   ok, err = validate_file("huge.mp4", 3 * 1024 * 1024 * 1024)
+  assert ok is True
+  assert err is None
+
+  # Empty size
+  ok, err = validate_file("empty.mp3", 0)
   assert ok is False
-  assert "2GB" in err
+  assert "vacío" in err
 
 
 def test_file_hash():
@@ -312,6 +317,37 @@ def test_transcription_cancel_and_models(client: TestClient):
   cancel_res = client.post("/api/transcription/cancel/test-fake-id-123")
   assert cancel_res.status_code == 200
   assert cancel_res.json()["ok"] is True
+
+
+def test_retranscribe_endpoint(client: TestClient):
+  # 1. Create dummy media and transcription record
+  dummy_bytes = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00" * 20
+  entry = save_media_file(
+    file_bytes=dummy_bytes,
+    filename="retrans_test.mp3",
+    title="Reunión Retranscribe",
+  )
+  record_id = "test-retrans-record-123"
+  save_transcription_record({
+    "id": record_id,
+    "media_id": entry["id"],
+    "metadata": {"title": "Reunión Retranscribe"},
+    "language": "es",
+    "duration_seconds": 30.0,
+    "created_at": "2026-10-01T10:00:00Z",
+    "segments": [],
+    "text": "Texto inicial",
+  })
+
+  # 2. Call retranscribe
+  retrans_res = client.post(f"/api/transcription/retranscribe/{record_id}", json={"mode": "auto"})
+  assert retrans_res.status_code == 200
+  data = retrans_res.json()
+  assert data["ok"] is True
+  assert data["transcription_id"] == record_id
+
+  # Clean up
+  delete_transcription_record(record_id)
 
 
 def test_upload_stream_and_sse_events(client: TestClient):

@@ -40,6 +40,7 @@ export const TranscripcionesPage = () => {
     activeMeetingTitle,
     currentProgress,
     handleUploadAndStart,
+    handleRetranscribe,
     handleDeleteTranscription,
     setShowGenerateModal,
     refreshTranscriptions,
@@ -104,6 +105,7 @@ export const TranscripcionesPage = () => {
           activeProgress={currentProgress}
           onBackToDashboard={closeStudio}
           onRefreshData={refreshTranscriptions}
+          onRetranscribe={handleRetranscribe}
         />
       </div>
     )
