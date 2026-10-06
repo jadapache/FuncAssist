@@ -81,12 +81,14 @@ async def upload_stream(
   file: UploadFile = File(...),
   title: str = Form(...),
   description: str = Form(default=""),
+  transcription_id: Optional[str] = Form(default=None),
 ) -> dict[str, Any]:
   """
   Stream-based file upload with real-time progress tracking.
   Writes file chunks to disk without memory overhead and emits SSE progress.
   """
-  transcription_id = str(uuid.uuid4())
+  if not transcription_id:
+    transcription_id = str(uuid.uuid4())
   filename = file.filename or "audio_file"
   media_id, file_path, stored_filename = get_media_destination(filename)
 

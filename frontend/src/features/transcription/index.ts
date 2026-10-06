@@ -28,7 +28,6 @@ export { TranscriptionStudio } from './components/TranscriptionStudio'
 export { UploadArea } from './components/UploadArea'
 export { ActiveTranscriptionItem } from './components/ActiveTranscriptionItem'
 export { RecentTranscriptionItem } from './components/RecentTranscriptionItem'
-export { TranscriptionProgressModal } from './components/TranscriptionProgressModal'
 export {
   FloatingJobToast as FloatingTranscriptionToast,
   type FloatingJobToastProps as FloatingTranscriptionToastProps,

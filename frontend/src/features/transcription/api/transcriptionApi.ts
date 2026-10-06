@@ -79,7 +79,8 @@ export function uploadMediaWithProgress(
   file: File,
   title: string,
   description: string = '',
-  onProgress?: (progress: number, message: string) => void
+  onProgress?: (progress: number, message: string) => void,
+  transcriptionId?: string
 ): Promise<{ ok: boolean; media_id: string; transcription_id: string; size: number; message: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -136,6 +137,9 @@ export function uploadMediaWithProgress(
     formData.append('file', file)
     formData.append('title', title)
     formData.append('description', description)
+    if (transcriptionId) {
+      formData.append('transcription_id', transcriptionId)
+    }
 
     const token = localStorage.getItem('auth_token')
     xhr.open('POST', `${API_BASE}/api/transcription/upload-stream`, true)
