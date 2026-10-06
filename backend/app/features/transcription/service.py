@@ -23,6 +23,7 @@ from app.features.transcription.storage import (
   load_active_job_progress,
   save_active_job_progress,
   save_transcription_record,
+  update_media_entry_after_audio_extraction,
 )
 from app.features.transcription.summarizer import summarize_transcript
 from app.features.transcription.whisper_cloud import WhisperCloudService
@@ -289,6 +290,8 @@ class TranscriptionService:
       if media_entry.get("is_video"):
         wav_candidate = media_path.with_suffix(".wav")
         audio_track_path = await asyncio.to_thread(extract_audio_track, media_path, wav_candidate)
+        if audio_track_path != media_path:
+          update_media_entry_after_audio_extraction(media_id, audio_track_path)
 
       _check_cancelled()
 

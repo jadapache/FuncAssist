@@ -1,5 +1,5 @@
 import React from 'react'
-import { Volume2, Users, Copy, Check } from 'lucide-react'
+import { Volume2, Users, Copy, Check, RotateCcw } from 'lucide-react'
 import type { TranscriptionResult } from '../api/transcriptionApi'
 import { SegmentList } from './SegmentList'
 import { DownloadMenu } from './DownloadMenu'
@@ -9,10 +9,12 @@ interface TranscriptionViewerProps {
   importantSegments: Set<number>
   activeProgressMessage?: string
   isJobActive: boolean
+  isRetranscribing?: boolean
   hasCopiedTranscript: boolean
   showTranscriptDownloadMenu: boolean
   transcriptMenuRef: React.RefObject<HTMLDivElement | null>
   onToggleDownloadMenu: () => void
+  onRetranscribe?: () => void
   onRenameClick: () => void
   onCopyTranscript: () => void
   onDownloadTranscriptTxt: () => void
@@ -25,10 +27,12 @@ export const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
   importantSegments,
   activeProgressMessage,
   isJobActive,
+  isRetranscribing = false,
   hasCopiedTranscript,
   showTranscriptDownloadMenu,
   transcriptMenuRef,
   onToggleDownloadMenu,
+  onRetranscribe,
   onRenameClick,
   onCopyTranscript,
   onDownloadTranscriptTxt,
@@ -65,8 +69,23 @@ export const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
           </h2>
         </div>
 
-        {/* Action Buttons: Renombrar interlocutores, Copiar, Descargar (JSON, TXT) */}
+        {/* Action Buttons: Regenerar transcripción, Renombrar interlocutores, Copiar, Descargar */}
         <div className="flex items-center gap-2">
+          {/* Regenerar Transcripción */}
+          <button
+            type="button"
+            onClick={onRetranscribe}
+            disabled={isRetranscribing || isJobActive || (!transcriptionResult?.segments?.length && !transcriptionResult?.text)}
+            className="p-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+            title={
+              isJobActive
+                ? 'Procesamiento en curso...'
+                : 'Regenerar transcripción'
+            }
+          >
+            <RotateCcw className={`h-3.5 w-3.5 text-slate-600 ${isRetranscribing ? 'animate-spin text-[#002777]' : ''}`} />
+          </button>
+
           {/* Renombrar interlocutores (Icono grupo de personas) */}
           <button
             type="button"

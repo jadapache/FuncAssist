@@ -16,8 +16,6 @@ TRANSCRIPTIONS_DIR = LOCAL_DIR / "transcriptions"
 ACTIVE_JOBS_DIR = LOCAL_DIR / "transcriptions" / "active_jobs"
 MEDIA_MANIFEST_PATH = LOCAL_DIR / "media" / "manifest.json"
 
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
-
 SUPPORTED_AUDIO_EXTS = {
   ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma", ".aac", ".opus", ".oga", ".weba"
 }
@@ -89,9 +87,36 @@ def validate_file(filename: str, size: int) -> tuple[bool, Optional[str]]:
   if not ext or ext not in SUPPORTED_FORMATS:
     supported_list = ", ".join(sorted(SUPPORTED_FORMATS))
     return False, f"Formato '{ext}' no soportado. Formatos admitidos: {supported_list}"
-  if size > MAX_FILE_SIZE:
-    return False, f"El archivo excede el tamaño máximo permitido de 2GB ({size / (1024 * 1024 * 1024):.2f} GB)."
+  if size <= 0:
+    return False, "El archivo está vacío."
   return True, None
+
+
+def update_media_entry_after_audio_extraction(media_id: str, audio_path: Path) -> Optional[dict[str, Any]]:
+  """
+  Updates media manifest to point to the newly extracted audio track and updates size,
+  deleting the heavy raw video file to keep only the encoded audio track in media storage.
+  """
+  manifest = _load_manifest()
+  for item in manifest:
+    if item.get("id") == media_id:
+      old_path_str = item.get("path")
+      if old_path_str and old_path_str != str(audio_path):
+        old_p = Path(old_path_str)
+        if old_p.exists() and old_p != audio_path:
+          try:
+            old_p.unlink()
+          except Exception:
+            pass
+
+      item["path"] = str(audio_path)
+      item["stored_filename"] = audio_path.name
+      item["is_video"] = False
+      if audio_path.exists():
+        item["size_bytes"] = audio_path.stat().st_size
+      _save_manifest(manifest)
+      return item
+  return None
 
 
 def save_media_file(

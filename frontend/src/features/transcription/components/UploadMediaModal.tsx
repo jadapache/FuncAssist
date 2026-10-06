@@ -49,8 +49,8 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
         <div className="p-7 overflow-y-auto max-h-[80vh]">
           <UploadArea
             onUpload={async (file, title, desc) => {
-              await onUpload(file, title, desc)
               onClose()
+              await onUpload(file, title, desc)
             }}
             isUploading={isUploading}
             configuredModelLabel={configuredModelLabel}

@@ -205,6 +205,48 @@ async def start_transcription(
   }
 
 
+@router.post("/retranscribe/{transcription_id}")
+async def retranscribe(
+  transcription_id: str,
+  background_tasks: BackgroundTasks,
+  req: Optional[TranscribeRequest] = None,
+) -> dict[str, Any]:
+  """Retrigger transcription on an existing transcription record using its preserved audio media."""
+  record = get_transcription_record(transcription_id)
+  media_id = record.get("media_id") if record else None
+  if not media_id:
+    entry = get_media_entry(transcription_id)
+    if entry:
+      media_id = transcription_id
+  if not media_id:
+    raise HTTPException(status_code=404, detail="Registro de transcripción o archivo multimedia no encontrado.")
+
+  transcribe_cfg = req or TranscribeRequest()
+
+  async def _run_job():
+    try:
+      await transcription_service.transcribe_media_async(
+        media_id=media_id,
+        transcription_id=transcription_id,
+        mode=transcribe_cfg.mode,
+        language=transcribe_cfg.language,
+        model_size=transcribe_cfg.model_size,
+        enable_diarization=transcribe_cfg.enable_diarization,
+      )
+    except Exception:
+      pass
+
+  background_tasks.add_task(_run_job)
+
+  return {
+    "ok": True,
+    "status": "started",
+    "transcription_id": transcription_id,
+    "media_id": media_id,
+    "message": "Regeneración de transcripción iniciada con éxito.",
+  }
+
+
 @router.get("/available-models")
 async def get_available_models() -> dict[str, Any]:
   """Return available transcription models and active configuration."""

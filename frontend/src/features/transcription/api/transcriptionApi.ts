@@ -177,6 +177,17 @@ export const transcriptionApi = {
     return handleResponse(response)
   },
 
+  async retranscribe(transcriptionId: string, options?: TranscribeOptions): Promise<{ ok: boolean; status: string; transcription_id: string; message: string }> {
+    const response = await fetch(`${API_BASE}/api/transcription/retranscribe/${transcriptionId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(options || {}),
+    })
+    return handleResponse(response)
+  },
+
   async getTranscriptionStatus(transcriptionId: string): Promise<TranscriptionProgress> {
     const response = await fetch(`${API_BASE}/api/transcription/status/${transcriptionId}`)
     return handleResponse(response)
