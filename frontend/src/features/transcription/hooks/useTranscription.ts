@@ -12,7 +12,7 @@ const LOCAL_STORAGE_ACTIVE_JOBS = 'qa_active_transcription_jobs'
 
 export function useTranscription() {
   const { toast } = useToast()
-  const { addOrUpdateJob } = useBackgroundJobs()
+  const { addOrUpdateJob, removeJob, cancelJob } = useBackgroundJobs()
 
   // View mode
   const [viewMode, setViewMode] = useState<'dashboard' | 'studio'>('dashboard')
@@ -38,7 +38,12 @@ export function useTranscription() {
     try {
       const activeOnly: Record<string, TranscriptionProgress> = {}
       for (const [id, job] of Object.entries(jobs)) {
-        if (job.status !== 'complete' && job.status !== 'failed' && job.status !== 'cancelled') {
+        if (
+          !id.startsWith('upload_') &&
+          job.status !== 'complete' &&
+          job.status !== 'failed' &&
+          job.status !== 'cancelled'
+        ) {
           activeOnly[id] = job
         }
       }
@@ -70,13 +75,19 @@ export function useTranscription() {
 
     refreshTranscriptions()
 
-    // Restore jobs from localStorage
+    // Restore jobs from localStorage (filtering out stale upload_ jobs)
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_ACTIVE_JOBS)
       if (stored) {
         const parsed: Record<string, TranscriptionProgress> = JSON.parse(stored)
-        if (Object.keys(parsed).length > 0) {
-          setActiveJobs(parsed)
+        const validJobs: Record<string, TranscriptionProgress> = {}
+        for (const [id, job] of Object.entries(parsed)) {
+          if (!id.startsWith('upload_')) {
+            validJobs[id] = job
+          }
+        }
+        if (Object.keys(validJobs).length > 0) {
+          setActiveJobs(validJobs)
         }
       }
     } catch (e) {
@@ -96,6 +107,7 @@ export function useTranscription() {
   useEffect(() => {
     const activeIds = Object.keys(activeJobs).filter(
       (id) =>
+        !id.startsWith('upload_') &&
         activeJobs[id].status !== 'complete' &&
         activeJobs[id].status !== 'failed' &&
         activeJobs[id].status !== 'cancelled' &&
@@ -104,7 +116,7 @@ export function useTranscription() {
 
     // Open EventSource for each active job
     for (const id of activeIds) {
-      if (!eventSourcesRef.current[id] && !id.startsWith('upload_')) {
+      if (!eventSourcesRef.current[id]) {
         try {
           const streamUrl = transcriptionApi.getProgressStreamUrl(id)
           const es = new EventSource(streamUrl)
@@ -212,13 +224,16 @@ export function useTranscription() {
 
   // Start upload and transcription pipeline -> auto-transition to Studio
   const handleUploadAndStart = async (file: File, title: string, description: string = '') => {
-    const tempId = `upload_${Date.now()}`
+    // Generate the definitive transcription ID upfront so the same ID is used for the entire lifecycle
+    const transcriptionId =
+      typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `trans_${Date.now()}`
+
     try {
       setIsUploading(true)
       setActiveMeetingTitle(title)
 
       const initialUploadJob = {
-        id: tempId,
+        id: transcriptionId,
         media_id: '',
         title,
         status: 'uploading' as const,
@@ -229,46 +244,53 @@ export function useTranscription() {
       }
       setActiveJobs((prev) => ({
         ...prev,
-        [tempId]: initialUploadJob,
+        [transcriptionId]: initialUploadJob,
       }))
       addOrUpdateJob({
-        id: tempId,
+        id: transcriptionId,
         type: 'transcription',
         title,
         progress: 5,
         status: 'uploading',
         stageText: `Iniciando subida de "${file.name}"...`,
+        onCancel: () => void handleCancelTranscription(transcriptionId),
+        onDismiss: () => handleDismissJob(transcriptionId),
       })
 
       // 1. Upload media with real-time XMLHttpRequest progress
-      const uploadRes = await transcriptionApi.uploadMediaWithProgress(file, title, description, (prog, msg) => {
-        const calculatedProgress = Math.min(10, Math.max(5, Math.round(prog / 10)))
-        setActiveJobs((prev) => {
-          if (!prev[tempId]) return prev
-          return {
-            ...prev,
-            [tempId]: {
-              ...prev[tempId],
-              progress: calculatedProgress,
-              message: msg,
-            },
-          }
-        })
-        addOrUpdateJob({
-          id: tempId,
-          type: 'transcription',
-          title,
-          progress: calculatedProgress,
-          status: 'uploading',
-          stageText: msg,
-        })
-      })
+      const uploadRes = await transcriptionApi.uploadMediaWithProgress(
+        file,
+        title,
+        description,
+        (prog, msg) => {
+          const calculatedProgress = Math.min(10, Math.max(5, Math.round(prog / 10)))
+          setActiveJobs((prev) => {
+            if (!prev[transcriptionId]) return prev
+            return {
+              ...prev,
+              [transcriptionId]: {
+                ...prev[transcriptionId],
+                progress: calculatedProgress,
+                message: msg,
+              },
+            }
+          })
+          addOrUpdateJob({
+            id: transcriptionId,
+            type: 'transcription',
+            title,
+            progress: calculatedProgress,
+            status: 'uploading',
+            stageText: msg,
+          })
+        },
+        transcriptionId
+      )
 
       const mediaId = uploadRes.media_id
-      const transcriptionId = uploadRes.transcription_id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `trans_${Date.now()}`)
 
-      // Replace tempId with actual transcriptionId
-      const newTranscriptionJob = {
+      // Transition to preprocessing with the exact same ID
+      const preprocessingJob = {
         id: transcriptionId,
         media_id: mediaId,
         title,
@@ -279,12 +301,10 @@ export function useTranscription() {
         eta: '~45 s',
         model_info: availableModels?.active_model_label || 'Whisper Auto',
       }
-      setActiveJobs((prev) => {
-        const next = { ...prev }
-        delete next[tempId]
-        next[transcriptionId] = newTranscriptionJob
-        return next
-      })
+      setActiveJobs((prev) => ({
+        ...prev,
+        [transcriptionId]: preprocessingJob,
+      }))
       addOrUpdateJob({
         id: transcriptionId,
         type: 'transcription',
@@ -309,9 +329,10 @@ export function useTranscription() {
     } catch (err: any) {
       setActiveJobs((prev) => {
         const next = { ...prev }
-        delete next[tempId]
+        delete next[transcriptionId]
         return next
       })
+      removeJob(transcriptionId)
       throw err
     } finally {
       setIsUploading(false)
@@ -321,7 +342,7 @@ export function useTranscription() {
   // Cancel transcription
   const handleCancelTranscription = async (transcriptionId: string) => {
     try {
-      await transcriptionApi.cancelTranscription(transcriptionId)
+      await cancelJob(transcriptionId)
       setActiveJobs((prev) => {
         const next = { ...prev }
         delete next[transcriptionId]
@@ -347,6 +368,7 @@ export function useTranscription() {
         delete next[transcriptionId]
         return next
       })
+      removeJob(transcriptionId)
       if (selectedTranscriptionId === transcriptionId) {
         setViewMode('dashboard')
         setSelectedTranscriptionId(null)
@@ -403,6 +425,7 @@ export function useTranscription() {
       delete next[id]
       return next
     })
+    removeJob(id)
   }
 
   // Active progress for selected transcription

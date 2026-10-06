@@ -194,7 +194,12 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       if (stored) {
         const parsed: Record<string, TranscriptionProgress> = JSON.parse(stored)
         for (const [id, job] of Object.entries(parsed)) {
-          if (job.status !== 'complete' && job.status !== 'failed' && job.status !== 'cancelled') {
+          if (
+            !id.startsWith('upload_') &&
+            job.status !== 'complete' &&
+            job.status !== 'failed' &&
+            job.status !== 'cancelled'
+          ) {
             const title = job.title || (job.model_info ? `Transcribir (${job.model_info})` : 'Transcribir Audio')
             addOrUpdateJob({
               id,
@@ -353,29 +358,58 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
 
               const isComplete = data.stage === 'complete' || data.progress === 100
               const isFailed = data.stage === 'failed'
+              const isCancelled = data.stage === 'cancelled' || data.status === 'cancelled'
 
               let stageText = 'Procesando...'
-              if (isComplete) stageText = 'Completado'
-              else if (isFailed) stageText = data.error || data.message || 'Error en procesamiento'
-              else if (data.stage && STAGE_TRANSLATIONS[data.stage.toLowerCase()]) {
+              if (isComplete) {
+                stageText = 'Completado'
+              } else if (isFailed) {
+                stageText = data.error || data.message || 'Error en procesamiento'
+              } else if (isCancelled) {
+                stageText = 'Transcripción cancelada'
+              } else if (data.message) {
+                stageText = data.message
+              } else if (data.stage && STAGE_TRANSLATIONS[data.stage.toLowerCase()]) {
                 stageText = STAGE_TRANSLATIONS[data.stage.toLowerCase()]
-              } else if (data.message) stageText = data.message
+              }
+
+              // Auto-dismiss completed job after 4 seconds
+              if (isComplete) {
+                if (dismissTimersRef.current[id]) {
+                  window.clearTimeout(dismissTimersRef.current[id])
+                }
+                dismissTimersRef.current[id] = window.setTimeout(() => {
+                  removeJob(id)
+                  delete dismissTimersRef.current[id]
+                }, 4000)
+              }
+
+              // Auto-dismiss failed or cancelled job after 4 seconds
+              if (isFailed || isCancelled) {
+                if (dismissTimersRef.current[id]) {
+                  window.clearTimeout(dismissTimersRef.current[id])
+                }
+                dismissTimersRef.current[id] = window.setTimeout(() => {
+                  removeJob(id)
+                  delete dismissTimersRef.current[id]
+                }, 4000)
+              }
 
               addOrUpdateJob({
                 id,
                 type: 'transcription',
                 title: data.title || job.title,
-                progress: typeof data.progress === 'number' ? data.progress : job.progress,
-                status: isComplete ? 'complete' : isFailed ? 'failed' : 'transcribing',
+                progress: isComplete ? 100 : typeof data.progress === 'number' ? data.progress : job.progress,
+                status: isComplete ? 'complete' : isFailed ? 'failed' : isCancelled ? 'cancelled' : 'transcribing',
                 stageText,
-                speedOrSize: data.preview || job.speedOrSize,
-                eta: data.eta || job.eta,
+                speedOrSize: data.preview || null,
+                eta: isComplete || isFailed || isCancelled ? null : data.eta || null,
                 onCancel: () => void cancelJob(id),
                 onClick: () => navigate('/funcional/transcripciones'),
                 onDismiss: () => removeJob(id),
               })
 
-              if (isComplete || isFailed) {
+              if (isComplete || isFailed || isCancelled) {
                 es.close()
                 delete sseConnectionsRef.current[id]
               }

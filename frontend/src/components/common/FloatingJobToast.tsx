@@ -126,8 +126,10 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
 
                 {/* Bottom Info Row: speed/size, eta, percentage */}
                 <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
-                  <span className="truncate max-w-[170px]" title={task.stageText || ''}>
-                    {task.speedOrSize || task.stageText || `${task.progress}%`}
+                  <span className="truncate max-w-[190px]" title={task.stageText || task.speedOrSize || ''}>
+                    {task.type === 'download'
+                      ? task.speedOrSize || task.stageText || `${task.progress}%`
+                      : task.stageText || task.speedOrSize || `${task.progress}%`}
                   </span>
 
                   <div className="flex items-center gap-2 shrink-0">

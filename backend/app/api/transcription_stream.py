@@ -13,38 +13,56 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/transcription", tags=["transcription-streaming"])
 
-# Global store: transcription_id -> asyncio.Queue of progress updates
-_PROGRESS_QUEUES: Dict[str, asyncio.Queue] = {}
+# Global store: transcription_id -> Set of subscriber asyncio.Queue
+_PROGRESS_SUBSCRIBERS: Dict[str, set[asyncio.Queue]] = {}
 _ACTIVE_STREAMS: Dict[str, int] = {}
 _LATEST_PROGRESS: Dict[str, dict[str, Any]] = {}
 
 
+def register_subscriber(transcription_id: str) -> asyncio.Queue:
+  """Create and register a dedicated progress queue for an SSE subscriber."""
+  if transcription_id not in _PROGRESS_SUBSCRIBERS:
+    _PROGRESS_SUBSCRIBERS[transcription_id] = set()
+  q: asyncio.Queue = asyncio.Queue(maxsize=50)
+  _PROGRESS_SUBSCRIBERS[transcription_id].add(q)
+  return q
+
+
+def unregister_subscriber(transcription_id: str, q: asyncio.Queue) -> None:
+  """Unregister a subscriber queue."""
+  if transcription_id in _PROGRESS_SUBSCRIBERS:
+    _PROGRESS_SUBSCRIBERS[transcription_id].discard(q)
+    if not _PROGRESS_SUBSCRIBERS[transcription_id]:
+      del _PROGRESS_SUBSCRIBERS[transcription_id]
+
+
 def get_or_create_progress_queue(transcription_id: str) -> asyncio.Queue:
-  """Get or create progress queue for a transcription (max 50 pending updates)."""
-  if transcription_id not in _PROGRESS_QUEUES:
-    _PROGRESS_QUEUES[transcription_id] = asyncio.Queue(maxsize=50)
-  return _PROGRESS_QUEUES[transcription_id]
+  """Get or create progress queue for a transcription (for test compatibility)."""
+  return register_subscriber(transcription_id)
 
 
 async def emit_progress(transcription_id: str, update: Dict[str, Any]) -> None:
   """
   Emit a progress update to all listening clients via SSE.
+  Broadcasts the message to all registered subscriber queues.
   """
   try:
-    queue = get_or_create_progress_queue(transcription_id)
     if "timestamp" not in update:
       update["timestamp"] = datetime.now(timezone.utc).isoformat()
     _LATEST_PROGRESS[transcription_id] = update
 
-    # If queue is full, drain one old item to make room for latest update
-    if queue.full():
+    subscribers = _PROGRESS_SUBSCRIBERS.get(transcription_id, set()).copy()
+    for q in subscribers:
+      if q.full():
+        try:
+          q.get_nowait()
+        except asyncio.QueueEmpty:
+          pass
       try:
-        queue.get_nowait()
-      except asyncio.QueueEmpty:
+        q.put_nowait(update)
+      except Exception:
         pass
-
-    queue.put_nowait(update)
-    logger.debug(f"Progress emitted: {transcription_id} - {update.get('stage')} {update.get('progress')}%")
+    logger.debug(f"Progress emitted: {transcription_id} - {update.get('stage')} {update.get('progress')}% to {len(subscribers)} subscribers")
   except Exception as e:
     logger.warning(f"Failed to emit progress for {transcription_id}: {e}")
 
@@ -59,12 +77,14 @@ def emit_progress_sync(transcription_id: str, update: Dict[str, Any]) -> None:
 
 
 async def _cleanup_queue_after_delay(transcription_id: str, delay_seconds: int = 300) -> None:
-  """Remove queue after delay if no clients are connected."""
+  """Clean up cached progress status after delay."""
   await asyncio.sleep(delay_seconds)
   if _ACTIVE_STREAMS.get(transcription_id, 0) == 0:
-    if transcription_id in _PROGRESS_QUEUES:
-      del _PROGRESS_QUEUES[transcription_id]
-      logger.info(f"Cleaned up progress queue: {transcription_id}")
+    if transcription_id in _LATEST_PROGRESS:
+      stage = str(_LATEST_PROGRESS[transcription_id].get("stage") or "")
+      if stage in {"complete", "failed", "cancelled"}:
+        del _LATEST_PROGRESS[transcription_id]
+        logger.info(f"Cleaned up progress status cache: {transcription_id}")
 
 
 async def transcription_progress_stream(transcription_id: str) -> AsyncGenerator[str, None]:
@@ -72,7 +92,7 @@ async def transcription_progress_stream(transcription_id: str) -> AsyncGenerator
   SSE stream generator for transcription progress.
   Pushes updates in real time and sends a heartbeat every 20 seconds.
   """
-  queue = get_or_create_progress_queue(transcription_id)
+  queue = register_subscriber(transcription_id)
   _ACTIVE_STREAMS[transcription_id] = _ACTIVE_STREAMS.get(transcription_id, 0) + 1
   logger.info(f"SSE client connected for {transcription_id} (active: {_ACTIVE_STREAMS[transcription_id]})")
 
@@ -124,6 +144,7 @@ async def transcription_progress_stream(transcription_id: str) -> AsyncGenerator
     }
     yield f"data: {json.dumps(error_event)}\n\n"
   finally:
+    unregister_subscriber(transcription_id, queue)
     _ACTIVE_STREAMS[transcription_id] = max(0, _ACTIVE_STREAMS.get(transcription_id, 1) - 1)
     logger.info(f"SSE client disconnected: {transcription_id} (active: {_ACTIVE_STREAMS[transcription_id]})")
     asyncio.create_task(_cleanup_queue_after_delay(transcription_id, delay_seconds=180))
