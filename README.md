@@ -66,6 +66,7 @@ La documentación técnica completa está disponible en **[`docs/`](./docs/)**:
 - **[ARCHITECTURE](./docs/ARCHITECTURE.md)** — Diseño del sistema, flujos, principios
 - **[BACKEND](./docs/BACKEND.md)** — Módulos Python, endpoints FastAPI, AI engine
 - **[FRONTEND](./docs/FRONTEND.md)** — Componentes React, hooks, gestión de estado
+- **[CI/CD & DESKTOP RELEASES](./docs/CICD_RELEASE_GUIDE.md)** — Pipeline automatizado de GitHub Actions y releases Tauri (.msi / .exe)
 
 ---
 
