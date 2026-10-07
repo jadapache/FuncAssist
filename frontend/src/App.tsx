@@ -6,6 +6,7 @@ import { FloatingJobToast } from './components/common/FloatingJobToast'
 import { UserProvider } from './context/UserContext'
 import { ToastProvider } from './context/ToastContext'
 import { BackgroundJobProvider, useBackgroundJobs } from './context/BackgroundJobContext'
+import { TranscriptionProvider } from './features/transcription'
 import { ErrorBoundary } from './core/providers/ErrorBoundary'
 import { DashboardPage } from './pages/DashboardPage'
 import { AskProductPage } from './pages/conocimiento/AskProductPage'
@@ -58,9 +59,10 @@ export const App = () => {
         <UserProvider>
           <BrowserRouter>
             <BackgroundJobProvider>
-              <ToastContainer />
-              <GlobalFloatingJobs />
-              <Routes>
+              <TranscriptionProvider>
+                <ToastContainer />
+                <GlobalFloatingJobs />
+                <Routes>
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
                   {/* Dashboard - all roles */}
@@ -99,6 +101,7 @@ export const App = () => {
                 </Route>
               </Route>
             </Routes>
+              </TranscriptionProvider>
             </BackgroundJobProvider>
           </BrowserRouter>
         </UserProvider>
