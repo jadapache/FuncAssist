@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   X,
   Loader2,
+  Ban,
 } from 'lucide-react'
 import type { BackgroundJobItem } from '../../context/BackgroundJobContext'
 
@@ -32,7 +33,9 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
       {jobs.map((task) => {
         const isComplete = task.status === 'complete'
         const isFailed = task.status === 'failed'
-        const inProgress = !isComplete && !isFailed
+        const isCancelled = task.status === 'cancelled'
+        const inProgress = !isComplete && !isFailed && !isCancelled
+        const isCancelling = inProgress && Boolean(task.stageText?.toLowerCase().startsWith('cancelando'))
 
         const renderIcon = () => {
           if (isComplete) {
@@ -41,11 +44,14 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
           if (isFailed) {
             return <AlertTriangle className="h-4 w-4 text-red-600" />
           }
+          if (isCancelled) {
+            return <Ban className="h-4 w-4 text-slate-500" />
+          }
           if (task.type === 'download') {
             return <Download className="h-4 w-4 text-slate-700 animate-pulse" />
           }
           if (task.type === 'transcription') {
-            return <Mic className="h-4 w-4 text-slate-700" />
+            return <Mic className="h-4 w-4 text-slate-700 animate-pulse" />
           }
           return <Loader2 className="h-4 w-4 text-slate-700 animate-spin" />
         }
@@ -81,15 +87,22 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                   {inProgress && (task.onCancel || onCancelJob) && (
                     <button
                       type="button"
+                      disabled={isCancelling}
                       onClick={(e) => {
                         e.stopPropagation()
+                        if (isCancelling) return
                         if (task.onCancel) task.onCancel()
                         else onCancelJob?.(task.id)
                       }}
-                      className="text-[11px] font-semibold text-slate-400 hover:text-red-600 transition shrink-0 cursor-pointer"
-                      title="Cancelar proceso"
+                      className={[
+                        'text-[11px] font-semibold transition shrink-0',
+                        isCancelling
+                          ? 'text-slate-400 cursor-not-allowed animate-pulse'
+                          : 'text-slate-400 hover:text-red-600 cursor-pointer',
+                      ].join(' ')}
+                      title={isCancelling ? 'Cancelando proceso...' : 'Cancelar proceso'}
                     >
-                      Cancelar
+                      {isCancelling ? 'Cancelando...' : 'Cancelar'}
                     </button>
                   )}
 
@@ -118,6 +131,8 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                         ? 'bg-emerald-600'
                         : isFailed
                         ? 'bg-red-600'
+                        : isCancelled
+                        ? 'bg-slate-400'
                         : 'bg-[#002777]',
                     ].join(' ')}
                     style={{ width: `${Math.min(100, Math.max(4, task.progress))}%` }}
@@ -127,9 +142,7 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                 {/* Bottom Info Row: speed/size, eta, percentage */}
                 <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
                   <span className="truncate max-w-[190px]" title={task.stageText || task.speedOrSize || ''}>
-                    {task.type === 'download'
-                      ? task.speedOrSize || task.stageText || `${task.progress}%`
-                      : task.stageText || task.speedOrSize || `${task.progress}%`}
+                    {task.stageText || task.speedOrSize || `${task.progress}%`}
                   </span>
 
                   <div className="flex items-center gap-2 shrink-0">

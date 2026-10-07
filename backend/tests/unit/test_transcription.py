@@ -437,5 +437,41 @@ def test_generate_summary_endpoint(client: TestClient, monkeypatch):
   delete_transcription_record("test-summary-id-999")
 
 
+def test_emit_progress_sync_from_worker_thread():
+  import concurrent.futures
+  import asyncio
+  from app.api.transcription_stream import (
+    register_subscriber,
+    unregister_subscriber,
+    emit_progress_sync,
+    set_main_loop,
+  )
+
+  loop = asyncio.new_event_loop()
+  set_main_loop(loop)
+  test_id = "thread-test-123"
+  q = register_subscriber(test_id)
+
+  def worker_emit():
+    emit_progress_sync(
+      test_id,
+      {"stage": "transcribing", "progress": 62, "message": "Decodificando audio (78% procesado)..."},
+    )
+
+  with concurrent.futures.ThreadPoolExecutor() as executor:
+    future = executor.submit(worker_emit)
+    future.result()
+
+  # Run the loop to process the thread-safe scheduled coroutine
+  async def drain():
+    item = await asyncio.wait_for(q.get(), timeout=2.0)
+    assert item["progress"] == 62
+    assert item["message"] == "Decodificando audio (78% procesado)..."
+
+  loop.run_until_complete(drain())
+  unregister_subscriber(test_id, q)
+  loop.close()
+
+
 
 

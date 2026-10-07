@@ -15,6 +15,10 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+  import asyncio
+  from app.api.transcription_stream import set_main_loop
+
+  set_main_loop(asyncio.get_running_loop())
   ensure_local_dirs()
   ensure_knowledge_dirs()
   ensure_ai_files()

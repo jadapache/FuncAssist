@@ -18,8 +18,9 @@ export type {
   MediaMetadata,
 } from './api/transcriptionApi'
 
-// Hooks
-export { useTranscription } from './hooks/useTranscription'
+// Hooks & Context
+export { useTranscription, TranscriptionProvider } from './hooks/useTranscription'
+export type { TranscriptionContextValue } from './hooks/useTranscription'
 export { useTranscriptionProgress } from './hooks/useTranscriptionProgress'
 export type { TranscriptionProgressData } from './hooks/useTranscriptionProgress'
 

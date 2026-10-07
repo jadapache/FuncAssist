@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
-from app.api.transcription_stream import emit_progress_sync
+from app.api.transcription_stream import emit_progress_sync, set_main_loop
 from app.context.knowledge import ingest_document
 from app.core.storage import load_app_settings
 from app.features.transcription.diarization import SpeakerDiarization
@@ -261,6 +261,7 @@ class TranscriptionService:
       self._update_progress(prog)
       raise ValueError(err_msg)
 
+    set_main_loop(asyncio.get_running_loop())
     start_time = time.time()
 
     def _check_cancelled():
