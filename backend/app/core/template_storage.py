@@ -17,9 +17,9 @@ try:
 except ImportError:
     docx = None
 
-from app.core.settings import LOCAL_DIR, SETTINGS_DIR, ensure_local_dirs
+from app.core.settings import SETTINGS_DIR, USER_DATA_DIR, ensure_local_dirs
 
-TEMPLATES_DIR = LOCAL_DIR / "templates"
+TEMPLATES_DIR = USER_DATA_DIR / "templates"
 INDEX_FILE = SETTINGS_DIR / "templates_index.json"
 
 DEFAULT_SYSTEM_TAGS: List[Dict[str, str]] = [

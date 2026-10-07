@@ -222,6 +222,13 @@ export const VoiceAudioSection = ({
                       ? `${catalogMb} MB`
                       : m.size || '75 MB'
 
+                  const engineLabel =
+                    m.id.startsWith('fw-') || ('provider' in m && m.provider === 'faster-whisper')
+                      ? 'Faster Whisper (CTranslate2)'
+                      : m.id.startsWith('moonshine') || ('provider' in m && m.provider === 'moonshine')
+                      ? 'Moonshine (Useful Sensors)'
+                      : 'Whisper Oficial (PyTorch)'
+
                   return (
                     <div
                       key={m.id}
@@ -236,6 +243,9 @@ export const VoiceAudioSection = ({
                       <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <h5 className="font-bold text-slate-900 text-base">{m.name}</h5>
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-700 border border-slate-200">
+                            {engineLabel}
+                          </span>
                           {isDownloaded ? (
                             <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
                               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />

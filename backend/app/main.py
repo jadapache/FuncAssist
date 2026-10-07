@@ -17,12 +17,26 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 async def lifespan(app: FastAPI):
   import asyncio
   from app.api.transcription_stream import set_main_loop
+  from app.core.index_refresher import run_index_refresher
+  from app.core.migration import migrate_paths_if_needed
 
-  set_main_loop(asyncio.get_running_loop())
+  loop = asyncio.get_running_loop()
+  set_main_loop(loop)
   ensure_local_dirs()
+  migrate_paths_if_needed()
   ensure_knowledge_dirs()
   ensure_ai_files()
-  yield
+
+  refresher_task = asyncio.create_task(run_index_refresher())
+
+  try:
+    yield
+  finally:
+    refresher_task.cancel()
+    try:
+      await refresher_task
+    except (asyncio.CancelledError, Exception):
+      pass
 
 
 def create_app() -> FastAPI:

@@ -12,12 +12,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.core.settings import LOCAL_DIR
+import shutil
+from app.core.settings import ROOT_DIR, USER_DATA_DIR
 from app.models import AIModelInfo, ModelCatalogResponse
 
 logger = logging.getLogger(__name__)
 
-CATALOG_FILE = LOCAL_DIR / "ai" / "models_catalog.json"
+CATALOG_FILE = USER_DATA_DIR / "ai" / "models_catalog.json"
+FALLBACK_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "models_catalog.json"
 
 _catalog_cache: list[AIModelInfo] | None = None
 _catalog_cache_ts: float = 0.0
@@ -25,25 +27,33 @@ _CACHE_TTL_SECONDS = 300  # 5 minutos
 
 
 def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
-    """Load verified model list from local/ai/models_catalog.json file."""
+    """Load verified model list from models_catalog.json file."""
     global _catalog_cache, _catalog_cache_ts
 
     now = time.monotonic()
     if not refresh and _catalog_cache is not None and (now - _catalog_cache_ts) < _CACHE_TTL_SECONDS:
         return _catalog_cache
 
-    if not CATALOG_FILE.exists():
-        logger.error(f"Catalog file not found at {CATALOG_FILE}")
-        return []
+    target_file = CATALOG_FILE
+    if not target_file.exists():
+        if FALLBACK_CATALOG_FILE.exists():
+            try:
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(FALLBACK_CATALOG_FILE, target_file)
+            except Exception:
+                target_file = FALLBACK_CATALOG_FILE
+        else:
+            logger.error(f"Catalog file not found at {CATALOG_FILE}")
+            return []
 
     try:
-        with open(CATALOG_FILE, "r", encoding="utf-8") as f:
+        with open(target_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         _catalog_cache = [AIModelInfo(**item) for item in data]
         _catalog_cache_ts = now
         return _catalog_cache
     except Exception as e:
-        logger.error(f"Failed to load AI models catalog from {CATALOG_FILE}: {e}")
+        logger.error(f"Failed to load AI models catalog from {target_file}: {e}")
         return []
 
 

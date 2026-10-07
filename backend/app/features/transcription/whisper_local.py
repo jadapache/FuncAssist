@@ -12,40 +12,59 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+from app.core.settings import WHISPER_MODELS_DIR
+
 def get_whisper_cache_dir() -> Path:
-  cache_dir = Path(os.path.expanduser("~")) / ".cache" / "whisper"
-  cache_dir.mkdir(parents=True, exist_ok=True)
-  return cache_dir
+  WHISPER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+  return WHISPER_MODELS_DIR
 
 
 def get_local_models_info() -> List[Dict[str, Any]]:
-  """Inspects the local cache directory to list all Whisper models and their download status based on models_catalog.json."""
-  from app.ai.catalog import load_local_catalog
+  """Inspects the local cache directory to list all local transcription models and their download status."""
+  from app.ai.builtin_local import load_builtin_catalog
+
   cache_dir = get_whisper_cache_dir()
   results: List[Dict[str, Any]] = []
 
   try:
-    all_models = load_local_catalog()
-    builtin_whisper = [m for m in all_models if m.provider == "builtin" and m.task_type == "transcription"]
+    catalog_models = load_builtin_catalog(task_type="transcription")
   except Exception:
-    builtin_whisper = []
+    catalog_models = {}
 
-  if builtin_whisper:
-    for m in builtin_whisper:
-      clean_id = m.id.replace("whisper-", "")
-      model_file = cache_dir / f"{clean_id}.pt"
-      is_downloaded = model_file.exists() and model_file.stat().st_size > 1024 * 1024
-      disk_size_mb = round(model_file.stat().st_size / (1024 * 1024), 1) if is_downloaded else 0.0
+  if catalog_models:
+    for model_id, m in catalog_models.items():
+      provider = m.get("provider", "builtin")
+      clean_id = model_id.replace("whisper-", "")
+
+      if provider == "faster-whisper" or model_id.startswith("fw-"):
+        fw_size = model_id.replace("fw-", "").replace("faster-whisper-", "")
+        fw_dir = cache_dir / f"faster-whisper-{fw_size}"
+        model_bin = fw_dir / "model.bin"
+        is_downloaded = model_bin.exists() and model_bin.stat().st_size > 1024 * 1024
+        disk_size_mb = round(model_bin.stat().st_size / (1024 * 1024), 1) if is_downloaded else 0.0
+        file_path = str(fw_dir) if is_downloaded else None
+      elif provider == "moonshine" or model_id.startswith("moonshine"):
+        m_dir = cache_dir / model_id
+        is_downloaded = m_dir.exists() and any(m_dir.iterdir()) if m_dir.exists() else False
+        disk_size_mb = 90.0 if (is_downloaded and "tiny" in model_id) else (360.0 if is_downloaded else 0.0)
+        file_path = str(m_dir) if is_downloaded else None
+      else:
+        model_file = cache_dir / f"{clean_id}.pt"
+        is_downloaded = model_file.exists() and model_file.stat().st_size > 1024 * 1024
+        disk_size_mb = round(model_file.stat().st_size / (1024 * 1024), 1) if is_downloaded else 0.0
+        file_path = str(model_file) if is_downloaded else None
 
       results.append({
-        "id": clean_id,
-        "name": m.name,
-        "size": m.size or "142 MB",
-        "accuracy": m.accuracy or "Estándar",
-        "description": m.description,
+        "id": model_id,
+        "name": m.get("name", f"Whisper {model_id.title()}"),
+        "size": m.get("size", "142 MB"),
+        "accuracy": m.get("accuracy", "Estándar"),
+        "description": m.get("description", ""),
+        "provider": provider,
+        "engine": m.get("engine", "openai-whisper"),
         "is_downloaded": is_downloaded,
         "disk_size_mb": disk_size_mb,
-        "file_path": str(model_file) if is_downloaded else None,
+        "file_path": file_path,
       })
     return results
 
@@ -263,10 +282,15 @@ def download_model_file(
 
 
 def delete_model_file(model_id: str) -> bool:
-  """Deletes a downloaded Whisper model file from the cache directory."""
+  """Deletes a downloaded local transcription model file or directory from the cache directory."""
   cache_dir = get_whisper_cache_dir()
-  target_file = cache_dir / f"{model_id}.pt"
-  tmp_file = cache_dir / f"{model_id}.pt.download"
+  clean = model_id.strip().lower()
+  clean_fw = clean.replace("fw-", "").replace("faster-whisper-", "")
+  
+  target_file = cache_dir / f"{clean}.pt"
+  tmp_file = cache_dir / f"{clean}.pt.download"
+  fw_dir = cache_dir / f"faster-whisper-{clean_fw}"
+  m_dir = cache_dir / clean
 
   deleted = False
   if target_file.exists():
@@ -278,6 +302,24 @@ def delete_model_file(model_id: str) -> bool:
       logger.error(f"Error deleting model file {target_file}: {exc}")
       raise
 
+  if fw_dir.exists() and fw_dir.is_dir():
+    try:
+      shutil.rmtree(fw_dir, ignore_errors=True)
+      deleted = True
+      logger.info(f"Deleted faster-whisper model dir: {fw_dir}")
+    except Exception as exc:
+      logger.error(f"Error deleting model directory {fw_dir}: {exc}")
+      raise
+
+  if m_dir.exists() and m_dir.is_dir():
+    try:
+      shutil.rmtree(m_dir, ignore_errors=True)
+      deleted = True
+      logger.info(f"Deleted moonshine model dir: {m_dir}")
+    except Exception as exc:
+      logger.error(f"Error deleting model directory {m_dir}: {exc}")
+      raise
+
   if tmp_file.exists():
     try:
       tmp_file.unlink()
@@ -286,6 +328,7 @@ def delete_model_file(model_id: str) -> bool:
 
   with _WHISPER_LOCK:
     _WHISPER_DOWNLOADS.pop(model_id, None)
+    _WHISPER_DOWNLOADS.pop(clean, None)
 
   return deleted
 
@@ -434,25 +477,13 @@ class WhisperLocalService:
 
 def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
   """
-  Extract audio from a video file and convert to 16 kHz mono PCM WAV for local Whisper.
-
-  Passthrough rules (no re-encoding):
-  - WAV files are returned as-is (already the target format).
-  - Native audio formats that openai-whisper loads directly (.mp3, .flac, .m4a, .ogg, .opus)
-    are returned as-is — Whisper resamples them internally to 16 kHz.
-
-  Conversion is applied only when:
-  - The file is a video container (.mp4, .mkv, .webm, .avi, .mov, etc.)
-  - The audio format is unsupported by Whisper directly (.wma, .weba, .aac, .oga, etc.)
+  Extract audio from a video or non-WAV audio file and convert to 16 kHz mono PCM WAV.
+  Returns output_wav_path if converted, or media_path if already .wav or ffmpeg is unavailable.
   """
   suffix = media_path.suffix.lower()
-
-  # Formats openai-whisper handles natively — no re-encoding needed
-  WHISPER_NATIVE_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".opus"}
-  if suffix in WHISPER_NATIVE_FORMATS:
+  if suffix == ".wav":
     return media_path
 
-  # For anything else (video containers or unsupported audio), convert via ffmpeg
   ffmpeg_cmd = shutil.which("ffmpeg")
   if not ffmpeg_cmd:
     return media_path

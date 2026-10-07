@@ -18,6 +18,7 @@ from app.features.levantamiento.docx_builder import create_levantamiento_docx
 from app.features.transcription.service import transcription_service
 from app.features.transcription.summarizer import summarize_transcript
 from app.features.transcription.storage import (
+  allocate_transcription_folder,
   delete_transcription_record,
   get_media_destination,
   get_media_entry,
@@ -51,22 +52,26 @@ async def upload_media(
   file: UploadFile = File(...),
   title: str = Form(...),
   description: str = Form(default=""),
+  transcription_id: Optional[str] = Form(default=None),
 ) -> dict[str, Any]:
   """Upload media file (audio or video) for transcription."""
   content = await file.read()
   if not content:
     raise HTTPException(status_code=400, detail="El archivo subido está vacío.")
 
+  tid = transcription_id or str(uuid.uuid4())
   try:
-    entry = save_media_file(
+    entry = allocate_transcription_folder(
+      transcription_id=tid,
       file_bytes=content,
-      filename=file.filename or "audio_file",
+      original_filename=file.filename or "audio_file",
       title=title,
       description=description,
     )
     return {
       "ok": True,
-      "media_id": entry["id"],
+      "media_id": tid,
+      "transcription_id": tid,
       "entry": entry,
       "message": "Archivo multimedia cargado con éxito.",
     }
@@ -87,16 +92,15 @@ async def upload_stream(
   Stream-based file upload with real-time progress tracking.
   Writes file chunks to disk without memory overhead and emits SSE progress.
   """
-  if not transcription_id:
-    transcription_id = str(uuid.uuid4())
+  tid = transcription_id or str(uuid.uuid4())
   filename = file.filename or "audio_file"
-  media_id, file_path, stored_filename = get_media_destination(filename)
+  media_id, file_path, stored_filename = get_media_destination(filename, media_id=tid)
 
   sha = hashlib.sha256()
   received_bytes = 0
   chunk_size = 1024 * 1024  # 1MB chunks
 
-  await emit_progress(transcription_id, {
+  await emit_progress(tid, {
     "stage": "uploading",
     "progress": 0,
     "message": f"Iniciando subida de {filename}...",
@@ -136,7 +140,7 @@ async def upload_stream(
       description=description,
     )
 
-    await emit_progress(transcription_id, {
+    await emit_progress(tid, {
       "stage": "uploading",
       "progress": 10,
       "message": "Archivo cargado con éxito. Preparando procesamiento...",
@@ -145,7 +149,7 @@ async def upload_stream(
     return {
       "ok": True,
       "media_id": media_id,
-      "transcription_id": transcription_id,
+      "transcription_id": tid,
       "size": received_bytes,
       "filename": filename,
       "entry": entry,
@@ -159,7 +163,7 @@ async def upload_stream(
         file_path.unlink()
       except Exception:
         pass
-    await emit_progress(transcription_id, {
+    await emit_progress(tid, {
       "stage": "failed",
       "progress": 0,
       "message": f"Error en la subida: {exc}",
