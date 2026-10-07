@@ -433,7 +433,26 @@ class WhisperLocalService:
 
 
 def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
-  """Extract audio from video or convert audio format to 16kHz WAV if ffmpeg is present."""
+  """
+  Extract audio from a video file and convert to 16 kHz mono PCM WAV for local Whisper.
+
+  Passthrough rules (no re-encoding):
+  - WAV files are returned as-is (already the target format).
+  - Native audio formats that openai-whisper loads directly (.mp3, .flac, .m4a, .ogg, .opus)
+    are returned as-is — Whisper resamples them internally to 16 kHz.
+
+  Conversion is applied only when:
+  - The file is a video container (.mp4, .mkv, .webm, .avi, .mov, etc.)
+  - The audio format is unsupported by Whisper directly (.wma, .weba, .aac, .oga, etc.)
+  """
+  suffix = media_path.suffix.lower()
+
+  # Formats openai-whisper handles natively — no re-encoding needed
+  WHISPER_NATIVE_FORMATS = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".opus"}
+  if suffix in WHISPER_NATIVE_FORMATS:
+    return media_path
+
+  # For anything else (video containers or unsupported audio), convert via ffmpeg
   ffmpeg_cmd = shutil.which("ffmpeg")
   if not ffmpeg_cmd:
     return media_path
@@ -443,10 +462,10 @@ def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
       ffmpeg_cmd,
       "-y",
       "-i", str(media_path),
-      "-vn",
-      "-acodec", "pcm_s16le",
-      "-ar", "16000",
-      "-ac", "1",
+      "-vn",                  # strip video stream
+      "-acodec", "pcm_s16le", # 16-bit PCM — native Whisper input
+      "-ar", "16000",         # 16 kHz — Whisper's required sample rate
+      "-ac", "1",             # mono
       str(output_wav_path),
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
