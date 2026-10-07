@@ -8,17 +8,24 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from app.api.transcription_stream import emit_progress_sync, set_main_loop
 from app.context.knowledge import ingest_document
 from app.core.storage import load_app_settings
 from app.features.transcription.diarization import SpeakerDiarization
+from app.features.transcription.providers import (
+  get_provider,
+  list_all_providers,
+  list_available_providers,
+)
 from app.features.transcription.storage import (
   delete_active_job_progress,
   delete_transcription_record,
+  get_audio_path_for_transcription,
   get_media_entry,
-  get_media_path,
+  get_media_path_for_transcription,
+  get_transcription_dir,
   get_transcription_record,
   load_active_job_progress,
   save_active_job_progress,
@@ -59,6 +66,44 @@ def _format_eta(seconds: float) -> str:
   return f"~{secs} s"
 
 
+def _resolve_provider(provider_id: str, model_id: str):
+  """
+  Select provider. Falls back gracefully:
+  1. Use explicitly configured provider_id
+  2. Auto-detect from model_id prefix
+  3. Fall back to whisper-python or first available provider
+  """
+  if provider_id and provider_id not in ("auto", "local", "builtin", "cloud"):
+    p = get_provider(provider_id)
+    if p and p.is_available():
+      return p
+
+  # Auto-detect from model_id
+  if model_id.startswith("fw-") or "faster-whisper" in model_id:
+    p = get_provider("faster-whisper")
+    if p and p.is_available():
+      return p
+  if model_id.startswith("moonshine"):
+    p = get_provider("moonshine")
+    if p and p.is_available():
+      return p
+
+  # Default: openai-whisper
+  p = get_provider("whisper-python")
+  if p and p.is_available():
+    return p
+
+  # Any available provider
+  available = list_available_providers()
+  if available:
+    return available[0]
+
+  raise RuntimeError(
+    "No hay ningún motor de transcripción disponible. "
+    "Instala openai-whisper o faster-whisper."
+  )
+
+
 class TranscriptionService:
   def __init__(self):
     self.local_service = WhisperLocalService()
@@ -95,7 +140,7 @@ class TranscriptionService:
     if record:
       return TranscriptionProgress(
         id=transcription_id,
-        media_id=record.get("media_id", ""),
+        media_id=record.get("media_id", transcription_id),
         status="complete",
         stage="complete",
         progress=100,
@@ -117,15 +162,6 @@ class TranscriptionService:
       job.eta = None
       self._update_progress(job)
 
-      # Clean up uploaded media file immediately
-      if job.media_id:
-        media_path = get_media_path(job.media_id)
-        if media_path and media_path.exists():
-          try:
-            media_path.unlink()
-          except OSError:
-            pass
-
     delete_active_job_progress(transcription_id)
     delete_transcription_record(transcription_id)
     return True
@@ -145,7 +181,9 @@ class TranscriptionService:
       or ai_cfg.get("openai_api_key")
       or os.getenv("OPENAI_API_KEY")
     )
-    local_avail = self.local_service.is_available()
+
+    available_local_providers = list_available_providers()
+    local_avail = len(available_local_providers) > 0
 
     available = []
     if local_avail:
@@ -157,7 +195,11 @@ class TranscriptionService:
 
     active_label = "Whisper Auto"
     if provider in ("local", "builtin") or (provider == "auto" and local_avail and not groq_key and not openai_key):
-      active_label = f"Whisper Local ({model or 'base'})"
+      try:
+        resolved_prov = _resolve_provider(provider, model)
+        active_label = f"{resolved_prov.display_name} ({model or 'base'})"
+      except Exception:
+        active_label = f"Whisper Local ({model or 'base'})"
     elif provider == "groq" or (groq_key and provider in ("groq", "auto", "cloud")):
       active_label = f"Groq Whisper ({model or 'whisper-large-v3'})"
     elif provider == "openai" or (openai_key and provider in ("openai", "auto", "cloud")):
@@ -167,6 +209,7 @@ class TranscriptionService:
       "configured_provider": provider,
       "configured_model": model,
       "local_available": local_avail,
+      "local_engines": [p.provider_id for p in available_local_providers],
       "groq_configured": groq_key,
       "openai_configured": openai_key,
       "available_providers": available,
@@ -208,7 +251,7 @@ class TranscriptionService:
     model_info_data = self.get_available_models_info()
     active_model_label = model_info_data.get("active_model_label", "Whisper")
 
-    media_entry = get_media_entry(media_id)
+    media_entry = get_media_entry(media_id) or get_media_entry(transcription_id)
     if not media_entry:
       prog = TranscriptionProgress(
         id=transcription_id,
@@ -223,7 +266,7 @@ class TranscriptionService:
       self._update_progress(prog)
       raise FileNotFoundError(f"Media entry {media_id} not found.")
 
-    media_path = get_media_path(media_id)
+    media_path = get_media_path_for_transcription(transcription_id) or get_media_path_for_transcription(media_id)
     if not media_path or not media_path.exists():
       prog = TranscriptionProgress(
         id=transcription_id,
@@ -236,7 +279,7 @@ class TranscriptionService:
         model_info=active_model_label,
       )
       self._update_progress(prog)
-      raise FileNotFoundError(f"Media file on disk for {media_id} not found.")
+      raise FileNotFoundError(f"Media file on disk for {transcription_id} not found.")
 
     # Up-front validation: check if any provider is available
     has_local = model_info_data.get("local_available", False)
@@ -262,7 +305,6 @@ class TranscriptionService:
       raise ValueError(err_msg)
 
     set_main_loop(asyncio.get_running_loop())
-    start_time = time.time()
 
     def _check_cancelled():
       if transcription_id in _CANCELLED_JOBS:
@@ -288,11 +330,20 @@ class TranscriptionService:
       )
 
       audio_track_path = media_path
-      if media_entry.get("is_video"):
-        audio_candidate = media_path.with_suffix(".wav")
+      if media_entry.get("is_video") or media_path.suffix.lower() != ".wav":
+        transcription_folder = get_transcription_dir(transcription_id)
+        audio_candidate = transcription_folder / "audio.wav"
         audio_track_path = await asyncio.to_thread(extract_audio_track, media_path, audio_candidate)
-        if audio_track_path != media_path:
-          update_media_entry_after_audio_extraction(media_id, audio_track_path)
+        if audio_candidate.exists() and audio_track_path == audio_candidate:
+          # Delete the original non-wav uploaded file (video or non-wav audio) to save disk space
+          if media_path != audio_candidate and media_path.exists():
+            try:
+              media_path.unlink()
+            except Exception as exc:
+              logger.warning(f"Could not delete original non-wav file {media_path}: {exc}")
+          updated_entry = update_media_entry_after_audio_extraction(transcription_id, audio_track_path)
+          if updated_entry:
+            media_entry = updated_entry
 
       _check_cancelled()
 
@@ -334,21 +385,48 @@ class TranscriptionService:
         or (used_mode == "auto" and cfg_provider in ("local", "builtin"))
       )
 
-      if is_local_requested or (used_mode == "auto" and self.local_service.is_available() and not has_groq and not has_openai):
-        target_size = model_size or ai_cfg.get("transcription_model") or "base"
-        if target_size.startswith("whisper-"):
-          target_size = target_size.replace("whisper-", "")
-        self.local_service = WhisperLocalService(model_size=target_size)
-        transcription_output = await asyncio.to_thread(
-          self.local_service.transcribe,
+      if is_local_requested or (used_mode == "auto" and has_local and not has_groq and not has_openai):
+        target_model = model_size or ai_cfg.get("transcription_model") or "base"
+        engine_provider = _resolve_provider(cfg_provider, target_model)
+        active_model_label = f"{engine_provider.display_name} ({target_model})"
+
+        provider_result = await asyncio.to_thread(
+          engine_provider.transcribe,
           audio_track_path,
+          model_id=target_model,
           language=language,
           on_progress=_on_local_progress,
           cancel_check=_local_cancel_check,
         )
+        transcription_output = {
+          "language": provider_result.language,
+          "text": provider_result.text,
+          "segments": [
+            {
+              "start": s.start,
+              "end": s.end,
+              "speaker": s.speaker,
+              "text": s.text,
+            }
+            for s in provider_result.segments
+          ],
+          "duration": provider_result.duration,
+          "provider": provider_result.provider,
+          "engine": provider_result.engine,
+          "model_id": provider_result.model_id,
+        }
       else:
         # Cloud mode (Groq or OpenAI)
-        transcription_output = await self.cloud_service.transcribe(audio_track_path, language=language)
+        cloud_raw = await self.cloud_service.transcribe(audio_track_path, language=language)
+        transcription_output = {
+          "language": cloud_raw.get("language", language or "es"),
+          "text": cloud_raw.get("text", ""),
+          "segments": cloud_raw.get("segments", []),
+          "duration": cloud_raw.get("duration", 0.0),
+          "provider": cfg_provider if cfg_provider in ("groq", "openai") else "groq",
+          "engine": "groq-whisper" if cfg_provider == "groq" else "openai-whisper",
+          "model_id": model_size or ai_cfg.get("transcription_model") or "whisper-large-v3",
+        }
 
       _check_cancelled()
 
@@ -420,7 +498,7 @@ class TranscriptionService:
 
       result = TranscriptionResult(
         id=transcription_id,
-        media_id=media_id,
+        media_id=transcription_id,
         metadata=MediaMetadata(
           title=media_entry.get("title", "Reunión"),
           description=media_entry.get("description", ""),
@@ -436,11 +514,23 @@ class TranscriptionService:
         saved_to_knowledge=False,
       )
 
-      save_transcription_record(result.model_dump())
+      result_dict = result.model_dump()
+      result_dict["provider"] = transcription_output.get("provider", "whisper")
+      result_dict["engine"] = transcription_output.get("engine", "openai-whisper")
+      result_dict["media"] = {
+        "original_filename": media_entry.get("original_filename", media_entry.get("filename", "")),
+        "stored_filename": media_entry.get("stored_filename", media_path.name if media_path else "media"),
+        "size_bytes": file_bytes_val,
+        "file_size_formatted": size_fmt,
+        "is_video": media_entry.get("is_video", False),
+        "hash": media_entry.get("hash", ""),
+      }
+
+      save_transcription_record(result_dict)
 
       final_prog = TranscriptionProgress(
         id=transcription_id,
-        media_id=media_id,
+        media_id=transcription_id,
         title=media_title,
         status="complete",
         stage="complete",

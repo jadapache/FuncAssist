@@ -9,28 +9,37 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import urllib.request
 
-from app.core.settings import LOCAL_DIR
+from app.core.settings import BUILTIN_MODELS_DIR, ROOT_DIR, USER_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
 # Dedicated local JSON catalog path for built-in models
-BUILTIN_CATALOG_FILE = LOCAL_DIR / "ai" / "builtin_models_catalog.json"
+BUILTIN_CATALOG_FILE = USER_DATA_DIR / "ai" / "builtin_models_catalog.json"
+FALLBACK_BUILTIN_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "builtin_models_catalog.json"
 
 # Cache directory for standalone built-in GGUF models (without Ollama)
 def get_builtin_cache_dir() -> Path:
-    cache_dir = Path(os.path.expanduser("~")) / ".cache" / "qa_mgmt" / "models"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
+    BUILTIN_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    return BUILTIN_MODELS_DIR
 
 
 def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str, Dict[str, Any]]:
-    """Loads built-in models directly from local/ai/builtin_models_catalog.json file."""
-    if not BUILTIN_CATALOG_FILE.exists():
-        logger.warning(f"Built-in catalog file not found at {BUILTIN_CATALOG_FILE}")
-        return {}
+    """Loads built-in models directly from builtin_models_catalog.json file."""
+    target_file = BUILTIN_CATALOG_FILE
+    if not target_file.exists():
+        if FALLBACK_BUILTIN_CATALOG_FILE.exists():
+            try:
+                import shutil
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(FALLBACK_BUILTIN_CATALOG_FILE, target_file)
+            except Exception:
+                target_file = FALLBACK_BUILTIN_CATALOG_FILE
+        else:
+            logger.warning(f"Built-in catalog file not found at {BUILTIN_CATALOG_FILE}")
+            return {}
 
     try:
-        with open(BUILTIN_CATALOG_FILE, "r", encoding="utf-8") as f:
+        with open(target_file, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
                 result = {}
@@ -41,7 +50,7 @@ def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str,
                         result[item["id"]] = item
                 return result
     except Exception as e:
-        logger.error(f"Error reading {BUILTIN_CATALOG_FILE}: {e}")
+        logger.error(f"Error reading {target_file}: {e}")
 
     return {}
 

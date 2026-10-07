@@ -124,5 +124,72 @@
     "accuracy": "Alta / Rápido",
     "task_type": "transcription",
     "aliases": ["whisper-large-v3-turbo"]
+  },
+  {
+    "id": "fw-tiny",
+    "name": "Faster Whisper Tiny (CTranslate2)",
+    "tag": "faster-whisper:tiny",
+    "description": "Versión CTranslate2 de Whisper Tiny — hasta 4× más rápido que la versión Python estándar.",
+    "size": "~78 MB",
+    "accuracy": "Básica (Ultra Rápido)",
+    "task_type": "transcription",
+    "provider": "faster-whisper",
+    "engine": "faster-whisper",
+    "hf_repo": "Systran/faster-whisper-tiny",
+    "aliases": ["faster-whisper-tiny"]
+  },
+  {
+    "id": "fw-base",
+    "name": "Faster Whisper Base (CTranslate2)",
+    "tag": "faster-whisper:base",
+    "description": "Versión CTranslate2 de Whisper Base — mejor rendimiento en CPU con precisión equivalente.",
+    "size": "~145 MB",
+    "accuracy": "Estándar (Rápido)",
+    "task_type": "transcription",
+    "provider": "faster-whisper",
+    "engine": "faster-whisper",
+    "hf_repo": "Systran/faster-whisper-base",
+    "aliases": ["faster-whisper-base"]
+  },
+  {
+    "id": "fw-small",
+    "name": "Faster Whisper Small (CTranslate2)",
+    "tag": "faster-whisper:small",
+    "description": "Versión CTranslate2 de Whisper Small. Recomendado para español con hardware moderado.",
+    "size": "~488 MB",
+    "accuracy": "Buena (Rápido)",
+    "task_type": "transcription",
+    "provider": "faster-whisper",
+    "engine": "faster-whisper",
+    "hf_repo": "Systran/faster-whisper-small",
+    "aliases": ["faster-whisper-small"]
+  },
+  {
+    "id": "moonshine-tiny",
+    "name": "Moonshine Tiny (Inglés)",
+    "tag": "moonshine:tiny",
+    "description": "Motor de Useful Sensors optimizado para inglés. Extremadamente ligero (~90 MB), ideal para notas rápidas.",
+    "size": "~90 MB",
+    "accuracy": "Básica (Inglés)",
+    "task_type": "transcription",
+    "provider": "moonshine",
+    "engine": "moonshine",
+    "hf_repo": "UsefulSensors/moonshine-tiny",
+    "language_restriction": "en",
+    "aliases": ["moonshine-tiny"]
+  },
+  {
+    "id": "moonshine-base",
+    "name": "Moonshine Base (Inglés)",
+    "tag": "moonshine:base",
+    "description": "Motor de Useful Sensors de mayor precisión para inglés técnico y reuniones.",
+    "size": "~360 MB",
+    "accuracy": "Buena (Inglés)",
+    "task_type": "transcription",
+    "provider": "moonshine",
+    "engine": "moonshine",
+    "hf_repo": "UsefulSensors/moonshine-base",
+    "language_restriction": "en",
+    "aliases": ["moonshine-base"]
   }
 ]

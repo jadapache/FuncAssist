@@ -473,5 +473,191 @@ def test_emit_progress_sync_from_worker_thread():
   loop.close()
 
 
+def test_guid_folder_layout_and_sidecars():
+  from app.features.transcription.storage import (
+    allocate_transcription_folder,
+    get_transcription_dir,
+    get_media_path_for_transcription,
+    get_audio_path_for_transcription,
+    save_transcription_record,
+    get_transcription_record,
+    delete_transcription_record,
+  )
+
+  tid = "test-guid-folder-001"
+  dummy_bytes = b"RIFF....WAVEfmt ...."
+  entry = allocate_transcription_folder(
+    transcription_id=tid,
+    file_bytes=dummy_bytes,
+    original_filename="sample_meeting.wav",
+    title="Reunion GUID Test",
+    description="Probando estructura GUID",
+  )
+
+  folder = get_transcription_dir(tid)
+  assert folder.exists()
+  assert (folder / "media.wav").exists()
+  assert get_media_path_for_transcription(tid) == folder / "media.wav"
+  assert get_audio_path_for_transcription(tid) == folder / "media.wav"
+
+  # Save transcription record with text and summary
+  record = {
+    "id": tid,
+    "created_at": "2026-10-07T12:00:00Z",
+    "language": "es",
+    "duration_seconds": 120.0,
+    "model_info": "Whisper Base",
+    "provider": "whisper-python",
+    "engine": "openai-whisper",
+    "text": "Esta es la transcripción completa de prueba.",
+    "summary": {
+      "participants": ["Participante 1", "Participante 2"],
+      "topics": ["Arquitectura"],
+      "decisions": ["Usar subcarpetas GUID"],
+      "requirements": ["Sidecars .txt"],
+      "action_items": ["Implementar pruebas"],
+    },
+    "metadata": {"title": "Reunion GUID Test"},
+  }
+  save_transcription_record(record)
+
+  assert (folder / "transcription.json").exists()
+  assert (folder / "transcript.txt").exists()
+  assert (folder / "transcript.txt").read_text(encoding="utf-8") == "Esta es la transcripción completa de prueba."
+  assert (folder / "summary.txt").exists()
+  summary_content = (folder / "summary.txt").read_text(encoding="utf-8")
+  assert "## Participantes" in summary_content
+  assert "## Decisiones" in summary_content
+  assert "Usar subcarpetas GUID" in summary_content
+
+  fetched = get_transcription_record(tid)
+  assert fetched is not None
+  assert fetched["id"] == tid
+
+  # Delete removes folder
+  deleted = delete_transcription_record(tid)
+  assert deleted is True
+  assert not folder.exists()
+
+
+def test_providers_registry_and_resolution():
+  from app.features.transcription.providers import (
+    get_provider,
+    list_all_providers,
+    list_available_providers,
+  )
+  from app.features.transcription.service import _resolve_provider
+
+  all_provs = list_all_providers()
+  assert len(all_provs) >= 2  # OpenAIWhisperProvider, FasterWhisperProvider, MoonshineProvider
+  ids = [p.provider_id for p in all_provs]
+  assert "whisper-python" in ids
+  assert "faster-whisper" in ids
+  assert "moonshine" in ids
+
+  # Check openai-whisper
+  whisper_p = get_provider("whisper-python")
+  assert whisper_p is not None
+  assert whisper_p.display_name == "Whisper (openai-whisper)"
+
+  # Check faster-whisper
+  fw_p = get_provider("faster-whisper")
+  assert fw_p is not None
+  assert fw_p.display_name == "Faster Whisper (CTranslate2)"
+
+  # Check moonshine
+  moon_p = get_provider("moonshine")
+  assert moon_p is not None
+  assert "Moonshine" in moon_p.display_name
+
+  # Provider auto-resolution
+  resolved_fw = _resolve_provider("faster-whisper", "fw-tiny")
+  if fw_p.is_available():
+    assert resolved_fw.provider_id == "faster-whisper"
+
+  resolved_py = _resolve_provider("whisper-python", "base")
+  assert resolved_py.provider_id == "whisper-python"
+
+
+def test_user_data_dir_resolution():
+  from app.core.settings import _get_user_data_dir, USER_DATA_DIR, WHISPER_MODELS_DIR, BUILTIN_MODELS_DIR
+
+  data_dir = _get_user_data_dir()
+  assert data_dir is not None
+  assert str(data_dir).endswith("qa-project-mgmt") or "local" in str(data_dir).lower()
+  assert WHISPER_MODELS_DIR == USER_DATA_DIR / "models" / "whisper"
+  assert BUILTIN_MODELS_DIR == USER_DATA_DIR / "models" / "builtin"
+
+
+@pytest.mark.asyncio
+async def test_index_refresher_tasks():
+  from app.core.index_refresher import (
+    _refresh_templates_index,
+    _refresh_builtin_model_catalog,
+    _refresh_transcription_index,
+  )
+
+  # Should run without throwing errors
+  await _refresh_templates_index()
+  await _refresh_builtin_model_catalog()
+  await _refresh_transcription_index()
+
+
+def test_non_wav_media_cleanup_after_conversion():
+  from app.features.transcription.storage import (
+    allocate_transcription_folder,
+    get_transcription_dir,
+    get_media_path_for_transcription,
+    update_media_entry_after_audio_extraction,
+    save_transcription_record,
+    get_transcription_record,
+    delete_transcription_record,
+  )
+
+  tid = "test-non-wav-cleanup-001"
+  dummy_video_bytes = b"fake-mp4-video-data-content"
+  entry = allocate_transcription_folder(
+    transcription_id=tid,
+    file_bytes=dummy_video_bytes,
+    original_filename="meeting_recording.mp4",
+    title="Grabación MP4",
+  )
+
+  folder = get_transcription_dir(tid)
+  assert (folder / "media.mp4").exists()
+
+  # Create initial record
+  record = {
+    "id": tid,
+    "media": entry,
+    "metadata": {"title": "Grabación MP4"},
+    "created_at": "2026-10-07T12:00:00Z",
+  }
+  save_transcription_record(record)
+
+  # Simulate FFmpeg converting media.mp4 -> audio.wav
+  wav_path = folder / "audio.wav"
+  wav_path.write_bytes(b"RIFF....WAVEfmt ....converted-pcm-16k-mono")
+
+  # Call extraction hook
+  updated_entry = update_media_entry_after_audio_extraction(tid, wav_path)
+  assert updated_entry is not None
+
+  # Verify original media.mp4 was deleted and only audio.wav remains
+  assert not (folder / "media.mp4").exists()
+  assert wav_path.exists()
+  assert get_media_path_for_transcription(tid) == wav_path
+
+  fetched_record = get_transcription_record(tid)
+  assert fetched_record is not None
+  assert fetched_record["media"]["stored_filename"] == "audio.wav"
+  assert fetched_record["media"]["is_video"] is False
+
+  # Clean up
+  delete_transcription_record(tid)
+  assert not folder.exists()
+
+
+
 
 

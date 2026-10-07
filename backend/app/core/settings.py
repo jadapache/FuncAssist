@@ -1,4 +1,5 @@
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -6,12 +7,41 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
-_custom_local = os.getenv("DATA_DIR") or os.getenv("LOCAL_DIR")
-LOCAL_DIR = Path(_custom_local) if _custom_local else ROOT_DIR / "local"
-CONNECTIONS_DIR = LOCAL_DIR / "connections"
-CACHE_DIR = LOCAL_DIR / "cache"
-SETTINGS_DIR = LOCAL_DIR / "settings"
-HISTORY_DIR = LOCAL_DIR / "history"
+
+
+def _get_user_data_dir() -> Path:
+  """
+  Returns the OS-standard user application data directory.
+  Precedence: DATA_DIR env var > LOCAL_DIR env var > platform default.
+  """
+  env_override = os.getenv("DATA_DIR") or os.getenv("LOCAL_DIR")
+  if env_override:
+    return Path(env_override)
+
+  app_name = "qa-project-mgmt"
+
+  if sys.platform == "win32":
+    local_app_data = os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+    return Path(local_app_data) / app_name
+
+  if sys.platform == "darwin":
+    return Path.home() / "Library" / "Application Support" / app_name
+
+  # Linux and other Unix
+  xdg_data_home = os.getenv("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
+  return Path(xdg_data_home) / app_name
+
+
+# Primary path constants
+USER_DATA_DIR = _get_user_data_dir()
+LOCAL_DIR = USER_DATA_DIR  # backward-compatible alias
+SETTINGS_DIR = USER_DATA_DIR / "settings"
+CONNECTIONS_DIR = USER_DATA_DIR / "connections"
+CACHE_DIR = USER_DATA_DIR / "cache"
+HISTORY_DIR = USER_DATA_DIR / "history"
+MODELS_DIR = USER_DATA_DIR / "models"
+WHISPER_MODELS_DIR = MODELS_DIR / "whisper"
+BUILTIN_MODELS_DIR = MODELS_DIR / "builtin"
 
 
 class Settings(BaseSettings):
@@ -60,5 +90,14 @@ def get_settings() -> Settings:
 
 
 def ensure_local_dirs() -> None:
-  for path in (LOCAL_DIR, CONNECTIONS_DIR, CACHE_DIR, SETTINGS_DIR, HISTORY_DIR):
+  for path in (
+    USER_DATA_DIR,
+    SETTINGS_DIR,
+    CONNECTIONS_DIR,
+    CACHE_DIR,
+    HISTORY_DIR,
+    MODELS_DIR,
+    WHISPER_MODELS_DIR,
+    BUILTIN_MODELS_DIR,
+  ):
     path.mkdir(parents=True, exist_ok=True)
