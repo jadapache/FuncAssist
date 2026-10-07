@@ -32,7 +32,7 @@ sequenceDiagram
     Note over TC,SSE: Conexión SSE única y persistente por tarea activa
 
     critical Pipeline de Procesamiento en Backend
-        SVC->>SSE: Fase 1: Preprocesamiento (FFmpeg 16kHz WAV) -> 15%
+        SVC->>SSE: Fase 1: Preprocesamiento (FFmpeg condicional según tipo) -> 15%
         SSE-->>TC: Evento SSE (15%)
         TC->>BJC: Actualiza barra y etapa en FloatingJobToast (15%)
 
@@ -105,25 +105,52 @@ sequenceDiagram
 
 | Fase | Rango % | Operación Técnica | Descripción |
 | :--- | :---: | :--- | :--- |
-| **1. Upload** | `0% - 10%` | HTTP POST multipart con XMLHttpRequest | Envío del archivo de audio/video desde el navegador al servidor local. |
-| **2. Preprocessing** | `10% - 20%` | Normalización FFmpeg | Extracción del flujo de audio y conversión a formato estándar `16 kHz mono PCM WAV`. |
+| **1. Upload** | `0% - 10%` | HTTP POST multipart con XMLHttpRequest | Transferencia del archivo original (audio o video) al servidor local sin ninguna conversión previa. |
+| **2. Preprocessing** | `10% - 20%` | FFmpeg condicional por tipo de archivo | **Archivos de audio nativos** (`.wav`, `.mp3`, `.flac`, `.m4a`, `.ogg`, `.opus`): se pasan directamente a Whisper sin re-codificación. **Archivos de video** (`.mp4`, `.mkv`, `.webm`, `.avi`, `.mov`, etc.) y formatos de audio no soportados (`.wma`, `.aac`, `.oga`): FFmpeg extrae la pista de audio y convierte a `16 kHz mono PCM WAV`. **Cloud (Groq/OpenAI)**: si el archivo supera 20 MB o es WAV/video, FFmpeg comprime a `MP3 48k mono` para cumplir el límite de la API. |
 | **3. Transcribing** | `20% - 80%` | Inferencia Whisper (CPU / GPU / API) | Decodificación acústica iterativa. Emite eventos continuos con texto previo, porcentaje y tiempo estimado. |
 | **4. Diarizing** | `80% - 90%` | Detección de interlocutores | Agrupación y clasificación de segmentos de audio según la voz de cada hablante detectado. |
-| **5. Finalizing** | `90% - 100%` | Guardado y Resumen | Estructuración del documento final, consolidación de metadatos, guardado en SQLite y emisión de evento `complete`. |
+| **5. Finalizing** | `90% - 100%` | Guardado y Resumen | Estructuración del documento final, consolidación de metadatos, guardado en archivos JSON locales (`local/transcriptions/`) y emisión de evento `complete`. |
 
 ---
 
-## 4. Resiliencia, Concurrencia y Cancelación
+## 4. Lógica de Preprocesamiento de Audio
 
-### 4.1. Sin Conexiones SSE ni Polling Duplicados
+La fase de preprocesamiento aplica una estrategia condicional para evitar re-codificaciones innecesarias:
+
+```
+Archivo recibido
+│
+├── ¿Es formato de audio nativo de Whisper?
+│   (.wav, .mp3, .flac, .m4a, .ogg, .opus)
+│   └── SÍ → Pasar directamente a Whisper sin conversión  ✓
+│
+├── ¿Es archivo de video o formato de audio no soportado?
+│   (.mp4, .mkv, .webm, .avi, .mov, .wma, .aac, .oga, ...)
+│   └── SÍ → FFmpeg: extraer pista de audio → WAV 16 kHz mono PCM
+│
+└── ¿Modo Cloud (Groq / OpenAI) y tamaño > 20 MB o formato WAV/video?
+    └── SÍ → FFmpeg: comprimir → MP3 48k mono (respeta límite 25 MB de la API)
+```
+
+**¿Por qué 16 kHz WAV para Whisper local?**
+`openai-whisper` computa su espectrograma de Mel internamente a 16 kHz. Alimentarle audio a mayor frecuencia resulta en un re-muestreo interno inmediato. Convertir previamente a 16 kHz elimina ese overhead y garantiza el formato exacto que el modelo espera.
+
+**¿Por qué MP3 48k para cloud?**
+Las APIs de Groq y OpenAI imponen un límite de 25 MB por archivo. Un archivo WAV de larga duración puede superarlo fácilmente; comprimir a MP3 48k mono reduce el tamaño entre 8× y 15× con pérdida de calidad imperceptible para voz.
+
+---
+
+## 5. Resiliencia, Concurrencia y Cancelación
+
+### 5.1. Sin Conexiones SSE ni Polling Duplicados
 Toda la lógica de suscripción en tiempo real está contenida en `TranscriptionContext`. `BackgroundJobContext` se comporta como un consumidor pasivo que recibe el estado consolidado mediante `addOrUpdateJob`. Esto previene condiciones de carrera, doble consumo de ancho de banda y desincronizaciones visuales.
 
-### 4.2. Recuperación ante Desconexión o Refresco de Pantalla
+### 5.2. Recuperación ante Desconexión o Refresco de Pantalla
 1. Si el usuario recarga el navegador (`F5`), `TranscriptionContext` lee `qa_active_transcription_jobs` desde `localStorage`.
 2. Restablece el estado en memoria y reconecta el `EventSource` al ID activo.
 3. El backend continúa la tarea sin interrupción y retoma la emisión de eventos donde se encontraba.
 
-### 4.3. Flujo de Cancelación Limpia
+### 5.3. Flujo de Cancelación Limpia
 1. El usuario pulsa **"Cancelar"** en el toast o en el estudio.
 2. La interfaz cambia inmediatamente a estado transitorio (*"Cancelando transcripción..."*).
 3. Se invoca `/api/transcription/cancel/{id}`.
