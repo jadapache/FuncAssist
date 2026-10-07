@@ -76,3 +76,14 @@ def test_pm_and_qa_features_validation():
         json={"query": "test", "sources": [], "document_ids": []},
     )
     assert res.status_code == 400
+
+
+def test_openapi_schema_generation():
+    res = client.get("/openapi.json")
+    assert res.status_code == 200
+    schema = res.json()
+    assert "openapi" in schema
+    assert "paths" in schema
+    assert "/api/ai/prompts/{feature}" in schema["paths"]
+    assert "/api/templates/{template_id}" in schema["paths"]
+
