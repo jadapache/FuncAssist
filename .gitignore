@@ -141,3 +141,5 @@ local/transcriptions/**
 _legacy_archive/
 pm_qa_copilot/
 
+# Tauri / Rust
+src-tauri/target/
