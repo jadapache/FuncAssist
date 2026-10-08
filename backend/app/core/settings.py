@@ -32,6 +32,23 @@ def _get_user_data_dir() -> Path:
   return Path(xdg_data_home) / app_name
 
 
+def _get_user_documents_dir() -> Path:
+  """
+  Returns the user's Documents folder under 'QA MGMT'.
+  Precedence: DOCUMENTS_DIR env var > OS Documents / 'QA MGMT'.
+  """
+  env_override = os.getenv("DOCUMENTS_DIR")
+  if env_override:
+    return Path(env_override) / "QA MGMT"
+
+  if sys.platform == "win32":
+    user_profile = os.getenv("USERPROFILE")
+    if user_profile:
+      return Path(user_profile) / "Documents" / "QA MGMT"
+
+  return Path.home() / "Documents" / "QA MGMT"
+
+
 # Primary path constants
 USER_DATA_DIR = _get_user_data_dir()
 LOCAL_DIR = USER_DATA_DIR  # backward-compatible alias
@@ -42,6 +59,18 @@ HISTORY_DIR = USER_DATA_DIR / "history"
 MODELS_DIR = USER_DATA_DIR / "models"
 WHISPER_MODELS_DIR = MODELS_DIR / "whisper"
 BUILTIN_MODELS_DIR = MODELS_DIR / "builtin"
+GENERATED_DIR = USER_DATA_DIR / "generated"
+GENERATED_INDEX_FILE = GENERATED_DIR / "generated_index.json"
+
+# App-internal state paths (active jobs, local index)
+APP_TRANSCRIPTIONS_DIR = USER_DATA_DIR / "transcriptions"
+ACTIVE_JOBS_DIR = APP_TRANSCRIPTIONS_DIR / "active_jobs"
+TRANSCRIPTIONS_INDEX_FILE = APP_TRANSCRIPTIONS_DIR / "transcriptions_index.json"
+
+# Accessible user documents paths
+USER_DOCUMENTS_DIR = _get_user_documents_dir()
+USER_TRANSCRIPTIONS_DIR = USER_DOCUMENTS_DIR / "Transcripciones"
+USER_DRAFTS_DIR = USER_DOCUMENTS_DIR / "Borradores"
 
 
 class Settings(BaseSettings):
@@ -99,5 +128,14 @@ def ensure_local_dirs() -> None:
     MODELS_DIR,
     WHISPER_MODELS_DIR,
     BUILTIN_MODELS_DIR,
+    APP_TRANSCRIPTIONS_DIR,
+    ACTIVE_JOBS_DIR,
+    GENERATED_DIR,
+    USER_DOCUMENTS_DIR,
+    USER_TRANSCRIPTIONS_DIR,
+    USER_DRAFTS_DIR,
+    USER_DRAFTS_DIR / "Mejoras",
+    USER_DRAFTS_DIR / "Levantamiento",
+    USER_DRAFTS_DIR / "Inventario",
   ):
     path.mkdir(parents=True, exist_ok=True)

@@ -11,12 +11,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from app.core.settings import USER_DATA_DIR, ensure_local_dirs
+from app.core.settings import (
+  ACTIVE_JOBS_DIR,
+  APP_TRANSCRIPTIONS_DIR,
+  TRANSCRIPTIONS_INDEX_FILE,
+  USER_DATA_DIR,
+  USER_TRANSCRIPTIONS_DIR,
+  ensure_local_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
-TRANSCRIPTIONS_DIR = USER_DATA_DIR / "transcriptions"
-ACTIVE_JOBS_DIR = TRANSCRIPTIONS_DIR / "active_jobs"
+TRANSCRIPTIONS_DIR = USER_TRANSCRIPTIONS_DIR
+LEGACY_TRANSCRIPTIONS_DIR = USER_DATA_DIR / "transcriptions"
 
 SUPPORTED_AUDIO_EXTS = {
   ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma", ".aac", ".opus", ".oga", ".weba"
@@ -30,7 +37,49 @@ SUPPORTED_FORMATS = SUPPORTED_AUDIO_EXTS | SUPPORTED_VIDEO_EXTS
 def ensure_transcription_dirs() -> None:
   ensure_local_dirs()
   TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
+  APP_TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
   ACTIVE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+  # Auto-migrate any existing transcriptions from USER_DATA_DIR/transcriptions to Documents/QA MGMT/Transcripciones
+  if LEGACY_TRANSCRIPTIONS_DIR.exists() and LEGACY_TRANSCRIPTIONS_DIR != TRANSCRIPTIONS_DIR:
+    try:
+      for item in LEGACY_TRANSCRIPTIONS_DIR.iterdir():
+        if item.name in ("active_jobs", "transcriptions_index.json"):
+          continue
+        target = TRANSCRIPTIONS_DIR / item.name
+        if not target.exists():
+          if item.is_dir():
+            shutil.copytree(item, target)
+          elif item.is_file():
+            shutil.copy2(item, target)
+    except Exception as exc:
+      logger.warning(f"Could not migrate legacy transcriptions to documents: {exc}")
+
+
+def _load_transcriptions_index() -> list[dict[str, Any]]:
+  ensure_transcription_dirs()
+  if not TRANSCRIPTIONS_INDEX_FILE.exists():
+    return []
+  try:
+    data = json.loads(TRANSCRIPTIONS_INDEX_FILE.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+      return data
+    if isinstance(data, dict) and "items" in data:
+      return data["items"]
+    return []
+  except Exception as exc:
+    logger.warning(f"Error loading {TRANSCRIPTIONS_INDEX_FILE}: {exc}")
+    return []
+
+
+def _save_transcriptions_index(items: list[dict[str, Any]]) -> None:
+  ensure_transcription_dirs()
+  payload = {
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+    "count": len(items),
+    "items": items,
+  }
+  TRANSCRIPTIONS_INDEX_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def get_transcription_dir(transcription_id: str) -> Path:
@@ -100,7 +149,7 @@ def allocate_transcription_folder(
 ) -> dict[str, Any]:
   """
   Create the GUID subfolder and write the original media file into it.
-  Returns a media metadata dictionary for the transcription record.
+  Saves the initial transcription.json immediately to preserve user-assigned title.
   """
   ensure_transcription_dirs()
   valid, err = validate_file(original_filename, len(file_bytes))
@@ -117,8 +166,9 @@ def allocate_transcription_folder(
   is_video = ext in SUPPORTED_VIDEO_EXTS
   file_hash = get_file_hash(file_bytes)
   now = datetime.now(timezone.utc).isoformat()
+  resolved_title = title.strip() or original_filename
 
-  return {
+  entry = {
     "id": transcription_id,
     "transcription_id": transcription_id,
     "original_filename": original_filename,
@@ -129,10 +179,37 @@ def allocate_transcription_folder(
     "file_size_formatted": _format_size_bytes(len(file_bytes)),
     "is_video": is_video,
     "hash": file_hash,
-    "title": title.strip() or original_filename,
+    "title": resolved_title,
     "description": description.strip(),
     "created_at": now,
   }
+
+  # Write initial record to guarantee user-assigned title is preserved
+  initial_record = {
+    "id": transcription_id,
+    "media_id": transcription_id,
+    "metadata": {
+      "title": resolved_title,
+      "description": description.strip(),
+      "size_bytes": len(file_bytes),
+      "file_size_formatted": _format_size_bytes(len(file_bytes)),
+    },
+    "title": resolved_title,
+    "description": description.strip(),
+    "original_filename": original_filename,
+    "filename": original_filename,
+    "created_at": now,
+    "status": "uploaded",
+    "language": "es",
+    "duration_seconds": 0.0,
+    "segments": [],
+    "text": "",
+    "summary": None,
+    "media": entry,
+  }
+  save_transcription_record(initial_record)
+
+  return entry
 
 
 def get_media_destination(filename: str, media_id: Optional[str] = None) -> tuple[str, Path, str]:
@@ -161,13 +238,15 @@ def register_saved_media_file(
 ) -> dict[str, Any]:
   """
   Registers a media file streamed directly to disk in its GUID subfolder.
+  Saves initial transcription.json to preserve user title.
   """
   ensure_transcription_dirs()
   ext = Path(filename).suffix.lower()
   now = datetime.now(timezone.utc).isoformat()
   is_video = ext in SUPPORTED_VIDEO_EXTS
+  resolved_title = title.strip() or filename
 
-  return {
+  entry = {
     "id": media_id,
     "transcription_id": media_id,
     "original_filename": filename,
@@ -178,10 +257,36 @@ def register_saved_media_file(
     "file_size_formatted": _format_size_bytes(file_size),
     "hash": file_hash,
     "is_video": is_video,
-    "title": title.strip() or filename,
+    "title": resolved_title,
     "description": description.strip(),
     "created_at": now,
   }
+
+  initial_record = {
+    "id": media_id,
+    "media_id": media_id,
+    "metadata": {
+      "title": resolved_title,
+      "description": description.strip(),
+      "size_bytes": file_size,
+      "file_size_formatted": _format_size_bytes(file_size),
+    },
+    "title": resolved_title,
+    "description": description.strip(),
+    "original_filename": filename,
+    "filename": filename,
+    "created_at": now,
+    "status": "uploaded",
+    "language": "es",
+    "duration_seconds": 0.0,
+    "segments": [],
+    "text": "",
+    "summary": None,
+    "media": entry,
+  }
+  save_transcription_record(initial_record)
+
+  return entry
 
 
 def save_media_file(
@@ -215,6 +320,7 @@ def get_media_entry(media_id: str) -> Optional[dict[str, Any]]:
   record = get_transcription_record(media_id)
   if record and record.get("media"):
     m = record["media"]
+    resolved_title = record.get("metadata", {}).get("title") or record.get("title") or m.get("title") or media_path.stem
     return {
       "id": media_id,
       "transcription_id": media_id,
@@ -226,8 +332,8 @@ def get_media_entry(media_id: str) -> Optional[dict[str, Any]]:
       "file_size_formatted": m.get("file_size_formatted", _format_size_bytes(media_path.stat().st_size)),
       "is_video": m.get("is_video", media_path.suffix.lower() in SUPPORTED_VIDEO_EXTS),
       "hash": m.get("hash", ""),
-      "title": record.get("metadata", {}).get("title", media_path.stem),
-      "description": record.get("metadata", {}).get("description", ""),
+      "title": resolved_title,
+      "description": record.get("metadata", {}).get("description") or record.get("description", ""),
       "created_at": record.get("created_at", ""),
     }
 
@@ -283,9 +389,46 @@ def update_media_entry_after_audio_extraction(media_id: str, audio_path: Path) -
   return get_media_entry(media_id)
 
 
+def _sync_transcription_in_index(record: dict[str, Any]) -> None:
+  try:
+    tid = record.get("id")
+    if not tid:
+      return
+    items = _load_transcriptions_index()
+    meta = record.get("metadata", {})
+    entry = {
+      "id": tid,
+      "title": meta.get("title") or record.get("title") or "Reunión",
+      "created_at": record.get("created_at", ""),
+      "duration_seconds": record.get("duration_seconds", 0.0),
+      "language": record.get("language", "es"),
+      "model_info": record.get("model_info", "Whisper"),
+      "folder_path": str(get_transcription_dir(tid)),
+      "has_summary": bool(record.get("summary")),
+    }
+    filtered = [i for i in items if i.get("id") != tid]
+    filtered.insert(0, entry)
+    _save_transcriptions_index(filtered)
+  except Exception as exc:
+    logger.debug(f"Error syncing transcription index: {exc}")
+
+
+def _remove_transcription_from_index(transcription_id: str) -> None:
+  try:
+    items = _load_transcriptions_index()
+    filtered = [i for i in items if i.get("id") != transcription_id]
+    _save_transcriptions_index(filtered)
+  except Exception as exc:
+    logger.debug(f"Error removing transcription from index: {exc}")
+
+
 def save_active_job_progress(progress_dict: dict[str, Any]) -> None:
   ensure_transcription_dirs()
   job_id = progress_dict.get("id")
+  status = progress_dict.get("status")
+  if status in ("complete", "cancelled"):
+    delete_active_job_progress(job_id)
+    return
   if job_id:
     path = ACTIVE_JOBS_DIR / f"{job_id}.json"
     path.write_text(json.dumps(progress_dict, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -302,14 +445,16 @@ def load_active_job_progress(job_id: str) -> Optional[dict[str, Any]]:
   return None
 
 
-def delete_active_job_progress(job_id: str) -> None:
+def delete_active_job_progress(job_id: Optional[str]) -> None:
+  if not job_id:
+    return
   ensure_transcription_dirs()
   path = ACTIVE_JOBS_DIR / f"{job_id}.json"
   if path.exists():
     try:
       path.unlink()
-    except Exception:
-      pass
+    except Exception as exc:
+      logger.warning(f"Could not delete active job file {path}: {exc}")
 
 
 def save_transcription_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -349,6 +494,7 @@ def save_transcription_record(record: dict[str, Any]) -> dict[str, Any]:
       except Exception as exc:
         logger.warning(f"Could not write summary.txt for {transcription_id}: {exc}")
 
+  _sync_transcription_in_index(record)
   return record
 
 
@@ -402,7 +548,7 @@ def list_transcriptions() -> list[dict[str, Any]]:
   for subfolder in TRANSCRIPTIONS_DIR.iterdir():
     if not subfolder.is_dir() or subfolder.name == "active_jobs":
       # Check legacy flat file if not active_jobs
-      if subfolder.is_file() and subfolder.suffix == ".json":
+      if subfolder.is_file() and subfolder.suffix == ".json" and subfolder.name != "transcriptions_index.json":
         try:
           data = json.loads(subfolder.read_text(encoding="utf-8"))
           records.append(_enrich_record_metadata(data))
@@ -419,6 +565,24 @@ def list_transcriptions() -> list[dict[str, Any]]:
         continue
 
   records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+
+  # Sync transcriptions_index.json
+  index_entries = []
+  for r in records:
+    tid = r.get("id")
+    meta = r.get("metadata", {})
+    index_entries.append({
+      "id": tid,
+      "title": meta.get("title") or r.get("title") or "Reunión",
+      "created_at": r.get("created_at", ""),
+      "duration_seconds": r.get("duration_seconds", 0.0),
+      "language": r.get("language", "es"),
+      "model_info": r.get("model_info", "Whisper"),
+      "folder_path": str(get_transcription_dir(tid)) if tid else "",
+      "has_summary": bool(r.get("summary")),
+    })
+  _save_transcriptions_index(index_entries)
+
   return records
 
 
@@ -477,6 +641,7 @@ def delete_transcription_record(transcription_id: str) -> bool:
     except OSError:
       pass
 
+  _remove_transcription_from_index(transcription_id)
   return deleted
 
 

@@ -75,23 +75,18 @@ async def _refresh_builtin_model_catalog() -> None:
 
 async def _refresh_transcription_index() -> None:
   """
-  Scan transcriptions/ directory and verify all GUID subfolders have a valid
-  transcription.json. Orphaned folders (media file but no JSON) are logged.
+  Scan transcriptions/ directory in Documents and rebuild transcriptions_index.json
+  in the OS user data path.
   """
   try:
     from app.features.transcription.storage import (
       TRANSCRIPTIONS_DIR,
-      get_transcription_json_path,
+      list_transcriptions,
     )
 
     if not TRANSCRIPTIONS_DIR.exists():
       return
-    for subfolder in TRANSCRIPTIONS_DIR.iterdir():
-      if not subfolder.is_dir() or subfolder.name == "active_jobs":
-        continue
-      json_path = subfolder / "transcription.json"
-      if not json_path.exists():
-        logger.warning(f"Transcription folder without JSON: {subfolder.name}")
+    list_transcriptions()
   except Exception as e:
     logger.debug(f"transcription index refresh skipped: {e}")
 

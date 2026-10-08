@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Artifact } from '../types/artifacts'
 import { loadChatConversations, saveChatConversations } from '../utils/chatStorage'
+import { draftsApi } from '../api/modules/drafts'
 
 export type DocumentArtifact = Artifact
 
@@ -32,7 +33,7 @@ export interface ThinkingStep {
 }
 
 /**
- * Hook for persisting and managing chat conversation history in localStorage.
+ * Hook for persisting and managing chat conversation history in localStorage and Documents/QA MGMT/Borradores.
  */
 export function useChatPersistence(featureSlug: string) {
   const [conversations, setConversations] = useState<ChatConversation[]>(() =>
@@ -43,12 +44,35 @@ export function useChatPersistence(featureSlug: string) {
     return loaded.length > 0 ? loaded[0].id : null
   })
 
-  // Persist to localStorage whenever conversations change (only non-empty conversations)
+  // Persist to localStorage and sync to backend Borradores whenever conversations change (only non-empty conversations)
   useEffect(() => {
     const nonEmpties = conversations.filter(
       (c) => c.messages.length > 0 || (c.artifacts && c.artifacts.length > 0),
     )
     saveChatConversations(featureSlug, nonEmpties)
+
+    // Debounced background sync to backend Documents/QA MGMT/Borradores
+    const timer = setTimeout(() => {
+      nonEmpties.forEach((conv) => {
+        draftsApi
+          .saveDraft({
+            id: conv.id,
+            name: conv.name,
+            title: conv.name,
+            feature_slug: featureSlug,
+            specification: featureSlug,
+            lastInteraction: conv.lastInteraction,
+            messages: conv.messages,
+            documentContent: conv.documentContent,
+            artifacts: conv.artifacts,
+          })
+          .catch((err) => {
+            console.debug('[useChatPersistence] Draft background sync failed:', err)
+          })
+      })
+    }, 600)
+
+    return () => clearTimeout(timer)
   }, [conversations, featureSlug])
 
 
@@ -116,6 +140,9 @@ export function useChatPersistence(featureSlug: string) {
           setActiveConversationId(filtered.length > 0 ? filtered[0].id : null)
         }
         return filtered
+      })
+      draftsApi.deleteDraft(id).catch((err) => {
+        console.debug('[useChatPersistence] Delete draft error:', err)
       })
     },
     [activeConversationId],

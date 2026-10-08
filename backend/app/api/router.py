@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api import (
   document_agent,
+  drafts,
   history,
   integrations,
   knowledge,
@@ -27,6 +28,7 @@ api_router.include_router(settings_api.router)
 api_router.include_router(knowledge.router)
 api_router.include_router(history.router)
 api_router.include_router(document_agent.router)
+api_router.include_router(drafts.router)
 api_router.include_router(transcription.router)
 api_router.include_router(transcription_stream.router)
 api_router.include_router(ai_settings.router)
