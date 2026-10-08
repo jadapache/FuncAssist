@@ -20,7 +20,8 @@ except ImportError:
 from app.core.settings import SETTINGS_DIR, USER_DATA_DIR, ensure_local_dirs
 
 TEMPLATES_DIR = USER_DATA_DIR / "templates"
-INDEX_FILE = SETTINGS_DIR / "templates_index.json"
+INDEX_FILE = TEMPLATES_DIR / "templates_index.json"
+LEGACY_INDEX_FILE = SETTINGS_DIR / "templates_index.json"
 
 DEFAULT_SYSTEM_TAGS: List[Dict[str, str]] = [
     # AI Content Tags
@@ -53,6 +54,17 @@ def ensure_template_dirs() -> None:
 def _load_index() -> List[Dict[str, Any]]:
     ensure_template_dirs()
     if not INDEX_FILE.exists():
+        if LEGACY_INDEX_FILE.exists():
+            try:
+                data = json.loads(LEGACY_INDEX_FILE.read_text(encoding="utf-8"))
+                _save_index(data)
+                try:
+                    LEGACY_INDEX_FILE.unlink()
+                except Exception:
+                    pass
+                return data
+            except Exception:
+                return []
         return []
     try:
         return json.loads(INDEX_FILE.read_text(encoding="utf-8"))

@@ -112,10 +112,13 @@ class TranscriptionService:
 
   def _update_progress(self, job_progress: TranscriptionProgress) -> None:
     _ACTIVE_JOBS[job_progress.id] = job_progress
-    try:
-      save_active_job_progress(job_progress.model_dump())
-    except Exception as exc:
-      logger.warning(f"Could not persist active job progress for {job_progress.id}: {exc}")
+    if job_progress.status in ("complete", "cancelled"):
+      delete_active_job_progress(job_progress.id)
+    else:
+      try:
+        save_active_job_progress(job_progress.model_dump())
+      except Exception as exc:
+        logger.warning(f"Could not persist active job progress for {job_progress.id}: {exc}")
     try:
       emit_progress_sync(job_progress.id, job_progress.model_dump())
     except Exception as exc:

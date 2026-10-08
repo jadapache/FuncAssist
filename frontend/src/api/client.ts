@@ -8,6 +8,7 @@ import { settingsApi } from './modules/settings'
 import { userApi } from './modules/user'
 import type { UserProfile, UserRole } from './modules/user'
 import { transcriptionApi } from '../features/transcription/api/transcriptionApi'
+import { draftsApi } from './modules/drafts'
 
 export type { AppSettings, IntegrationInfo, TestConnectionResult } from '../types'
 export type {
@@ -233,6 +234,7 @@ export const api = {
   ...templatesApi,
   ...settingsApi,
   ...transcriptionApi,
+  ...draftsApi,
 }
 
 export const apiClient = api

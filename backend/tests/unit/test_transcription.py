@@ -580,13 +580,102 @@ def test_providers_registry_and_resolution():
 
 
 def test_user_data_dir_resolution():
-  from app.core.settings import _get_user_data_dir, USER_DATA_DIR, WHISPER_MODELS_DIR, BUILTIN_MODELS_DIR
+  from app.core.settings import _get_user_data_dir, USER_DATA_DIR, WHISPER_MODELS_DIR, BUILTIN_MODELS_DIR, USER_DOCUMENTS_DIR, USER_TRANSCRIPTIONS_DIR
 
   data_dir = _get_user_data_dir()
   assert data_dir is not None
   assert str(data_dir).endswith("qa-project-mgmt") or "local" in str(data_dir).lower()
   assert WHISPER_MODELS_DIR == USER_DATA_DIR / "models" / "whisper"
   assert BUILTIN_MODELS_DIR == USER_DATA_DIR / "models" / "builtin"
+  assert USER_DOCUMENTS_DIR.name == "QA MGMT"
+  assert USER_TRANSCRIPTIONS_DIR == USER_DOCUMENTS_DIR / "Transcripciones"
+
+
+def test_user_assigned_title_preservation_on_upload():
+  from app.features.transcription.storage import (
+    allocate_transcription_folder,
+    get_transcription_record,
+    get_media_entry,
+    delete_transcription_record,
+  )
+
+  tid = "test-custom-title-001"
+  dummy_bytes = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00" * 10
+  custom_title = "Reunión de Planificación Q4"
+  entry = allocate_transcription_folder(
+    transcription_id=tid,
+    file_bytes=dummy_bytes,
+    original_filename="voice_rec_123.mp3",
+    title=custom_title,
+    description="Notas de kickoff",
+  )
+
+  assert entry["title"] == custom_title
+
+  # Fetch entry and record
+  fetched_media = get_media_entry(tid)
+  assert fetched_media is not None
+  assert fetched_media["title"] == custom_title
+
+  record = get_transcription_record(tid)
+  assert record is not None
+  assert record["metadata"]["title"] == custom_title
+  assert record["title"] == custom_title
+
+  delete_transcription_record(tid)
+
+
+def test_active_jobs_and_transcriptions_index_location():
+  from app.core.settings import USER_DATA_DIR, ACTIVE_JOBS_DIR, TRANSCRIPTIONS_INDEX_FILE
+  from app.features.transcription.storage import (
+    save_active_job_progress,
+    delete_active_job_progress,
+    save_transcription_record,
+    delete_transcription_record,
+    list_transcriptions,
+  )
+
+  assert ACTIVE_JOBS_DIR == USER_DATA_DIR / "transcriptions" / "active_jobs"
+  assert TRANSCRIPTIONS_INDEX_FILE == USER_DATA_DIR / "transcriptions" / "transcriptions_index.json"
+
+  job_id = "test-active-job-cleanup-99"
+  # 1. Save in-progress job
+  save_active_job_progress({
+    "id": job_id,
+    "status": "transcribing",
+    "stage": "transcribing",
+    "progress": 50,
+  })
+  job_file = ACTIVE_JOBS_DIR / f"{job_id}.json"
+  assert job_file.exists()
+
+  # 2. Mark complete -> should delete active job file
+  save_active_job_progress({
+    "id": job_id,
+    "status": "complete",
+    "stage": "complete",
+    "progress": 100,
+  })
+  assert not job_file.exists()
+
+  # 3. Verify transcriptions_index.json
+  tid = "test-index-sync-001"
+  save_transcription_record({
+    "id": tid,
+    "created_at": "2026-10-07T12:00:00Z",
+    "metadata": {"title": "Reunión Index Sync"},
+    "duration_seconds": 45.0,
+    "language": "es",
+  })
+
+  list_transcriptions()
+  assert TRANSCRIPTIONS_INDEX_FILE.exists()
+  import json
+  index_data = json.loads(TRANSCRIPTIONS_INDEX_FILE.read_text(encoding="utf-8"))
+  items = index_data if isinstance(index_data, list) else index_data.get("items", [])
+  assert any(item["id"] == tid for item in items)
+
+  delete_transcription_record(tid)
 
 
 @pytest.mark.asyncio
