@@ -1,6 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom'
 import { useUser, type UserRole } from '../../context/UserContext'
-import { FirstTimeSetup } from '../setup/FirstTimeSetup'
+import { FirstTimeSetup } from '../../features/setup'
 
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[]

@@ -1,21 +1,21 @@
-import { knowledgeApi } from './modules/knowledge'
-import { aiSettingsApi } from './modules/aiSettings'
+import { knowledgeApi } from '../features/knowledge/api/knowledgeApi'
+import { aiSettingsApi } from '../features/settings/api/aiSettingsApi'
 import { featuresApi } from './modules/features'
-import { docAgentApi } from './modules/docAgent'
-import { integrationsApi } from './modules/integrations'
-import { templatesApi } from './modules/templates'
-import { settingsApi } from './modules/settings'
+import { docAgentApi } from '../features/document/api/docAgentApi'
+import { integrationsApi } from '../features/integrations/api/integrationsApi'
+import { templatesApi } from '../features/settings/api/templatesApi'
+import { settingsApi } from '../features/settings/api/settingsApi'
 import { userApi } from './modules/user'
 import type { UserProfile, UserRole } from './modules/user'
 import { transcriptionApi } from '../features/transcription/api/transcriptionApi'
-import { draftsApi } from './modules/drafts'
+import { draftsApi } from '../features/document/api/draftsApi'
 
 export type {
   KnowledgePathResponse,
   KnowledgeIntegrityResponse,
   KnowledgeRebuildResponse,
   KnowledgeExportResponse,
-} from './modules/knowledge'
+} from '../features/knowledge/api/knowledgeApi'
 export type { AppSettings, IntegrationInfo, TestConnectionResult } from '../types'
 export type {
   MediaMetadata,

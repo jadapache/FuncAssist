@@ -2,7 +2,7 @@
  * Capa de acceso a localStorage para persistencia de conversaciones de chat.
  */
 
-import type { ChatConversation } from '../hooks/useChatPersistence'
+import type { ChatConversation } from '../features/document/hooks/useChatPersistence'
 
 const STORAGE_PREFIX = 'qa_mgmt_chats_'
 
