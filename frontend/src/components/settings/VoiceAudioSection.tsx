@@ -171,9 +171,9 @@ export const VoiceAudioSection = ({
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
             >
-              <option value="builtin">Modelos Integrados / Locales (ONNX Runtime, Faster Whisper, Moonshine, Whisper)</option>
-              <option value="groq">Groq Cloud (Whisper LPU Ultrarrápido - Free Tier)</option>
-              <option value="openai">OpenAI API (Whisper Oficial Cloud)</option>
+              <option value="builtin">IA Integrada (Local)</option>
+              <option value="groq">Groq (API)</option>
+              <option value="openai">OpenAI (API)</option>
             </select>
           </div>
 

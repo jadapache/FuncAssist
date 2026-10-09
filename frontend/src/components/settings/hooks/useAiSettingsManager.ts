@@ -194,7 +194,7 @@ export function useAiSettingsManager() {
         } else if (isFirstTimeSetup) {
           if (prov === 'groq') setModel('llama-3.3-70b-versatile')
           else if (prov === 'builtin') setModel('qwen3.5:2b')
-          else if (prov === 'gemini') setModel('gemini-1.5-flash')
+          else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
           else setModel('qwen3.5:2b')
@@ -202,7 +202,7 @@ export function useAiSettingsManager() {
           // Provider exists but model is unset, assign sensible default for that provider
           if (prov === 'groq') setModel('llama-3.3-70b-versatile')
           else if (prov === 'builtin') setModel('qwen3.5:2b')
-          else if (prov === 'gemini') setModel('gemini-1.5-flash')
+          else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
         }

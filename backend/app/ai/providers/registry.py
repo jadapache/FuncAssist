@@ -40,7 +40,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     litellm_prefix="gemini",
     env_key="GEMINI_API_KEY",
     config_key="gemini_api_key",
-    default_model="gemini-1.5-flash",
+    default_model="gemini-2.5-flash",
     aliases=("google",),
   ),
   "claude": ProviderSpec(
