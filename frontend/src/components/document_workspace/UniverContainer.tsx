@@ -719,7 +719,7 @@ const UniverContainerInternal = ({
           const blockStyleClass =
             mode === 'artifact'
               ? 'my-1 py-0.5 px-1 rounded-sm cursor-text transition-colors hover:bg-slate-100/40'
-              : `group/block relative my-0.5 py-1 px-2 rounded-lg cursor-pointer transition-all border ${
+              : `group/block relative my-0.5 py-1 px-2 rounded-lg cursor-text transition-all border ${
                   isActive
                     ? 'bg-blue-50/40 border-blue-300 shadow-2xs'
                     : 'border-transparent hover:bg-slate-100/70 hover:border-slate-200'
@@ -730,16 +730,51 @@ const UniverContainerInternal = ({
               key={block.id}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => handleLineDrop(block.lineIndex, e)}
+              onClick={(e) => {
+                handleLineFocus(block.lineIndex)
+                if (e.target === e.currentTarget) {
+                  const editable = e.currentTarget.querySelector<HTMLElement>('[contenteditable="true"]')
+                  if (editable) {
+                    editable.focus()
+                  }
+                }
+              }}
               className={blockStyleClass}
             >
-              {block.type === 'empty' && mode === 'template' && (
-                <div className="h-4 flex items-center text-[10px] text-slate-400 opacity-0 group-hover/block:opacity-100 italic transition select-none">
-                  + Espacio en blanco (Clic para escribir)
-                </div>
-              )}
-
-              {block.type === 'empty' && mode === 'artifact' && (
-                <div className="h-3" />
+              {block.type === 'empty' && (
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  onFocus={() => handleLineFocus(block.lineIndex)}
+                  onBlur={(e) => {
+                    const text = htmlToMarkdown(e.currentTarget.innerHTML)
+                    handleLineUpdate(block.lineIndex, text)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = htmlToMarkdown(e.currentTarget.innerHTML)
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = text
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
+                  }}
+                  style={{
+                    fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
+                    fontSize: `${fontSize}px`,
+                    color: textColor,
+                    textAlign: alignment,
+                    minHeight: mode === 'template' ? '1.75rem' : '0.75rem',
+                  }}
+                  data-placeholder="+ Espacio en blanco (Clic para escribir)"
+                  className={`text-slate-700 leading-relaxed text-xs md:text-[13px] outline-none focus:bg-blue-50/40 rounded px-1.5 py-0.5 my-0.5 transition-colors ${
+                    mode === 'template'
+                      ? 'min-h-[1.75rem] empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400 empty:before:italic empty:before:text-[11px] empty:before:opacity-80 hover:empty:before:opacity-100 focus:empty:before:opacity-30 empty:before:pointer-events-none empty:before:select-none'
+                      : 'min-h-[0.75rem]'
+                  }`}
+                />
               )}
 
               {block.type === 'divider' && <hr className="my-3 border-slate-200 select-none" />}
@@ -752,6 +787,17 @@ const UniverContainerInternal = ({
                   onBlur={(e) => {
                     const text = e.currentTarget.innerText
                     handleLineUpdate(block.lineIndex, `# ${text}`)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = e.currentTarget.innerText
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = `# ${text}`
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
                   }}
                   style={{
                     fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
@@ -773,6 +819,17 @@ const UniverContainerInternal = ({
                     const text = e.currentTarget.innerText
                     handleLineUpdate(block.lineIndex, `## ${text}`)
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = e.currentTarget.innerText
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = `## ${text}`
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
+                  }}
                   style={{
                     fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
                     color: textColor || '#002777',
@@ -793,6 +850,17 @@ const UniverContainerInternal = ({
                     const text = e.currentTarget.innerText
                     handleLineUpdate(block.lineIndex, `### ${text}`)
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = e.currentTarget.innerText
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = `### ${text}`
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
+                  }}
                   style={{
                     fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
                     color: textColor || '#002777',
@@ -812,6 +880,17 @@ const UniverContainerInternal = ({
                   onBlur={(e) => {
                     const text = e.currentTarget.innerText
                     handleLineUpdate(block.lineIndex, text)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = e.currentTarget.innerText
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = text
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
                   }}
                   style={{
                     fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
@@ -834,6 +913,21 @@ const UniverContainerInternal = ({
                     onBlur={(e) => {
                       const text = htmlToMarkdown(e.currentTarget.innerHTML)
                       handleLineUpdate(block.lineIndex, `- ${text}`)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        const text = htmlToMarkdown(e.currentTarget.innerHTML)
+                        const lines = (content || '').split(/\r?\n/)
+                        if (!text.trim()) {
+                          lines[block.lineIndex] = ''
+                        } else {
+                          lines[block.lineIndex] = `- ${text}`
+                          lines.splice(block.lineIndex + 1, 0, '- ')
+                        }
+                        pushContentUpdate(lines.join('\n'))
+                        handleLineFocus(block.lineIndex + 1)
+                      }
                     }}
                     style={{
                       fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
@@ -858,6 +952,17 @@ const UniverContainerInternal = ({
                       const text = htmlToMarkdown(e.currentTarget.innerHTML)
                       handleLineUpdate(block.lineIndex, text)
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        const text = htmlToMarkdown(e.currentTarget.innerHTML)
+                        const lines = (content || '').split(/\r?\n/)
+                        lines[block.lineIndex] = text
+                        lines.splice(block.lineIndex + 1, 0, '')
+                        pushContentUpdate(lines.join('\n'))
+                        handleLineFocus(block.lineIndex + 1)
+                      }
+                    }}
                     style={{
                       fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
                       fontSize: `${fontSize}px`,
@@ -880,6 +985,17 @@ const UniverContainerInternal = ({
                     const text = htmlToMarkdown(e.currentTarget.innerHTML)
                     handleLineUpdate(block.lineIndex, `> ${text}`)
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = htmlToMarkdown(e.currentTarget.innerHTML)
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = `> ${text}`
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
+                  }}
                   style={{
                     fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
                     fontSize: `${fontSize}px`,
@@ -900,6 +1016,17 @@ const UniverContainerInternal = ({
                   onBlur={(e) => {
                     const text = htmlToMarkdown(e.currentTarget.innerHTML)
                     handleLineUpdate(block.lineIndex, text)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      const text = htmlToMarkdown(e.currentTarget.innerHTML)
+                      const lines = (content || '').split(/\r?\n/)
+                      lines[block.lineIndex] = text
+                      lines.splice(block.lineIndex + 1, 0, '')
+                      pushContentUpdate(lines.join('\n'))
+                      handleLineFocus(block.lineIndex + 1)
+                    }
                   }}
                   style={{
                     fontFamily: blockFonts[block.lineIndex] || defaultFontFamily,
