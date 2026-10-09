@@ -51,6 +51,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     summaryParagraphs,
     keyInsights,
     isSummaryReady,
+    hasTranscriptContent,
     meetingTitle,
     toggleSegmentImportance,
     handleRetranscribe,
@@ -134,15 +135,23 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
               <button
                 type="button"
                 onClick={handleSaveToKB}
-                disabled={isSavingKB || transcriptionResult.saved_to_knowledge}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
-                  transcriptionResult.saved_to_knowledge
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                disabled={isSavingKB || transcriptionResult.saved_to_knowledge || !hasTranscriptContent || isJobActive}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition flex items-center gap-1.5 shadow-2xs ${
+                  !hasTranscriptContent || isJobActive
+                    ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                    : transcriptionResult.saved_to_knowledge
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 cursor-pointer'
                 }`}
-                title="Guardar en biblioteca de conocimiento para consultas del agente"
+                title={
+                  !hasTranscriptContent
+                    ? 'No hay transcripción disponible para guardar en la Base de Conocimiento'
+                    : transcriptionResult.saved_to_knowledge
+                    ? 'Ya está guardado en la Base de Conocimiento'
+                    : 'Guardar en biblioteca de conocimiento para consultas del agente'
+                }
               >
-                <BookOpen className="h-3.5 w-3.5 text-[#002777]" />
+                <BookOpen className={`h-3.5 w-3.5 ${hasTranscriptContent && !isJobActive ? 'text-[#002777]' : 'text-slate-400'}`} />
                 <span className="hidden md:inline">
                   {transcriptionResult.saved_to_knowledge ? 'En Base de Conocimiento' : 'Guardar en BC'}
                 </span>
@@ -152,19 +161,21 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setGenerateModalOpen(true)}
-                disabled={!isSummaryReady || isJobActive}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer ${
-                  isSummaryReady && !isJobActive
-                    ? 'bg-[#002777] hover:bg-[#001e5c] text-white'
+                disabled={!isSummaryReady || !hasTranscriptContent || isJobActive}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-2xs ${
+                  hasTranscriptContent && isSummaryReady && !isJobActive
+                    ? 'bg-[#002777] hover:bg-[#001e5c] text-white cursor-pointer'
                     : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
                 }`}
                 title={
-                  !isSummaryReady
+                  !hasTranscriptContent
+                    ? 'Se requiere una transcripción con diálogos para generar entregables'
+                    : !isSummaryReady
                     ? 'Genera el resumen para habilitar la creación de entregables'
                     : 'Generar Inventario (.xlsx) y Levantamiento (.docx)'
                 }
               >
-                <Sparkles className={`h-3.5 w-3.5 ${isSummaryReady && !isJobActive ? 'text-amber-300' : 'text-slate-400'}`} />
+                <Sparkles className={`h-3.5 w-3.5 ${hasTranscriptContent && isSummaryReady && !isJobActive ? 'text-amber-300' : 'text-slate-400'}`} />
                 <span>Generar</span>
               </button>
             </>
@@ -200,6 +211,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
           isSummaryReady={isSummaryReady}
           isGeneratingSummary={isGeneratingSummary}
           isJobActive={isJobActive}
+          hasTranscriptContent={hasTranscriptContent}
           hasCopiedSummary={hasCopiedSummary}
           showSummaryDownloadMenu={showSummaryDownloadMenu}
           summaryMenuRef={summaryMenuRef}

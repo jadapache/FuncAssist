@@ -326,7 +326,22 @@ export function useTranscriptionActions(
           ? summaryData.requirements
           : []
 
-  const isSummaryReady = summaryParagraphs.length > 0 || keyInsights.length > 0
+  const hasTranscriptContent = Boolean(
+    (transcriptionResult?.text && transcriptionResult.text.trim().length > 0) ||
+    (transcriptionResult?.segments && transcriptionResult.segments.length > 0)
+  )
+
+  const isSummaryReady =
+    hasTranscriptContent &&
+    ((summaryParagraphs.length > 0 &&
+      summaryParagraphs.some(
+        (p) =>
+          p &&
+          !p.toLowerCase().includes('no se detectaron diálogos') &&
+          !p.toLowerCase().includes('no se detectaron dialogos') &&
+          !p.toLowerCase().includes('sin texto registrado')
+      )) ||
+      keyInsights.length > 0)
 
   // Copy summary text
   const handleCopySummary = useCallback(() => {
@@ -394,6 +409,7 @@ export function useTranscriptionActions(
     summaryParagraphs,
     keyInsights,
     isSummaryReady,
+    hasTranscriptContent,
     meetingTitle,
     isRetranscribing,
     toggleSegmentImportance,
