@@ -1,6 +1,5 @@
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
