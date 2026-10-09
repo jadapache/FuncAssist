@@ -14,11 +14,11 @@ import { transcriptionApi } from '../api/transcriptionApi'
 export type UploadTarget =
   | File
   | {
-      path: string
-      name: string
-      size: number
-      isVideo?: boolean
-    }
+    path: string
+    name: string
+    size: number
+    isVideo?: boolean
+  }
 
 interface UploadAreaProps {
   onUpload: (target: UploadTarget, title: string, description?: string) => Promise<void>
@@ -26,7 +26,7 @@ interface UploadAreaProps {
   configuredModelLabel?: string
 }
 
-const SUPPORTED_EXTS = ['.mp3', '.mp4', '.wav', '.m4a', '.webm', '.ogg', '.flac', '.aac', '.opus', '.mkv', '.mov']
+const SUPPORTED_EXTS = ['.mp3', '.mp4', '.wav', '.m4a', '.webm', '.ogg', '.flac', '.aac', '.opus', '.mkv', '.mov', '.wmv', '.avi']
 
 export const UploadArea: React.FC<UploadAreaProps> = ({
   onUpload,
@@ -94,7 +94,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
         path: localPath.trim(),
         name: file.name,
         size: file.size,
-        isVideo: file.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi)$/i.test(file.name),
+        isVideo: file.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi|wmv|m4v|flv|ts)$/i.test(file.name),
       })
     } else {
       setSelectedTarget(file)
@@ -152,8 +152,8 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
   const targetSize = selectedTarget ? (selectedTarget instanceof File ? selectedTarget.size : selectedTarget.size) : 0
   const isVideo = selectedTarget
     ? selectedTarget instanceof File
-      ? selectedTarget.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi)$/i.test(selectedTarget.name)
-      : Boolean(selectedTarget.isVideo || /\.(mp4|webm|mkv|mov|avi)$/i.test(selectedTarget.name))
+      ? selectedTarget.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi|wmv|m4v|flv|ts)$/i.test(selectedTarget.name)
+      : Boolean(selectedTarget.isVideo || /\.(mp4|webm|mkv|mov|avi|wmv|m4v|flv|ts)$/i.test(selectedTarget.name))
     : false
   const isLocalDirect = selectedTarget ? !(selectedTarget instanceof File) && Boolean(selectedTarget.path) : false
 
@@ -167,18 +167,17 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
           onDragOver={handleDrag}
           onDrop={handleDrop}
           onClick={handleNativePick}
-          className={`relative rounded-2xl border-2 border-dashed p-8 transition flex flex-col items-center justify-center text-center cursor-pointer ${
-            dragActive
-              ? 'border-blue-500 bg-blue-50/70 shadow-md ring-4 ring-blue-500/10'
-              : selectedTarget
+          className={`relative rounded-2xl border-2 border-dashed p-8 transition flex flex-col items-center justify-center text-center cursor-pointer ${dragActive
+            ? 'border-blue-500 bg-blue-50/70 shadow-md ring-4 ring-blue-500/10'
+            : selectedTarget
               ? 'border-emerald-300 bg-emerald-50/30'
               : 'border-slate-300 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/30'
-          }`}
+            }`}
         >
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*,video/*,.mp3,.mp4,.wav,.m4a,.webm,.ogg,.flac,.aac,.opus,.mkv,.mov"
+            accept="audio/*,video/*,.mp3,.mp4,.wav,.m4a,.webm,.ogg,.flac,.aac,.opus,.mkv,.mov,.wmv,.avi"
             onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             className="hidden"
           />
@@ -193,7 +192,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
                   {isOpeningPicker ? 'Abriendo explorador de archivos...' : 'Haz clic para explorar o arrastra tu grabación aquí'}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
-                  Audio o video (MP3, WAV, M4A, MP4, WebM, FLAC, MKV) • Acceso directo sin copia
+                  Audio o video (MP3, WAV, M4A, MP4, WebM, FLAC, OGG, OPUS, AAC, MKV, WMV, AVI)
                 </p>
               </div>
             </div>

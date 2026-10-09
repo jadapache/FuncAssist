@@ -16,8 +16,8 @@ from app.features.transcription.storage import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_FILTER = (
-  "Archivos Multimedia (*.mp3;*.mp4;*.wav;*.m4a;*.webm;*.ogg;*.flac;*.aac;*.opus;*.mkv;*.mov)|"
-  "*.mp3;*.mp4;*.wav;*.m4a;*.webm;*.ogg;*.flac;*.aac;*.opus;*.mkv;*.mov|"
+  "Archivos Multimedia (*.mp3;*.mp4;*.wav;*.m4a;*.webm;*.ogg;*.flac;*.aac;*.opus;*.mkv;*.mov;*.wmv;*.avi)|"
+  "*.mp3;*.mp4;*.wav;*.m4a;*.webm;*.ogg;*.flac;*.aac;*.opus;*.mkv;*.mov;*.wmv;*.avi|"
   "Todos los archivos (*.*)|*.*"
 )
 

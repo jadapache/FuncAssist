@@ -87,9 +87,10 @@ class FasterWhisperProvider(TranscriptionProvider):
     audio_path: Path,
     model_id: str,
     language: Optional[str] = None,
-    on_progress: Optional[Callable[[int, str, str], None]] = None,
+    on_progress: Optional[Callable[..., None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
   ) -> TranscriptionResult:
+    _patch_pyav_metadata_errors()
     try:
       from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -112,7 +113,10 @@ class FasterWhisperProvider(TranscriptionProvider):
     segments_gen, info = model.transcribe(
       str(audio_path),
       language=language,
-      beam_size=5,
+      beam_size=1,
+      vad_filter=True,
+      vad_parameters=dict(min_silence_duration_ms=500),
+      condition_on_previous_text=False,
     )
 
     segments: List[TranscriptionSegment] = []
@@ -123,18 +127,40 @@ class FasterWhisperProvider(TranscriptionProvider):
       if cancel_check and cancel_check():
         raise RuntimeError("Transcripción cancelada por el usuario.")
       text = seg.text.strip()
-      segments.append(
-        TranscriptionSegment(
-          start=float(seg.start),
-          end=float(seg.end),
-          text=text,
-          speaker=f"Participante {(i % 2) + 1}",
-        )
+      if not text:
+        continue
+      segment_obj = TranscriptionSegment(
+        start=float(seg.start),
+        end=float(seg.end),
+        text=text,
+        speaker=f"Participante {(i % 2) + 1}",
       )
+      segments.append(segment_obj)
       full_text_parts.append(text)
+
       if on_progress:
-        pct = min(79, 20 + int((seg.end / total_duration) * 55))
-        on_progress(pct, f"Segmento {i+1}: {text[:40]}...", "")
+        pct = min(74, 20 + int((seg.end / total_duration) * 54))
+        detail_msg = f"Segmento {i+1}: {text[:40]}..."
+        raw_segs = [
+          {
+            "start": s.start,
+            "end": s.end,
+            "text": s.text,
+            "speaker": s.speaker,
+          }
+          for s in segments
+        ]
+        try:
+          on_progress(
+            pct,
+            detail_msg,
+            "",
+            raw_segs,
+            " ".join(full_text_parts),
+          )
+        except TypeError:
+          on_progress(pct, detail_msg, "")
+
 
     return TranscriptionResult(
       language=info.language or language or "es",
@@ -145,3 +171,5 @@ class FasterWhisperProvider(TranscriptionProvider):
       engine="faster-whisper",
       model_id=model_id,
     )
+
+

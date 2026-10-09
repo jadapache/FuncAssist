@@ -32,6 +32,24 @@ export const STAGE_TRANSLATIONS: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
+export const getGeneralStageText = (data: {
+  stage?: string
+  status?: string
+}): string => {
+  const isComplete = data.stage === 'complete' || data.status === 'complete'
+  const isFailed = data.stage === 'failed' || data.status === 'failed'
+  const isCancelled = data.stage === 'cancelled' || data.status === 'cancelled'
+
+  if (isComplete) return 'Completado'
+  if (isCancelled) return 'Cancelado'
+  if (isFailed) return 'Error en procesamiento'
+  const key = (data.stage || data.status || '').toLowerCase()
+  if (STAGE_TRANSLATIONS[key]) {
+    return STAGE_TRANSLATIONS[key]
+  }
+  return 'Transcribiendo...'
+}
+
 export const getTranscriptionStageText = (data: {
   stage?: string
   status?: string
@@ -350,6 +368,7 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
                   ? 'failed'
                   : 'transcribing'
               const stageText = getTranscriptionStageText(data)
+              const generalStageText = getGeneralStageText(data)
 
               setActiveJobs((prev) => {
                 if (cancelledJobsRef.current.has(id)) return prev
@@ -364,11 +383,13 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
                     status: updatedStatus,
                     stage: data.stage || existing?.stage,
                     progress: isDone ? 100 : finalProgress,
-                    message: stageText,
+                    message: data.message || stageText,
                     preview: data.preview,
                     eta: isDone || isFail ? null : data.eta || existing?.eta,
                     model_info: data.model_info || existing?.model_info,
                     error: data.error,
+                    live_segments: data.live_segments || existing?.live_segments || [],
+                    live_text: data.live_text || existing?.live_text || '',
                   },
                 }
               })
@@ -379,8 +400,8 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
                 title: data.title || activeJobsRef.current[id]?.title || 'Transcripción',
                 progress: isDone ? 100 : updatedProgress,
                 status: updatedStatus,
-                stageText,
-                speedOrSize: data.preview || null,
+                stageText: generalStageText,
+                speedOrSize: null,
                 eta: isDone || isFail ? null : data.eta || null,
                 onClick: () => {
                   openStudio(id)
@@ -481,6 +502,7 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
                 : (status.status as any) || 'transcribing'
             const finalProgress = isDone ? 100 : typeof status.progress === 'number' ? status.progress : 0
             const stageText = getTranscriptionStageText(status)
+            const generalStageText = getGeneralStageText(status)
 
             setActiveJobs((prev) => {
               if (cancelledJobsRef.current.has(id)) return prev
@@ -492,7 +514,9 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
                   ...status,
                   status: finalStatus,
                   progress: finalProgress,
-                  message: stageText,
+                  message: status.message || stageText,
+                  live_segments: status.live_segments || prevJob?.live_segments || [],
+                  live_text: status.live_text || prevJob?.live_text || '',
                 },
               }
             })
@@ -503,8 +527,8 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
               title: status.title || activeJobsRef.current[id]?.title || 'Transcripción',
               progress: finalProgress,
               status: finalStatus,
-              stageText,
-              speedOrSize: status.preview || null,
+              stageText: generalStageText,
+              speedOrSize: null,
               eta: isDone || isFail ? null : status.eta || null,
               onClick: () => {
                 openStudio(id)
@@ -569,93 +593,24 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
     const abortController = new AbortController()
     abortControllersRef.current[transcriptionId] = abortController
 
-    const targetName = (target && typeof target === 'object' && ('name' in target ? target.name : target.filename)) || 'archivo_multimedia'
     const localPath = ((target as any)?.path || (target as any)?.filePath || '') as string
 
     try {
       setIsUploading(true)
       setActiveMeetingTitle(title)
 
-      let mediaId = transcriptionId
-
-      if (localPath && typeof localPath === 'string' && localPath.trim().length > 0) {
-        // Zero-copy directo: vincular la ruta local existente en disco sin transferir gigabytes por HTTP
-        const regRes = await transcriptionApi.registerLocalPath(
-          localPath.trim(),
-          title,
-          description,
-          transcriptionId
-        )
-        mediaId = regRes.media_id || transcriptionId
-      } else if (target && typeof (target as any).size === 'number') {
-        // Fallback para navegador web estándar: subir el archivo por streaming HTTP
-        const initialUploadJob: TranscriptionProgress = {
-          id: transcriptionId,
-          media_id: '',
-          title,
-          status: 'uploading',
-          stage: 'uploading',
-          progress: 1,
-          message: `Iniciando subida de "${targetName}"...`,
-          model_info: availableModels?.active_model_label || 'Whisper Auto',
-        }
-        setActiveJobs((prev) => ({
-          ...prev,
-          [transcriptionId]: initialUploadJob,
-        }))
-        addOrUpdateJob({
-          id: transcriptionId,
-          type: 'transcription',
-          title,
-          progress: 1,
-          status: 'uploading',
-          stageText: `Iniciando subida de "${targetName}"...`,
-          onClick: () => {
-            openStudio(transcriptionId)
-            navigate('/funcional/transcripciones')
-          },
-          onCancel: () => void handleCancelTranscription(transcriptionId),
-          onDismiss: () => handleDismissJob(transcriptionId),
-        })
-
-        const uploadRes = await transcriptionApi.uploadMediaWithProgress(
-          target as File,
-          title,
-          description,
-          (prog, msg) => {
-            if (cancelledJobsRef.current.has(transcriptionId)) return
-            const calculatedProgress = Math.min(10, Math.max(1, Math.round(prog / 10)))
-            setActiveJobs((prev) => {
-              if (!prev[transcriptionId] || cancelledJobsRef.current.has(transcriptionId)) return prev
-              return {
-                ...prev,
-                [transcriptionId]: {
-                  ...prev[transcriptionId],
-                  progress: calculatedProgress,
-                  message: msg,
-                },
-              }
-            })
-            addOrUpdateJob({
-              id: transcriptionId,
-              type: 'transcription',
-              title,
-              progress: calculatedProgress,
-              status: 'uploading',
-              stageText: msg,
-              onClick: () => {
-                openStudio(transcriptionId)
-                navigate('/funcional/transcripciones')
-              },
-              onCancel: () => void handleCancelTranscription(transcriptionId),
-              onDismiss: () => handleDismissJob(transcriptionId),
-            })
-          },
-          transcriptionId,
-          abortController.signal
-        )
-        mediaId = uploadRes.media_id || transcriptionId
+      if (!localPath || typeof localPath !== 'string' || localPath.trim().length === 0) {
+        throw new Error('No se pudo resolver la ruta local del archivo multimedia.')
       }
+
+      // Zero-copy directo: vincular la ruta local existente en disco sin transferir gigabytes por HTTP
+      const regRes = await transcriptionApi.registerLocalPath(
+        localPath.trim(),
+        title,
+        description,
+        transcriptionId
+      )
+      const mediaId = regRes.media_id || transcriptionId
 
       delete abortControllersRef.current[transcriptionId]
       if (cancelledJobsRef.current.has(transcriptionId)) return

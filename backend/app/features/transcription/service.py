@@ -359,18 +359,28 @@ class TranscriptionService:
           status="transcribing",
           stage="transcribing",
           progress=20,
-          message=f"Decodificando audio con {active_model_label}...",
+          message="Iniciando decodificación de audio...",
           eta=_format_eta(35),
           model_info=active_model_label,
         )
       )
 
-      def _on_local_progress(prog_pct: int, message: str, eta_str: str):
+      def _on_local_progress(
+        prog_pct: int,
+        message: str,
+        eta_str: str = "",
+        live_segments: Optional[list] = None,
+        live_text: Optional[str] = None,
+      ):
         if transcription_id in _ACTIVE_JOBS and _ACTIVE_JOBS[transcription_id].status == "transcribing":
           _ACTIVE_JOBS[transcription_id].progress = prog_pct
           _ACTIVE_JOBS[transcription_id].message = message
           _ACTIVE_JOBS[transcription_id].eta = eta_str
           _ACTIVE_JOBS[transcription_id].title = media_title
+          if live_segments is not None:
+            _ACTIVE_JOBS[transcription_id].live_segments = live_segments
+          if live_text is not None:
+            _ACTIVE_JOBS[transcription_id].live_text = live_text
           save_active_job_progress(_ACTIVE_JOBS[transcription_id].model_dump())
           emit_progress_sync(transcription_id, _ACTIVE_JOBS[transcription_id].model_dump())
 
@@ -563,7 +573,7 @@ class TranscriptionService:
       return None
 
     except Exception as exc:
-      if is_job_cancelled(transcription_id) or "cancelada" in str(exc).lower():
+      if transcription_id in _CANCELLED_JOBS or "cancelada" in str(exc).lower():
         logger.info(f"Transcription job {transcription_id} was cancelled by user: {exc}")
         prog = TranscriptionProgress(
           id=transcription_id,

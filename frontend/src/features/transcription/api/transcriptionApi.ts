@@ -1,6 +1,5 @@
 import { API_BASE, handleResponse } from '../../../api/client'
 
-
 export type MediaMetadata = {
   title: string
   description?: string
@@ -38,6 +37,8 @@ export type TranscriptionProgress = {
   model_info?: string | null
   error?: string | null
   timestamp?: string | null
+  live_segments?: TranscriptionSegment[]
+  live_text?: string | null
 }
 
 export type TranscriptionResult = {
@@ -72,104 +73,7 @@ export type AvailableModelsInfo = {
   active_model_label: string
 }
 
-/**
- * Upload media file with XMLHttpRequest to track real-time upload progress.
- */
-export function uploadMediaWithProgress(
-  file: File,
-  title: string,
-  description: string = '',
-  onProgress?: (progress: number, message: string) => void,
-  transcriptionId?: string,
-  signal?: AbortSignal
-): Promise<{ ok: boolean; media_id: string; transcription_id: string; size: number; message: string }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    const fileSize = file.size || 1
-
-    if (signal) {
-      if (signal.aborted) {
-        reject(new Error('Subida cancelada por el usuario'))
-        return
-      }
-      signal.addEventListener('abort', () => {
-        xhr.abort()
-        reject(new Error('Subida cancelada por el usuario'))
-      })
-    }
-
-    xhr.upload.addEventListener('progress', (event) => {
-      if (signal?.aborted) return
-      if (event.lengthComputable) {
-        const bytesReceived = event.loaded
-        const uploadProgress = Math.min(100, Math.round((bytesReceived / fileSize) * 100))
-        const mbReceived = (bytesReceived / 1024 / 1024).toFixed(1)
-        const mbTotal = (fileSize / 1024 / 1024).toFixed(1)
-        const message = `Subiendo archivo... ${mbReceived}MB / ${mbTotal}MB`
-        onProgress?.(uploadProgress, message)
-      }
-    })
-
-    xhr.upload.addEventListener('loadstart', () => {
-      if (signal?.aborted) return
-      onProgress?.(0, 'Iniciando subida de archivo...')
-    })
-
-    xhr.addEventListener('load', () => {
-      if (signal?.aborted) return
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const response = JSON.parse(xhr.responseText)
-          onProgress?.(100, 'Subida completada con éxito')
-          resolve(response)
-        } catch {
-          reject(new Error('Respuesta del servidor no válida'))
-        }
-      } else {
-        try {
-          const errJson = JSON.parse(xhr.responseText)
-          reject(new Error(errJson.detail || `Error al subir archivo (${xhr.status})`))
-        } catch {
-          reject(new Error(`Error al subir archivo (${xhr.status})`))
-        }
-      }
-    })
-
-    xhr.addEventListener('error', () => {
-      if (signal?.aborted) return
-      reject(new Error('Error de red durante la subida del archivo'))
-    })
-
-    xhr.addEventListener('abort', () => {
-      reject(new Error('Subida cancelada por el usuario'))
-    })
-
-    xhr.timeout = 10 * 60 * 1000 // 10 minutes timeout for large recordings
-    xhr.addEventListener('timeout', () => {
-      if (signal?.aborted) return
-      reject(new Error('Tiempo de espera agotado al subir el archivo'))
-    })
-
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('title', title)
-    formData.append('description', description)
-    if (transcriptionId) {
-      formData.append('transcription_id', transcriptionId)
-    }
-
-    const token = localStorage.getItem('auth_token')
-    xhr.open('POST', `${API_BASE}/api/transcription/upload-stream`, true)
-    if (token) {
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-    }
-    xhr.send(formData)
-  })
-}
-
 export const transcriptionApi = {
-  uploadMediaWithProgress,
-
   getProgressStreamUrl(transcriptionId: string): string {
     return `${API_BASE}/api/transcription/progress-stream/${transcriptionId}`
   },
@@ -238,10 +142,6 @@ export const transcriptionApi = {
       }),
     })
     return handleResponse(response)
-  },
-
-  async uploadMedia(file: File, title: string, description: string = ''): Promise<{ ok: boolean; media_id: string; transcription_id?: string; message: string }> {
-    return uploadMediaWithProgress(file, title, description)
   },
 
   async startTranscription(mediaId: string, options?: TranscribeOptions): Promise<{ ok: boolean; status: string; transcription_id: string }> {
@@ -368,5 +268,4 @@ export const transcriptionApi = {
     }
     return response.blob()
   },
-
 }

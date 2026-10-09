@@ -143,3 +143,8 @@ pm_qa_copilot/
 
 # Tauri / Rust
 src-tauri/target/
+
+# AI Models & Downloads
+backend/app/ai/models/*
+!backend/app/ai/models/.gitkeep
+

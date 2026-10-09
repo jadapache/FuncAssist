@@ -33,6 +33,7 @@ class TranscriptionSummary(BaseModel):
 class TranscriptionProgress(BaseModel):
   id: str
   media_id: str
+  title: Optional[str] = None
   status: str = "pending"  # pending, uploading, preprocessing, transcribing, diarizing, summarizing, complete, failed, cancelled
   stage: str = "pending"
   progress: int = 0  # 0 to 100
@@ -42,6 +43,9 @@ class TranscriptionProgress(BaseModel):
   model_info: Optional[str] = None
   error: Optional[str] = None
   timestamp: Optional[str] = None
+  live_segments: List[Any] = Field(default_factory=list)
+  live_text: Optional[str] = None
+
 
 
 class TranscriptionResult(BaseModel):
