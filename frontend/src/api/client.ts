@@ -10,6 +10,12 @@ import type { UserProfile, UserRole } from './modules/user'
 import { transcriptionApi } from '../features/transcription/api/transcriptionApi'
 import { draftsApi } from './modules/drafts'
 
+export type {
+  KnowledgePathResponse,
+  KnowledgeIntegrityResponse,
+  KnowledgeRebuildResponse,
+  KnowledgeExportResponse,
+} from './modules/knowledge'
 export type { AppSettings, IntegrationInfo, TestConnectionResult } from '../types'
 export type {
   MediaMetadata,

@@ -1,13 +1,14 @@
-"""Retrieval over knowledge chunks — BM25 when available, keyword fallback otherwise.
-
-Seam is intentionally small so a later vector store can replace this module.
-"""
+"""Retrieval over knowledge chunks — FTS5 persistent index with Python BM25 fallback."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from app.context.knowledge import get_chunks_for_documents, load_chunks
+from app.context.knowledge import (
+  get_chunks_for_documents,
+  load_chunks,
+  search_chunks_fts,
+)
 from app.context.models import ContextChunk, SourceType
 
 
@@ -16,6 +17,12 @@ def chunks_from_documents(document_ids: list[str], *, max_chunks: int = 48) -> l
 
 
 def search_knowledge(query: str, *, top_k: int = 8, tags: list[str] | None = None) -> list[ContextChunk]:
+  # 1. Try SQLite FTS5 — fast, persistent index, handles Spanish accents
+  fts_results = search_chunks_fts(query, top_k=top_k, tags=tags)
+  if fts_results:
+    return [_to_chunk(item, score=item.get("score")) for item in fts_results]
+
+  # 2. Fall back to Python BM25 / keyword over full corpus
   chunks = load_chunks()
   if tags:
     tag_set = {tag.lower() for tag in tags}

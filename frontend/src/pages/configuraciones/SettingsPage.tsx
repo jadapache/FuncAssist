@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Cpu, FileText, Layers } from 'lucide-react'
+import { Cpu, Database, FileText, Layers } from 'lucide-react'
 import { AiModelsPanel } from '../../components/settings/AiModelsPanel'
 import { IntegrationsPanel } from '../../components/settings/IntegrationsPanel'
+import { KnowledgeBaseSection } from '../../components/settings/KnowledgeBaseSection'
 import { TemplatesPanel } from '../../components/settings/TemplatesPanel'
 import { useIntegrationsManager } from '../../components/settings/hooks/useIntegrationsManager'
 import type { SettingsTabItem, TabType } from '../../components/settings/types'
@@ -15,7 +16,7 @@ export const SettingsPage = () => {
 
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const t = new URLSearchParams(window.location.search).get('tab')
-    if (t === 'integrations' || t === 'ai_models' || t === 'templates') {
+    if (t === 'integrations' || t === 'ai_models' || t === 'templates' || t === 'knowledge') {
       return t as TabType
     }
     if (
@@ -33,7 +34,7 @@ export const SettingsPage = () => {
 
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab === 'integrations' || tab === 'ai_models' || tab === 'templates') {
+    if (tab === 'integrations' || tab === 'ai_models' || tab === 'templates' || tab === 'knowledge') {
       setActiveTab(tab as TabType)
     } else if (searchParams.get('jira') || searchParams.get('github') || searchParams.get('gitlab')) {
       setActiveTab('integrations')
@@ -55,6 +56,12 @@ export const SettingsPage = () => {
       label: 'Plantillas',
       subtitle: 'Plantillas corporativas (.doc, .docx, .xlsx)',
       icon: FileText,
+    },
+    {
+      id: 'knowledge',
+      label: 'Base de Conocimiento',
+      subtitle: 'Almacenamiento SQLite FTS5 y red compartida',
+      icon: Database,
     },
     ...(canSeeIntegrations
       ? [
@@ -78,7 +85,7 @@ export const SettingsPage = () => {
         </div>
         <h1 className="page-title">Configuración del Sistema</h1>
         <p className="page-subtitle">
-          Administra los modelos de IA, plantillas corporativas e integraciones con repositorios.
+          Administra los modelos de IA, base de conocimiento SQLite FTS5, plantillas corporativas e integraciones.
         </p>
       </header>
 
@@ -129,6 +136,7 @@ export const SettingsPage = () => {
       {/* Tab Panels */}
       {activeTab === 'ai_models' && <AiModelsPanel />}
       {activeTab === 'templates' && <TemplatesPanel />}
+      {activeTab === 'knowledge' && <KnowledgeBaseSection />}
       {activeTab === 'integrations' && canSeeIntegrations && (
         <IntegrationsPanel integrationsManager={integrationsManager} />
       )}
