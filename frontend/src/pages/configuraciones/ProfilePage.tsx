@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '../../api/client'
+import { PageHeader } from '../../components/common'
 import { useUser, type UserRole } from '../../context/UserContext'
 import { useToast } from '../../context/ToastContext'
 
@@ -130,16 +131,11 @@ export const ProfilePage = () => {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Header */}
-      <header className="space-y-2">
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[#002777]">Cuenta & Perfil</p>
-        </div>
-        <h1 className="page-title">Perfil de Usuario</h1>
-        <p className="page-subtitle">
-          Visualiza tu cuenta local y personaliza tu nombre de usuario.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="CUENTA & PERFIL"
+        title="Perfil de Usuario"
+        subtitle="Visualiza tu cuenta local y personaliza tu nombre de usuario."
+      />
 
       {/* Global Alerts */}
       {message ? (

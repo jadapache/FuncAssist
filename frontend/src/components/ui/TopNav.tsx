@@ -248,7 +248,13 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
   const updateMenuPosition = () => {
     if (!buttonRef.current) return
     const rect = buttonRef.current.getBoundingClientRect()
-    setMenuPos({ top: rect.bottom + 8, left: Math.max(10, rect.right - 220) })
+    const menuWidth = 256 // w-64 is 16rem = 256px
+    const margin = 16
+    const left = Math.min(
+      Math.max(margin, rect.right - menuWidth),
+      window.innerWidth - menuWidth - margin,
+    )
+    setMenuPos({ top: rect.bottom + 8, left })
   }
 
   useEffect(() => {

@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-  Sparkles,
   FileText,
   Search,
   RefreshCw,
@@ -15,7 +14,7 @@ import {
 import { Link } from 'react-router-dom'
 import { useTranscription } from '../hooks/useTranscription'
 import type { TranscriptionResult } from '../api/transcriptionApi'
-import { ConfirmationModal } from '../../../components/common'
+import { ConfirmationModal, PageHeader } from '../../../components/common'
 import {
   RecentTranscriptionItem,
   GenerateModal,
@@ -112,34 +111,22 @@ export const TranscripcionesPage = () => {
   }
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto font-sans pb-12 animate-fade-in">
-      {/* Page Header */}
-      <header className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-bold uppercase tracking-widest text-[#002777]">
-              MÓDULO FUNCIONAL
-            </p>
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-bold text-[#002777]">
-              <Sparkles className="h-3 w-3" />
-              IA + Whisper
-            </span>
-          </div>
-          <h1 className="page-title mt-1">Transcripción y Análisis de Reuniones</h1>
-          <p className="page-subtitle">
-            Carga grabaciones de reuniones para transcribir con Whisper, identificar interlocutores, extraer minutas y generar entregables funcionales.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setIsUploadModalOpen(true)}
-          className="px-4 py-2.5 bg-[#002777] hover:bg-[#001e5c] text-white text-xs font-bold rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Nueva Transcripción</span>
-        </button>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="MÓDULO FUNCIONAL"
+        title="Transcripción y Análisis de Reuniones"
+        subtitle="Carga grabaciones de reuniones para transcribir con Whisper, identificar interlocutores, extraer minutas y generar entregables funcionales."
+        actions={
+          <button
+            type="button"
+            onClick={() => setIsUploadModalOpen(true)}
+            className="px-4 py-2.5 bg-[#002777] hover:bg-[#001e5c] text-white text-xs font-bold rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nueva Transcripción</span>
+          </button>
+        }
+      />
 
       {/* API Key Missing Warning Banner (If no model provider is configured) */}
       {!isModelConfigured && (
@@ -199,11 +186,10 @@ export const TranscripcionesPage = () => {
               <button
                 type="button"
                 onClick={() => setViewStyle('grid')}
-                className={`p-1.5 rounded-lg transition cursor-pointer ${
-                  viewStyle === 'grid'
-                    ? 'bg-white text-[#002777] shadow-xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${viewStyle === 'grid'
+                  ? 'bg-white text-[#002777] shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900'
+                  }`}
                 title="Vista en Cuadrícula"
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -211,11 +197,10 @@ export const TranscripcionesPage = () => {
               <button
                 type="button"
                 onClick={() => setViewStyle('list')}
-                className={`p-1.5 rounded-lg transition cursor-pointer ${
-                  viewStyle === 'list'
-                    ? 'bg-white text-[#002777] shadow-xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${viewStyle === 'list'
+                  ? 'bg-white text-[#002777] shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900'
+                  }`}
                 title="Vista en Lista"
               >
                 <List className="h-4 w-4" />
@@ -321,11 +306,10 @@ export const TranscripcionesPage = () => {
                       key={pageNum}
                       type="button"
                       onClick={() => setCurrentPage(pageNum)}
-                      className={`min-w-[32px] h-8 px-2 rounded-lg font-bold text-xs transition cursor-pointer ${
-                        currentPage === pageNum
-                          ? 'bg-[#002777] text-white'
-                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                      }`}
+                      className={`min-w-[32px] h-8 px-2 rounded-lg font-bold text-xs transition cursor-pointer ${currentPage === pageNum
+                        ? 'bg-[#002777] text-white'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}
                     >
                       {pageNum}
                     </button>
@@ -362,9 +346,8 @@ export const TranscripcionesPage = () => {
       <ConfirmationModal
         isOpen={Boolean(transcriptionToDelete)}
         title="¿Eliminar Transcripción?"
-        message={`¿Estás seguro de que deseas eliminar permanentemente "${
-          transcriptionToDelete?.metadata.title || 'esta transcripción'
-        }" y sus archivos asociados? Esta acción no se puede deshacer.`}
+        message={`¿Estás seguro de que deseas eliminar permanentemente "${transcriptionToDelete?.metadata.title || 'esta transcripción'
+          }" y sus archivos asociados? Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar Transcripción"
         cancelLabel="Cancelar"
         isDestructive={true}

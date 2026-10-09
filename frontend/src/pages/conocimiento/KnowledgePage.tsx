@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import { api, type KnowledgeDocument } from '../../api/client'
-import { ConfirmationModal } from '../../components/common'
+import { ConfirmationModal, PageHeader } from '../../components/common'
 import { useToast } from '../../context/ToastContext'
 
 const ACCEPTED_TYPES = '.pdf,.docx,.doc,.md,.txt,.json,.html,.htm'
@@ -231,7 +231,7 @@ export const KnowledgePage = () => {
   const allAvailableDocTags = useMemo(() => {
     const tagsSet = new Set<string>()
     documents.forEach((doc) => {
-      ;(doc.tags || []).forEach((t) => tagsSet.add(t.toLowerCase()))
+      ; (doc.tags || []).forEach((t) => tagsSet.add(t.toLowerCase()))
     })
     return Array.from(tagsSet)
   }, [documents])
@@ -267,30 +267,20 @@ export const KnowledgePage = () => {
 
   return (
     <div className="space-y-8 pb-12 font-sans">
-      {/* 1. Header Section */}
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-[#002777]">
-              Sistema RAG & Indexación
-            </span>
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
-            Biblioteca de Conocimiento
-          </h1>
-          <p className="max-w-2xl text-xs md:text-sm text-slate-500 leading-relaxed">
-            Indexa PRDs, especificaciones y actas de reunión. Almacenados en SQLite FTS5 con búsqueda
-            BM25 nativa y soporte para diacríticos en español.
-          </p>
-        </div>
-        <Link
-          to="/settings?tab=knowledge"
-          className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-[#002777] bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 rounded-xl transition shadow-2xs cursor-pointer group"
-        >
-          <Database className="h-4 w-4 text-[#002777] group-hover:scale-110 transition-transform" />
-          <span>Configurar Motor SQLite & Red</span>
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="SISTEMA RAG & INDEXACIÓN"
+        title="Biblioteca de Conocimiento"
+        subtitle="Indexa PRDs, especificaciones y actas de reunión. Almacenados en SQLite FTS5 con búsqueda BM25 nativa y soporte para diacríticos en español."
+        actions={
+          <Link
+            to="/settings?tab=knowledge"
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#002777] bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 rounded-xl transition shadow-2xs cursor-pointer group"
+          >
+            <Database className="h-4 w-4 text-[#002777] group-hover:scale-110 transition-transform" />
+            <span>Configurar Motor SQLite & Red</span>
+          </Link>
+        }
+      />
 
       {/* 2. Drag & Drop File Upload Section */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-5">
@@ -314,13 +304,12 @@ export const KnowledgePage = () => {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${
-            isDragging
+          className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer ${isDragging
               ? 'border-blue-500 bg-blue-50/60 scale-[0.99]'
               : selectedFile
                 ? 'border-emerald-400 bg-emerald-50/30'
                 : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/80 bg-slate-50/40'
-          }`}
+            }`}
         >
           <input
             ref={fileInputRef}
@@ -366,11 +355,9 @@ export const KnowledgePage = () => {
             >
               <div className="flex items-center gap-3.5 min-w-0">
                 <div
-                  className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center font-mono font-extrabold text-xs shadow-2xs ${
-                    getFileExtensionStyle(selectedFile.name).bg
-                  } ${getFileExtensionStyle(selectedFile.name).text} ${
-                    getFileExtensionStyle(selectedFile.name).ring
-                  } ring-1`}
+                  className={`h-11 w-11 shrink-0 rounded-xl flex items-center justify-center font-mono font-extrabold text-xs shadow-2xs ${getFileExtensionStyle(selectedFile.name).bg
+                    } ${getFileExtensionStyle(selectedFile.name).text} ${getFileExtensionStyle(selectedFile.name).ring
+                    } ring-1`}
                 >
                   {getFileExtension(selectedFile.name)}
                 </div>
@@ -422,11 +409,10 @@ export const KnowledgePage = () => {
                   key={tag}
                   type="button"
                   onClick={() => toggleTag(tag)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer border ${
-                    active
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer border ${active
                       ? 'bg-[#002777] text-white border-[#002777] shadow-2xs'
                       : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700 border-slate-200'
-                  }`}
+                    }`}
                 >
                   {active ? `✓ ${tag}` : `+ ${tag}`}
                 </button>
@@ -559,11 +545,10 @@ export const KnowledgePage = () => {
               <button
                 type="button"
                 onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-lg transition cursor-pointer ${
-                  viewMode === 'grid'
+                className={`p-1.5 rounded-lg transition cursor-pointer ${viewMode === 'grid'
                     ? 'bg-white text-[#002777] shadow-2xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
-                }`}
+                  }`}
                 title="Vista en tarjetas"
               >
                 <Grid className="h-3.5 w-3.5" />
@@ -571,11 +556,10 @@ export const KnowledgePage = () => {
               <button
                 type="button"
                 onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded-lg transition cursor-pointer ${
-                  viewMode === 'list'
+                className={`p-1.5 rounded-lg transition cursor-pointer ${viewMode === 'list'
                     ? 'bg-white text-[#002777] shadow-2xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
-                }`}
+                  }`}
                 title="Vista en lista"
               >
                 <List className="h-3.5 w-3.5" />
@@ -804,11 +788,10 @@ export const KnowledgePage = () => {
                     key={pageNum}
                     type="button"
                     onClick={() => setCurrentPage(pageNum)}
-                    className={`h-7 w-7 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      currentPage === pageNum
+                    className={`h-7 w-7 rounded-lg text-xs font-bold transition cursor-pointer ${currentPage === pageNum
                         ? 'bg-[#002777] text-white shadow-2xs'
                         : 'text-slate-600 hover:bg-slate-100'
-                    }`}
+                      }`}
                   >
                     {pageNum}
                   </button>

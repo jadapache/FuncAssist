@@ -32,6 +32,7 @@ import { ArtifactsStudio } from './ArtifactsStudio'
 import { useArtifacts } from '../../hooks/useArtifacts'
 import { useAgenticGeneration } from '../../hooks/useAgenticGeneration'
 import { useToast } from '../../context/ToastContext'
+import { PageHeader } from '../common'
 
 
 interface AgenticDocumentWorkspaceProps {
@@ -314,14 +315,12 @@ export const AgenticDocumentWorkspace = ({
         onChange={(e) => handlePickFiles(e.target.files)}
       />
 
-      {/* Top Page Title Banner Header (OUTSIDE the workspace card container) */}
-      <header className="space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-widest text-[#002777]">
-          {eyebrow}
-        </p>
-        <h1 className="page-title">{config.title}</h1>
-        <p className="page-subtitle max-w-4xl">{config.subtitle}</p>
-      </header>
+      {/* Top Page Title Banner Header (Standardized) */}
+      <PageHeader
+        eyebrow={eyebrow}
+        title={config.title}
+        subtitle={config.subtitle}
+      />
 
       {/* Main Workspace Card Container (Encloses Sidebar + Chat Panel + Artefactos Studio) */}
       <div className="flex h-[calc(100vh-235px)] min-h-[580px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

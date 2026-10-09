@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { FileText, Paperclip, Send, Trash2, Upload, X } from 'lucide-react'
 import { api, type GroundedResult, type KnowledgeDocument } from '../../api/client'
 import { GroundedResultView } from '../pm/StandupPage'
+import { PageHeader } from '../../components/common'
 import { useToast } from '../../context/ToastContext'
 
 const SOURCE_OPTIONS = [
@@ -124,13 +125,11 @@ export const AskProductPage = () => {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">Conocimiento</p>
-        <h1 className="page-title">Consultar Producto</h1>
-        <p className="page-subtitle max-w-3xl">
-          Sube documentos, selecciona fuentes en vivo y realiza preguntas. Las respuestas citan evidencias o indican claramente si falta información.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="CONOCIMIENTO"
+        title="Consultar Producto"
+        subtitle="Sube documentos, selecciona fuentes en vivo y realiza preguntas. Las respuestas citan evidencias o indican claramente si falta información."
+      />
 
 
 
