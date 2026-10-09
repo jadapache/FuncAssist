@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body
 from pydantic import BaseModel
 
 from app.ai.catalog import get_model_catalog
+from app.ai.frontier_sync import get_frontier_sync_status, sync_frontier_models_catalog
 from app.ai.providers.factory import get_ai_settings
 from app.ai.providers.registry import find_provider_spec
 from app.api.middleware.error_handlers import handle_grounded_errors
@@ -39,6 +40,25 @@ async def ai_models_catalog(
 ) -> dict[str, Any]:
     catalog = await get_model_catalog(refresh=refresh, provider=provider, task_type=task_type)
     return catalog.model_dump()
+
+
+@router.post("/models/sync")
+@handle_grounded_errors
+async def sync_ai_models_catalog(force_remote: bool = True) -> dict[str, Any]:
+    """Manually trigger background synchronization of frontier models from LiteLLM."""
+    sync_result = await sync_frontier_models_catalog(force_remote=force_remote)
+    catalog = await get_model_catalog(refresh=True)
+    return {
+        "sync": sync_result,
+        "catalog": catalog.model_dump(),
+    }
+
+
+@router.get("/models/sync-status")
+@handle_grounded_errors
+async def get_ai_models_sync_status() -> dict[str, Any]:
+    """Retrieve last frontier models synchronization status."""
+    return get_frontier_sync_status()
 
 
 @router.get("/settings")

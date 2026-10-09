@@ -1,5 +1,9 @@
 import os
 import sys
+
+# Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 from functools import lru_cache
 from pathlib import Path
 

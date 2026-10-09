@@ -6,6 +6,10 @@ import logging
 import re
 from typing import Any
 
+import os
+# Disable remote cost map fetch during standard execution
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 import litellm
 
 from app.ai.providers.base import AICompletion, AIMessage, AIProvider
@@ -20,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Disable litellm telemetry and set quiet mode
 litellm.telemetry = False
 litellm.suppress_debug_info = True
+litellm.set_verbose = False
 
 
 def _handle_completion_error(err: Exception) -> Exception:

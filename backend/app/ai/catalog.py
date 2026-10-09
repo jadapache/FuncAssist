@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-
 import shutil
+
+# Ensure LiteLLM offline cost map default
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from app.core.settings import ROOT_DIR, USER_DATA_DIR
 from app.models import AIModelInfo, ModelCatalogResponse
 
