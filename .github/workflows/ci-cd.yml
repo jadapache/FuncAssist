@@ -33,15 +33,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: 'frontend/package-lock.json'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'backend/requirements.txt'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install Python dependencies
         run: |
@@ -52,7 +52,7 @@ jobs:
       - name: Run Backend Tests
         run: |
           cd backend
-          pytest tests/ -v --cov=app --cov-report=xml || echo "Pytest completed with status $?"
+          pytest tests/ -v --cov=app --cov-report=xml
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -63,14 +63,14 @@ jobs:
           name: backend-coverage
           token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Setup Frontend dependencies
+      - name: Install Frontend Dependencies
         run: npm ci --prefix frontend
 
       - name: Run Frontend Type Check
         run: npm run typecheck --prefix frontend
 
       - name: Run Frontend Linter
-        run: npm run lint --prefix frontend || echo "Linting completed"
+        run: npm run lint --prefix frontend
 
   # ============================================================================
   # PHASE 2: BUILD FRONTEND
@@ -89,10 +89,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: 'frontend/package-lock.json'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install Frontend Dependencies
         run: npm ci --prefix frontend
 
       - name: Build Frontend
@@ -134,26 +134,32 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: 'package-lock.json'
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install WebView2 Runtime
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
-          Start-Process -FilePath '.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe' -ArgumentList '/silent /install' -Wait
+          Invoke-WebRequest `
+            -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' `
+            -OutFile 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+
+          Start-Process `
+            -FilePath '.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe' `
+            -ArgumentList '/silent /install' `
+            -Wait
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install backend dependencies
+      - name: Install Backend Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Install root & frontend dependencies
+      - name: Install Root & Frontend Dependencies
         run: |
           npm ci
           npm ci --prefix frontend
@@ -163,8 +169,29 @@ jobs:
         env:
           VITE_API_BASE: 'http://localhost:8000'
 
+      # Diagnose the actual Rust compiler error before packaging.
+      - name: Diagnose Rust Compilation
+        shell: pwsh
+        run: |
+          Write-Host "=== Rust version ==="
+          rustc --version
+          cargo --version
+
+          Write-Host "=== Repository directory ==="
+          Get-Location
+          Get-ChildItem src-tauri
+
+          Write-Host "=== Cargo manifest ==="
+          Get-Content src-tauri/Cargo.toml
+
+          Write-Host "=== Compile Tauri binary ==="
+          cargo check `
+            --manifest-path src-tauri/Cargo.toml `
+            --bin qa-project-mgmt `
+            --verbose
+
       - name: Build Tauri Desktop
-        run: npx @tauri-apps/cli build
+        run: npx @tauri-apps/cli build --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -194,18 +221,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download Tauri artifacts
+      - name: Download Tauri Artifacts
         uses: actions/download-artifact@v4
         with:
           name: tauri-windows-release
           path: ./artifacts
 
       - name: Create Release Notes
-        id: release_notes
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          cat << 'EOF' > RELEASE_NOTES.md
-          ## QA Project Management Release $VERSION
+          VERSION="${GITHUB_REF#refs/tags/}"
+
+          cat > RELEASE_NOTES.md <<EOF
+          ## QA Project Management Release ${VERSION}
 
           ### Highlights & Changes
           - Automated Build & Release generated via GitHub Actions
@@ -220,7 +248,6 @@ jobs:
           - If you already have QA Project Management installed, the in-app updater will notify you automatically.
           - Or download and run the latest installer attached to this release.
           EOF
-          sed -i "s/\$VERSION/$VERSION/g" RELEASE_NOTES.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
