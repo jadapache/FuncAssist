@@ -9,18 +9,17 @@ import { BackgroundJobProvider, useBackgroundJobs } from './context/BackgroundJo
 import { TranscriptionProvider } from './features/transcription'
 import { ErrorBoundary } from './core/providers/ErrorBoundary'
 import { DashboardPage } from './pages/DashboardPage'
-import { AskProductPage } from './pages/conocimiento/AskProductPage'
-import { KnowledgePage } from './pages/conocimiento/KnowledgePage'
-import { ProfilePage } from './pages/configuraciones/ProfilePage'
-import { SettingsPage } from './pages/configuraciones/SettingsPage'
-import { LevantamientoPage } from './pages/funcional/LevantamientoPage'
-import { MejorasPage } from './pages/funcional/MejorasPage'
-import { InventarioPage } from './pages/funcional/InventarioPage'
-import { TranscripcionesPage } from './features/transcription/pages/TranscripcionesPage'
-import { FuncionalFeaturePage } from './pages/funcional/FuncionalFeaturePage'
-import { PmFeaturePage } from './pages/pm/PmFeaturePage'
-import { StandupPage } from './pages/pm/StandupPage'
-import { QaFeaturePage } from './pages/qa/QaFeaturePage'
+import { KnowledgePage, AskProductPage } from './features/knowledge'
+import { SettingsPage, ProfilePage } from './features/settings'
+import {
+  MejorasPage,
+  LevantamientoPage,
+  InventarioPage,
+  FuncionalFeaturePage,
+} from './features/funcional'
+import { TranscripcionesPage } from './features/transcription'
+import { StandupPage, PmFeaturePage } from './features/pm'
+import { QaFeaturePage } from './features/qa'
 
 import { useAppUpdater } from './hooks/useAppUpdater'
 import { UpdateNotification } from './components/UpdateNotification'
