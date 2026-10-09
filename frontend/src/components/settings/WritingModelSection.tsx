@@ -105,23 +105,23 @@ export const WritingModelSection = ({
   // Modelos built-in cargados dinámicamente desde local/ai/builtin_models_catalog.json
   const builtinModelsList = (localBuiltinModels && localBuiltinModels.length > 0)
     ? localBuiltinModels.map((lm) => ({
-        id: lm.id,
-        name: lm.name,
-        tag: lm.id,
-        description: lm.description || '',
-        size: lm.size || '~1.2 GiB',
-        tokens: lm.tokens || '32k tokens',
-      }))
+      id: lm.id,
+      name: lm.name,
+      tag: lm.id,
+      description: lm.description || '',
+      size: lm.size || '~1.2 GiB',
+      tokens: lm.tokens || '32k tokens',
+    }))
     : catalogModels
-        .filter((m) => m.provider === 'builtin' && m.task_type === 'chat_writing')
-        .map((cm) => ({
-          id: cm.id,
-          name: cm.name,
-          tag: cm.raw_id || cm.id,
-          description: cm.description,
-          size: cm.size || '~1.2 GiB',
-          tokens: cm.context_window || '32k tokens',
-        }))
+      .filter((m) => m.provider === 'builtin' && m.task_type === 'chat_writing')
+      .map((cm) => ({
+        id: cm.id,
+        name: cm.name,
+        tag: cm.raw_id || cm.id,
+        description: cm.description,
+        size: cm.size || '~1.2 GiB',
+        tokens: cm.context_window || '32k tokens',
+      }))
 
 
   return (
@@ -184,7 +184,7 @@ export const WritingModelSection = ({
                 } else if (newProv === 'groq') {
                   setModel('llama-3.3-70b-versatile')
                 } else if (newProv === 'gemini') {
-                  setModel('gemini-1.5-flash')
+                  setModel('gemini-2.5-flash')
                 } else if (newProv === 'openai') {
                   setModel('gpt-4o-mini')
                 } else if (newProv === 'claude') {
@@ -193,12 +193,12 @@ export const WritingModelSection = ({
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
             >
-              <option value="builtin">IA Integrada (Local, Sin API externa)</option>
+              <option value="builtin">IA Integrada (Local)</option>
               <option value="ollama">Ollama (Servidor Local / Remoto)</option>
-              <option value="groq">Groq (API en la Nube)</option>
-              <option value="gemini">Google Gemini (API en la Nube)</option>
-              <option value="openai">OpenAI (API en la Nube)</option>
-              <option value="claude">Claude (Anthropic API en la Nube)</option>
+              <option value="groq">Groq (API)</option>
+              <option value="gemini">Google (API)</option>
+              <option value="openai">OpenAI (API)</option>
+              <option value="claude">Claude (API)</option>
             </select>
           </div>
 

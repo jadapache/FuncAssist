@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Cpu, Download, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Download, HardDrive, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import type { LocalWhisperModelInfo } from '../../../api/client'
 
 export interface LocalVoiceModelItem {
@@ -55,21 +55,25 @@ export const LocalVoiceModelsList = ({
 
   return (
     <div className="space-y-4 pt-2">
-      {/* Banner Informativo */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-[#002777]">
-        <div className="flex items-center gap-2.5">
-          <Cpu className="h-4 w-4 shrink-0 text-[#002777]" />
-          <span className="font-medium">
-            El procesamiento local ejecuta modelos de IA (ONNX Runtime, Faster Whisper, PyTorch) directamente en tu GPU/CPU de forma privada sin enviar audio a internet.
-          </span>
+      {/* Encabezado de Modelos Locales idéntico a WritingModelSection / BuiltinModelsList */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <HardDrive className="h-4 w-4 text-[#002777]" />
+            <span>Modelos de IA Integrados (Local)</span>
+          </h4>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Modelos de transcripción (ONNX Runtime, Faster Whisper, Moonshine, Whisper) ejecutados directamente en tu GPU/CPU de forma privada sin enviar audio a internet.
+          </p>
         </div>
+
         {fetchLocalWhisperModels && (
           <button
             type="button"
             onClick={() => void fetchLocalWhisperModels()}
             disabled={fetchingWhisperModels}
             title="Actualizar estado de modelos en disco"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white border border-blue-200 hover:bg-blue-50 transition cursor-pointer self-start sm:self-auto disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition cursor-pointer self-start sm:self-auto disabled:opacity-50"
           >
             <RefreshCw className={['h-3.5 w-3.5', fetchingWhisperModels ? 'animate-spin' : ''].join(' ')} />
             <span>Actualizar</span>

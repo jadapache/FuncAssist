@@ -331,15 +331,15 @@ KNOWN_FRONTIER_MODELS: list[dict[str, Any]] = [
     },
     # Gemini models
     {
-        "id": "gemini-1.5-flash",
-        "raw_id": "gemini-1.5-flash",
-        "name": "Gemini 1.5 Flash (Gran Contexto)",
+        "id": "gemini-2.5-flash",
+        "raw_id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash (Recomendado Gemini)",
         "provider": "gemini",
         "provider_name": "Google Gemini",
-        "description": "Modelo rápido de Google con ventana de contexto de 1M de tokens y excelente soporte multimodal.",
+        "description": "Modelo insignia de Google con pensamiento adaptativo, latencia ultra baja y ventana de contexto masiva de 1M tokens.",
         "context_window": "1M tokens",
         "context_length": 1048576,
-        "badge": "1M Context",
+        "badge": "Recomendado Gemini",
         "task_type": "chat_writing",
         "task_label": "Redacción y Chat",
         "is_free": False,
@@ -350,12 +350,31 @@ KNOWN_FRONTIER_MODELS: list[dict[str, Any]] = [
         "rate_limits": "15 RPM • 1M TPM (Free Tier disponible)",
     },
     {
+        "id": "gemini-2.5-pro",
+        "raw_id": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro (Razonamiento Complejo)",
+        "provider": "gemini",
+        "provider_name": "Google Gemini",
+        "description": "El modelo de razonamiento más potente de Google para análisis multimodal extenso y código.",
+        "context_window": "2M tokens",
+        "context_length": 2097152,
+        "badge": "Flagship 2M Context",
+        "task_type": "chat_writing",
+        "task_label": "Redacción y Chat",
+        "is_free": False,
+        "tier_type": "paid",
+        "pricing_prompt": 1.25,
+        "pricing_completion": 5.00,
+        "pricing_label": "$1.25 / 1M input • $5.00 / 1M output",
+        "rate_limits": "15 RPM • 1M TPM",
+    },
+    {
         "id": "gemini-2.0-flash",
         "raw_id": "gemini-2.0-flash",
         "name": "Gemini 2.0 Flash (Next-Gen)",
         "provider": "gemini",
         "provider_name": "Google Gemini",
-        "description": "Modelo de nueva generación de Google con velocidad en tiempo real y alta fidelidad.",
+        "description": "Generación rápida en tiempo real con capacidades nativas multimodales.",
         "context_window": "1M tokens",
         "context_length": 1048576,
         "badge": "Next-Gen Flash",
@@ -480,6 +499,25 @@ def _find_litellm_entry(cost_map: dict[str, Any], model_id: str, provider: str) 
     return None
 
 
+DEPRECATED_MODEL_IDS: set[str] = {
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash-8b",
+    "gemini-1.0-pro",
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-16k",
+    "gpt-4-0613",
+    "gpt-4-0314",
+    "claude-2.1",
+    "claude-2.0",
+    "claude-instant-1.2",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "mixtral-8x7b-32768",
+    "gemma-7b-it",
+}
+
+
 async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, Any]:
     """Synchronize frontier model catalog with the latest LiteLLM database.
     
@@ -507,18 +545,22 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
             except Exception as e:
                 logger.warning(f"Could not parse fallback catalog: {e}")
 
-        # Index existing models by id
+        # Index existing models by id (excluding deprecated and builtin models)
         model_dict: dict[str, dict[str, Any]] = {}
         for item in existing_data:
             if isinstance(item, dict) and "id" in item:
+                mid = item["id"]
+                if mid in DEPRECATED_MODEL_IDS:
+                    continue
                 if item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx"):
-                    model_dict[item["id"]] = dict(item)
+                    model_dict[mid] = dict(item)
 
         # Merge known frontier models if not present
         for km in KNOWN_FRONTIER_MODELS:
             mid = km["id"]
-            if mid not in model_dict:
-                model_dict[mid] = dict(km)
+            if mid not in DEPRECATED_MODEL_IDS:
+                if mid not in model_dict:
+                    model_dict[mid] = dict(km)
 
         # Enrich each frontier model with LiteLLM specs
         for mid, model_item in model_dict.items():

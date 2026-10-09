@@ -26,8 +26,8 @@ export const OLLAMA_RECOMMENDED: RecommendedModel[] = [
 ]
 
 export const CLOUD_PROVIDERS: CloudProvider[] = [
-  { id: 'groq', name: 'Groq (API en la Nube)' },
-  { id: 'gemini', name: 'Google Gemini (API en la Nube)' },
-  { id: 'openai', name: 'OpenAI (API en la Nube)' },
-  { id: 'claude', name: 'Claude (Anthropic API en la Nube)' },
+  { id: 'groq', name: 'Groq' },
+  { id: 'gemini', name: 'Google' },
+  { id: 'openai', name: 'OpenAI' },
+  { id: 'claude', name: 'Anthropic' },
 ]
