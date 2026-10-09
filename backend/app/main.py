@@ -1,3 +1,8 @@
+import os
+
+# Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

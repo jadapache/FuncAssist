@@ -17,6 +17,16 @@ export const aiSettingsApi = {
     )
   },
 
+  syncFrontierCatalog: (forceRemote: boolean = true) =>
+    fetch(`${API_BASE}/api/ai/models/sync?force_remote=${forceRemote}`, {
+      method: 'POST',
+    }).then((r) => handleResponse<{ sync: Record<string, unknown>; catalog: ModelCatalogResponse }>(r)),
+
+  getSyncStatus: () =>
+    fetch(`${API_BASE}/api/ai/models/sync-status`).then((r) =>
+      handleResponse<Record<string, unknown>>(r),
+    ),
+
   getAiSettings: () =>
     fetch(`${API_BASE}/api/ai/settings`).then((r) => handleResponse<AISettings>(r)),
 
