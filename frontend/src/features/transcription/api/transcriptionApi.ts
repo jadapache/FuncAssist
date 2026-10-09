@@ -80,13 +80,26 @@ export function uploadMediaWithProgress(
   title: string,
   description: string = '',
   onProgress?: (progress: number, message: string) => void,
-  transcriptionId?: string
+  transcriptionId?: string,
+  signal?: AbortSignal
 ): Promise<{ ok: boolean; media_id: string; transcription_id: string; size: number; message: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     const fileSize = file.size || 1
 
+    if (signal) {
+      if (signal.aborted) {
+        reject(new Error('Subida cancelada por el usuario'))
+        return
+      }
+      signal.addEventListener('abort', () => {
+        xhr.abort()
+        reject(new Error('Subida cancelada por el usuario'))
+      })
+    }
+
     xhr.upload.addEventListener('progress', (event) => {
+      if (signal?.aborted) return
       if (event.lengthComputable) {
         const bytesReceived = event.loaded
         const uploadProgress = Math.min(100, Math.round((bytesReceived / fileSize) * 100))
@@ -98,10 +111,12 @@ export function uploadMediaWithProgress(
     })
 
     xhr.upload.addEventListener('loadstart', () => {
+      if (signal?.aborted) return
       onProgress?.(0, 'Iniciando subida de archivo...')
     })
 
     xhr.addEventListener('load', () => {
+      if (signal?.aborted) return
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const response = JSON.parse(xhr.responseText)
@@ -121,6 +136,7 @@ export function uploadMediaWithProgress(
     })
 
     xhr.addEventListener('error', () => {
+      if (signal?.aborted) return
       reject(new Error('Error de red durante la subida del archivo'))
     })
 
@@ -130,6 +146,7 @@ export function uploadMediaWithProgress(
 
     xhr.timeout = 10 * 60 * 1000 // 10 minutes timeout for large recordings
     xhr.addEventListener('timeout', () => {
+      if (signal?.aborted) return
       reject(new Error('Tiempo de espera agotado al subir el archivo'))
     })
 
@@ -159,6 +176,67 @@ export const transcriptionApi = {
 
   async getAvailableModels(): Promise<AvailableModelsInfo> {
     const response = await fetch(`${API_BASE}/api/transcription/available-models`)
+    return handleResponse(response)
+  },
+
+  async pickLocalFile(): Promise<{
+    ok: boolean
+    selected?: boolean
+    cancelled?: boolean
+    path?: string
+    filename?: string
+    size_bytes?: number
+    size_formatted?: string
+    is_video?: boolean
+    error?: string
+  }> {
+    const response = await fetch(`${API_BASE}/api/transcription/pick-local-file`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    return handleResponse(response)
+  },
+
+  async inspectFile(filePath: string): Promise<{
+    ok: boolean
+    exists?: boolean
+    path?: string
+    filename?: string
+    size_bytes?: number
+    size_formatted?: string
+    is_video?: boolean
+    error?: string
+  }> {
+    const response = await fetch(`${API_BASE}/api/transcription/inspect-file`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ file_path: filePath }),
+    })
+    return handleResponse(response)
+  },
+
+  async registerLocalPath(
+    localPath: string,
+    title: string,
+    description: string = '',
+    transcriptionId?: string
+  ): Promise<{ ok: boolean; media_id: string; transcription_id: string; size: number; message: string }> {
+    const response = await fetch(`${API_BASE}/api/transcription/register-local-path`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        local_path: localPath,
+        title,
+        description,
+        transcription_id: transcriptionId,
+      }),
+    })
     return handleResponse(response)
   },
 

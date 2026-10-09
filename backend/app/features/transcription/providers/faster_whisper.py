@@ -14,6 +14,33 @@ from app.features.transcription.providers.base import (
 logger = logging.getLogger(__name__)
 
 
+def _patch_pyav_metadata_errors() -> None:
+  """PyAV 14+ removed the 'metadata_errors' parameter from av.open().
+
+  faster-whisper passes metadata_errors='ignore', causing a TypeError.
+  This patch ensures compatibility across all PyAV versions.
+  """
+  try:
+    import av
+
+    if hasattr(av, "open"):
+      _orig_open = av.open
+      if getattr(_orig_open, "_patched_metadata_errors", False):
+        return
+
+      def _safe_av_open(*args: Any, **kwargs: Any) -> Any:
+        kwargs.pop("metadata_errors", None)
+        return _orig_open(*args, **kwargs)
+
+      _safe_av_open._patched_metadata_errors = True  # type: ignore
+      av.open = _safe_av_open
+  except ImportError:
+    pass
+
+
+_patch_pyav_metadata_errors()
+
+
 class FasterWhisperProvider(TranscriptionProvider):
   provider_id = "faster-whisper"
   display_name = "Faster Whisper (CTranslate2)"

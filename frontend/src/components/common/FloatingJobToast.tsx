@@ -131,29 +131,35 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                         ? 'bg-emerald-600'
                         : isFailed
                         ? 'bg-red-600'
-                        : isCancelled
+                        : isCancelled || isCancelling
                         ? 'bg-slate-400'
                         : 'bg-[#002777]',
                     ].join(' ')}
-                    style={{ width: `${Math.min(100, Math.max(4, task.progress))}%` }}
+                    style={{
+                      width: isCancelled
+                        ? '0%'
+                        : `${Math.min(100, Math.max(4, task.progress))}%`,
+                    }}
                   />
                 </div>
 
                 {/* Bottom Info Row: speed/size, eta, percentage */}
                 <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
-                  <span className="truncate max-w-[190px]" title={task.stageText || task.speedOrSize || ''}>
+                  <span className="truncate max-w-[210px]" title={task.stageText || task.speedOrSize || ''}>
                     {task.stageText || task.speedOrSize || `${task.progress}%`}
                   </span>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {task.eta && inProgress && (
+                    {task.eta && inProgress && !isCancelling && (
                       <span className="text-slate-400 font-mono text-[10px]">
                         {task.eta}
                       </span>
                     )}
-                    <span className="font-bold font-mono text-slate-800">
-                      {task.progress}%
-                    </span>
+                    {!isCancelled && !isCancelling && (
+                      <span className="font-bold font-mono text-slate-800">
+                        {task.progress}%
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

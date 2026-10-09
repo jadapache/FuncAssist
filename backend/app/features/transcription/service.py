@@ -338,12 +338,12 @@ class TranscriptionService:
         audio_candidate = transcription_folder / "audio.wav"
         audio_track_path = await asyncio.to_thread(extract_audio_track, media_path, audio_candidate)
         if audio_candidate.exists() and audio_track_path == audio_candidate:
-          # Delete the original non-wav uploaded file (video or non-wav audio) to save disk space
-          if media_path != audio_candidate and media_path.exists():
+          # Delete the original non-wav uploaded file (video or non-wav audio) only if inside the transcription folder
+          if media_path != audio_candidate and media_path.exists() and str(media_path.resolve()).startswith(str(transcription_folder.resolve())):
             try:
               media_path.unlink()
             except Exception as exc:
-              logger.warning(f"Could not delete original non-wav file {media_path}: {exc}")
+              logger.warning(f"Could not delete uploaded non-wav file {media_path}: {exc}")
           updated_entry = update_media_entry_after_audio_extraction(transcription_id, audio_track_path)
           if updated_entry:
             media_entry = updated_entry
@@ -548,6 +548,7 @@ class TranscriptionService:
       return result
 
     except asyncio.CancelledError:
+      logger.info(f"Transcription job {transcription_id} was cancelled by user.")
       prog = TranscriptionProgress(
         id=transcription_id,
         media_id=media_id,
@@ -559,9 +560,24 @@ class TranscriptionService:
       )
       self._update_progress(prog)
       delete_active_job_progress(transcription_id)
-      raise
+      return None
 
     except Exception as exc:
+      if is_job_cancelled(transcription_id) or "cancelada" in str(exc).lower():
+        logger.info(f"Transcription job {transcription_id} was cancelled by user: {exc}")
+        prog = TranscriptionProgress(
+          id=transcription_id,
+          media_id=media_id,
+          status="cancelled",
+          stage="cancelled",
+          progress=0,
+          message="Transcripción cancelada.",
+          model_info=active_model_label,
+        )
+        self._update_progress(prog)
+        delete_active_job_progress(transcription_id)
+        return None
+
       logger.exception(f"Error in transcription job {transcription_id}: {exc}")
       prog = TranscriptionProgress(
         id=transcription_id,

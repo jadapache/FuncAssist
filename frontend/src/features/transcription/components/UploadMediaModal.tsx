@@ -1,11 +1,11 @@
 import React from 'react'
 import { X } from 'lucide-react'
-import { UploadArea } from './UploadArea'
+import { UploadArea, type UploadTarget } from './UploadArea'
 
 interface UploadMediaModalProps {
   isOpen: boolean
   onClose: () => void
-  onUpload: (file: File, title: string, description?: string) => Promise<void>
+  onUpload: (target: UploadTarget, title: string, description?: string) => Promise<void>
   isUploading?: boolean
   configuredModelLabel?: string
 }
@@ -48,9 +48,9 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
         {/* Modal Body */}
         <div className="p-7 overflow-y-auto max-h-[80vh]">
           <UploadArea
-            onUpload={async (file, title, desc) => {
+            onUpload={async (target, title, desc) => {
               onClose()
-              await onUpload(file, title, desc)
+              await onUpload(target, title, desc)
             }}
             isUploading={isUploading}
             configuredModelLabel={configuredModelLabel}
