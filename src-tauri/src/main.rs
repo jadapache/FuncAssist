@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    qa_project_mgmt_lib::run();
+    qa_project_mgmt::run();
 }
