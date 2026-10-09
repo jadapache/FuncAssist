@@ -2,6 +2,8 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { api, type KnowledgeDocument } from '../../api/client'
 import { useToast } from '../../context/ToastContext'
+import { Link } from 'react-router-dom'
+import { Database } from 'lucide-react'
 import { ConfirmationModal } from '../../components/common'
 
 const ACCEPTED_TYPES = '.pdf,.docx,.md,.txt,.json,.html,.htm'
@@ -119,12 +121,21 @@ export const KnowledgePage = () => {
 
   return (
     <div className="space-y-8">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">Conocimiento</p>
-        <h1 className="font-[family-name:var(--font-display)] text-5xl">Biblioteca de Documentos</h1>
-        <p className="max-w-2xl text-[var(--color-ink-muted)]">
-          Sube PRDs y especificaciones. Se dividen en fragmentos y se almacenan localmente para búsquedas BM25 en las herramientas de PM y QA.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">Conocimiento</p>
+          <h1 className="font-[family-name:var(--font-display)] text-5xl">Biblioteca de Documentos</h1>
+          <p className="max-w-2xl text-[var(--color-ink-muted)]">
+            Sube PRDs y especificaciones. Se indexan en SQLite FTS5 con soporte BM25 y diacríticos en español para búsquedas de PM y QA.
+          </p>
+        </div>
+        <Link
+          to="/settings?tab=knowledge"
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#002777] bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 transition shadow-2xs"
+        >
+          <Database className="h-4 w-4" />
+          <span>Configurar Motor SQLite & Red</span>
+        </Link>
       </header>
 
 
