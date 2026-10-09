@@ -22,10 +22,30 @@ class OpenAIWhisperProvider(TranscriptionProvider):
     except ImportError:
       return False
 
+  def _clean_model_id(self, model_id: str) -> str:
+    clean = model_id.replace("whisper-", "").replace("fw-", "").replace("faster-whisper-", "").strip().lower()
+    valid_sizes = {
+      "tiny", "tiny.en", "base", "base.en", "small", "small.en",
+      "medium", "medium.en", "large", "large-v1", "large-v2", "large-v3", "large-v3-turbo", "turbo"
+    }
+    if clean not in valid_sizes:
+      if "tiny" in clean:
+        return "tiny"
+      if "small" in clean:
+        return "small"
+      if "medium" in clean:
+        return "medium"
+      if "large" in clean and "turbo" in clean:
+        return "large-v3-turbo"
+      if "large" in clean:
+        return "large-v3"
+      return "base"
+    return clean
+
   def get_model_path(self, model_id: str) -> Optional[Path]:
     from app.features.transcription.whisper_local import get_whisper_cache_dir
 
-    clean = model_id.replace("whisper-", "").strip().lower()
+    clean = self._clean_model_id(model_id)
     path = get_whisper_cache_dir() / f"{clean}.pt"
     return path if path.exists() else None
 
@@ -43,7 +63,7 @@ class OpenAIWhisperProvider(TranscriptionProvider):
   ) -> TranscriptionResult:
     from app.features.transcription.whisper_local import WhisperLocalService
 
-    clean = model_id.replace("whisper-", "").strip().lower()
+    clean = self._clean_model_id(model_id)
     svc = WhisperLocalService(model_size=clean)
     raw = svc.transcribe(
       audio_path,
