@@ -64,10 +64,12 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const dismissTimersRef = useRef<Record<string, number>>({})
   const dismissedJobsRef = useRef<Set<string>>(new Set())
+  const cancelledJobsRef = useRef<Set<string>>(new Set())
 
   // 1. Helper to remove a job (manual dismiss or timer expiry)
   const removeJob = useCallback((id: string) => {
     dismissedJobsRef.current.add(id)
+    cancelledJobsRef.current.delete(id)
     if (dismissTimersRef.current[id]) {
       window.clearTimeout(dismissTimersRef.current[id])
       delete dismissTimersRef.current[id]
@@ -84,6 +86,11 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
     (job: BackgroundJobItem) => {
       const isTerminal = job.status === 'complete' || job.status === 'failed' || job.status === 'cancelled'
 
+      // If job has been cancelled, reject any incoming non-cancelled update
+      if (cancelledJobsRef.current.has(job.id) && job.status !== 'cancelled') {
+        return
+      }
+
       // If user explicitly dismissed a job that is already terminal, don't resurrect it
       if (dismissedJobsRef.current.has(job.id) && isTerminal) {
         return
@@ -91,6 +98,9 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       // If a job becomes active again, allow showing it
       if (!isTerminal && dismissedJobsRef.current.has(job.id)) {
         dismissedJobsRef.current.delete(job.id)
+      }
+      if (!isTerminal && cancelledJobsRef.current.has(job.id)) {
+        cancelledJobsRef.current.delete(job.id)
       }
 
       setJobsMap((prev) => ({
@@ -124,6 +134,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   // 3. Cancel a job by ID
   const cancelJob = useCallback(
     async (id: string) => {
+      cancelledJobsRef.current.add(id)
       const current = jobsMapRef.current[id]
       const isTranscription =
         current?.type === 'transcription' ||
@@ -138,7 +149,9 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
           ...prev,
           [id]: {
             ...prev[id],
+            status: 'cancelled',
             stageText: cancellingText,
+            eta: null,
           },
         }
       })
@@ -178,6 +191,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   const registerDownloadJob = useCallback(
     (modelId: string, title?: string) => {
       dismissedJobsRef.current.delete(modelId)
+      cancelledJobsRef.current.delete(modelId)
       if (dismissTimersRef.current[modelId]) {
         window.clearTimeout(dismissTimersRef.current[modelId])
         delete dismissTimersRef.current[modelId]

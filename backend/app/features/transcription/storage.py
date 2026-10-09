@@ -94,21 +94,33 @@ def get_transcription_json_path(transcription_id: str) -> Path:
 
 
 def get_media_path_for_transcription(transcription_id: str) -> Optional[Path]:
-  """Find the media file in the transcription subfolder, prioritizing audio.wav."""
+  """Find the media file in the transcription subfolder, prioritizing audio.wav or local file reference."""
   folder = get_transcription_dir(transcription_id)
-  if not folder.exists():
-    return None
-  audio_wav = folder / "audio.wav"
-  if audio_wav.exists():
-    return audio_wav
-  for ext in SUPPORTED_FORMATS:
-    candidate = folder / f"media{ext}"
-    if candidate.exists():
-      return candidate
-  # Check if there is any media.* file
-  for item in folder.glob("media.*"):
-    if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS:
-      return item
+  if folder.exists():
+    audio_wav = folder / "audio.wav"
+    if audio_wav.exists():
+      return audio_wav
+    for ext in SUPPORTED_FORMATS:
+      candidate = folder / f"media{ext}"
+      if candidate.exists():
+        return candidate
+    # Check if there is any media.* file
+    for item in folder.glob("media.*"):
+      if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS:
+        return item
+
+  # Check if there is a local file source reference in transcription.json
+  record = get_transcription_record(transcription_id)
+  if record:
+    src = (
+      record.get("metadata", {}).get("source_path")
+      or (record.get("media", {}) or {}).get("path")
+      or record.get("path")
+    )
+    if src:
+      p = Path(src)
+      if p.exists() and p.is_file():
+        return p
   return None
 
 
@@ -278,6 +290,78 @@ def register_saved_media_file(
     "description": description.strip(),
     "original_filename": filename,
     "filename": filename,
+    "created_at": now,
+    "status": "uploaded",
+    "language": "es",
+    "duration_seconds": 0.0,
+    "segments": [],
+    "text": "",
+    "summary": None,
+    "media": entry,
+  }
+  save_transcription_record(initial_record)
+
+  return entry
+
+
+def register_local_media_path(
+  transcription_id: str,
+  local_path: Path | str,
+  title: str,
+  description: str = "",
+) -> dict[str, Any]:
+  """
+  Zero-copy registration of an existing local media file on disk.
+  Creates the transcription folder and references the original path directly.
+  """
+  ensure_transcription_dirs()
+  p = Path(local_path)
+  if not p.exists() or not p.is_file():
+    raise ValueError(f"El archivo local no existe o no es accesible: {local_path}")
+
+  size = p.stat().st_size
+  valid, err = validate_file(p.name, size)
+  if not valid:
+    raise ValueError(err)
+
+  folder = get_transcription_dir(transcription_id)
+  folder.mkdir(parents=True, exist_ok=True)
+
+  ext = p.suffix.lower()
+  is_video = ext in SUPPORTED_VIDEO_EXTS
+  now = datetime.now(timezone.utc).isoformat()
+  resolved_title = title.strip() or p.name
+
+  entry = {
+    "id": transcription_id,
+    "transcription_id": transcription_id,
+    "original_filename": p.name,
+    "filename": p.name,
+    "stored_filename": p.name,
+    "path": str(p.resolve()),
+    "size_bytes": size,
+    "file_size_formatted": _format_size_bytes(size),
+    "hash": "",
+    "is_video": is_video,
+    "title": resolved_title,
+    "description": description.strip(),
+    "created_at": now,
+  }
+
+  initial_record = {
+    "id": transcription_id,
+    "media_id": transcription_id,
+    "metadata": {
+      "title": resolved_title,
+      "description": description.strip(),
+      "size_bytes": size,
+      "file_size_formatted": _format_size_bytes(size),
+      "source_path": str(p.resolve()),
+    },
+    "title": resolved_title,
+    "description": description.strip(),
+    "original_filename": p.name,
+    "filename": p.name,
     "created_at": now,
     "status": "uploaded",
     "language": "es",

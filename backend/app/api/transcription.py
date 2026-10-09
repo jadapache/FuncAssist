@@ -24,6 +24,7 @@ from app.features.transcription.storage import (
   get_media_entry,
   get_transcription_record,
   list_transcriptions,
+  register_local_media_path,
   register_saved_media_file,
   rename_transcription_speakers,
   save_media_file,
@@ -45,6 +46,70 @@ router = APIRouter(prefix="/transcription", tags=["transcription"])
 class ExportDocumentRequest(BaseModel):
   content: str = ""
   title: str = "Documento"
+
+
+from app.features.transcription.local_picker import (
+  inspect_local_file,
+  open_native_file_dialog_sync,
+)
+
+
+class RegisterLocalPathRequest(BaseModel):
+  local_path: str
+  title: str = ""
+  description: str = ""
+  transcription_id: Optional[str] = None
+
+
+class InspectFileRequest(BaseModel):
+  file_path: str
+
+
+@router.post("/pick-local-file")
+async def pick_local_file() -> dict[str, Any]:
+  """
+  Opens native Windows file dialog to let the user pick a media file on disk.
+  Returns path, filename, size, etc. without transferring file bytes.
+  """
+  path_str = await asyncio.to_thread(open_native_file_dialog_sync)
+  if not path_str:
+    return {"ok": False, "cancelled": True, "message": "No se seleccionó ningún archivo."}
+  info = inspect_local_file(path_str)
+  return {"ok": True, "selected": True, **info}
+
+
+@router.post("/inspect-file")
+async def inspect_file(req: InspectFileRequest) -> dict[str, Any]:
+  """Inspects a local file path and validates its format and accessibility."""
+  return inspect_local_file(req.file_path)
+
+
+@router.post("/register-local-path")
+async def register_local_path(req: RegisterLocalPathRequest) -> dict[str, Any]:
+  """
+  Zero-copy registration of a local media file already present on disk.
+  Avoids transferring gigabytes of video over HTTP in desktop mode.
+  """
+  tid = req.transcription_id or str(uuid.uuid4())
+  try:
+    entry = register_local_media_path(
+      transcription_id=tid,
+      local_path=req.local_path,
+      title=req.title,
+      description=req.description,
+    )
+    return {
+      "ok": True,
+      "media_id": tid,
+      "transcription_id": tid,
+      "size": entry.get("size_bytes", 0),
+      "entry": entry,
+      "message": "Archivo local vinculado con éxito.",
+    }
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Error vinculando archivo local: {exc}") from exc
 
 
 @router.post("/upload")
