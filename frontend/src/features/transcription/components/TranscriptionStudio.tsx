@@ -95,8 +95,8 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
                 {meetingTitle}
               </h1>
               {activeProgress && isJobActive ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 animate-pulse">
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-[#002777] border border-blue-200/80 shadow-2xs animate-pulse">
+                  <Loader2 className="h-3 w-3 animate-spin text-[#002777]" />
                   <span>En vivo ({activeProgress.progress}%)</span>
                 </span>
               ) : (
@@ -136,19 +136,18 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
                 type="button"
                 onClick={handleSaveToKB}
                 disabled={isSavingKB || transcriptionResult.saved_to_knowledge || !hasTranscriptContent || isJobActive}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition flex items-center gap-1.5 shadow-2xs ${
-                  !hasTranscriptContent || isJobActive
+                className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition flex items-center gap-1.5 shadow-2xs ${!hasTranscriptContent || isJobActive
                     ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
                     : transcriptionResult.saved_to_knowledge
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 cursor-pointer'
-                }`}
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-pointer'
+                      : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 cursor-pointer'
+                  }`}
                 title={
                   !hasTranscriptContent
                     ? 'No hay transcripción disponible para guardar en la Base de Conocimiento'
                     : transcriptionResult.saved_to_knowledge
-                    ? 'Ya está guardado en la Base de Conocimiento'
-                    : 'Guardar en biblioteca de conocimiento para consultas del agente'
+                      ? 'Ya está guardado en la Base de Conocimiento'
+                      : 'Guardar en biblioteca de conocimiento para consultas del agente'
                 }
               >
                 <BookOpen className={`h-3.5 w-3.5 ${hasTranscriptContent && !isJobActive ? 'text-[#002777]' : 'text-slate-400'}`} />
@@ -162,17 +161,16 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
                 type="button"
                 onClick={() => setGenerateModalOpen(true)}
                 disabled={!isSummaryReady || !hasTranscriptContent || isJobActive}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-2xs ${
-                  hasTranscriptContent && isSummaryReady && !isJobActive
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-2xs ${hasTranscriptContent && isSummaryReady && !isJobActive
                     ? 'bg-[#002777] hover:bg-[#001e5c] text-white cursor-pointer'
                     : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
-                }`}
+                  }`}
                 title={
                   !hasTranscriptContent
                     ? 'Se requiere una transcripción con diálogos para generar entregables'
                     : !isSummaryReady
-                    ? 'Genera el resumen para habilitar la creación de entregables'
-                    : 'Generar Inventario (.xlsx) y Levantamiento (.docx)'
+                      ? 'Genera el resumen para habilitar la creación de entregables'
+                      : 'Generar Inventario (.xlsx) y Levantamiento (.docx)'
                 }
               >
                 <Sparkles className={`h-3.5 w-3.5 ${hasTranscriptContent && isSummaryReady && !isJobActive ? 'text-amber-300' : 'text-slate-400'}`} />
@@ -189,6 +187,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
         <TranscriptionViewer
           transcriptionResult={transcriptionResult}
           importantSegments={importantSegments}
+          activeProgress={activeProgress}
           activeProgressMessage={activeProgress?.message}
           isJobActive={isJobActive}
           isRetranscribing={isRetranscribing}

@@ -1,12 +1,13 @@
 import React from 'react'
 import { Volume2, Users, Copy, Check, RotateCcw } from 'lucide-react'
-import type { TranscriptionResult } from '../api/transcriptionApi'
+import type { TranscriptionProgress, TranscriptionResult } from '../api/transcriptionApi'
 import { SegmentList } from './SegmentList'
 import { DownloadMenu } from './DownloadMenu'
 
 interface TranscriptionViewerProps {
   transcriptionResult: TranscriptionResult | null
   importantSegments: Set<number>
+  activeProgress?: TranscriptionProgress | null
   activeProgressMessage?: string
   isJobActive: boolean
   isRetranscribing?: boolean
@@ -152,3 +153,4 @@ export const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
     </section>
   )
 }
+

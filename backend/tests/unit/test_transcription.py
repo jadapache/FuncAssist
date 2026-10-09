@@ -205,13 +205,17 @@ def test_inventario_and_levantamiento_docx_builders():
   assert len(lev_bytes) > 1000
 
 
-def test_transcription_api_lifecycle(client: TestClient):
-  # 1. Upload
-  audio_content = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00"
+def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
+  # 1. Register local path
+  tmp_file = tmp_path / "meeting_demo.mp3"
+  tmp_file.write_bytes(b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00")
   upload_res = client.post(
-    "/api/transcription/upload",
-    files={"file": ("meeting_demo.mp3", io.BytesIO(audio_content), "audio/mpeg")},
-    data={"title": "Reunión de Levantamiento QA", "description": "Transcripción de prueba"},
+    "/api/transcription/register-local-path",
+    json={
+      "local_path": str(tmp_file),
+      "title": "Reunión de Levantamiento QA",
+      "description": "Transcripción de prueba",
+    },
   )
   assert upload_res.status_code == 200
   data = upload_res.json()
@@ -350,14 +354,18 @@ def test_retranscribe_endpoint(client: TestClient):
   delete_transcription_record(record_id)
 
 
-def test_upload_stream_and_sse_events(client: TestClient):
+def test_register_local_path_and_sse_events(client: TestClient, tmp_path: Path):
   from app.api.transcription_stream import get_or_create_progress_queue
 
-  audio_content = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00" * 50
+  tmp_file = tmp_path / "stream_demo.mp3"
+  tmp_file.write_bytes(b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00" * 50)
   upload_res = client.post(
-    "/api/transcription/upload-stream",
-    files={"file": ("stream_demo.mp3", io.BytesIO(audio_content), "audio/mpeg")},
-    data={"title": "Reunión en Tiempo Real", "description": "Prueba de streaming SSE"},
+    "/api/transcription/register-local-path",
+    json={
+      "local_path": str(tmp_file),
+      "title": "Reunión en Tiempo Real",
+      "description": "Prueba de streaming SSE",
+    },
   )
   assert upload_res.status_code == 200
   data = upload_res.json()

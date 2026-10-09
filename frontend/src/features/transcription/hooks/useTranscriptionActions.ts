@@ -3,7 +3,7 @@
  * Extracted actions and business logic for TranscriptionStudio
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   transcriptionApi,
   type TranscriptionResult,
@@ -117,6 +117,39 @@ export function useTranscriptionActions(
   useEffect(() => {
     loadTranscription()
   }, [loadTranscription])
+
+  const displayResult = useMemo<TranscriptionResult | null>(() => {
+    if (transcriptionResult) {
+      if (
+        isJobActive &&
+        activeProgress?.live_segments &&
+        activeProgress.live_segments.length > (transcriptionResult.segments?.length || 0)
+      ) {
+        return {
+          ...transcriptionResult,
+          segments: activeProgress.live_segments,
+          text: activeProgress.live_text || transcriptionResult.text,
+        }
+      }
+      return transcriptionResult
+    }
+    if (activeProgress && isJobActive) {
+      return {
+        id: transcriptionId,
+        media_id: activeProgress.media_id || transcriptionId,
+        metadata: {
+          title: activeProgress.title || initialMeetingTitle || 'Transcripción',
+        },
+        language: 'es',
+        duration_seconds: 0,
+        created_at: new Date().toISOString(),
+        segments: activeProgress.live_segments || [],
+        text: activeProgress.live_text || '',
+        summary: null,
+      }
+    }
+    return null
+  }, [transcriptionResult, activeProgress, isJobActive, transcriptionId, initialMeetingTitle])
 
   // Reload when job finishes
   useEffect(() => {
@@ -327,8 +360,8 @@ export function useTranscriptionActions(
           : []
 
   const hasTranscriptContent = Boolean(
-    (transcriptionResult?.text && transcriptionResult.text.trim().length > 0) ||
-    (transcriptionResult?.segments && transcriptionResult.segments.length > 0)
+    (displayResult?.text && displayResult.text.trim().length > 0) ||
+    (displayResult?.segments && displayResult.segments.length > 0)
   )
 
   const isSummaryReady =
@@ -357,8 +390,8 @@ export function useTranscriptionActions(
 
   // Download summary as TXT
   const handleDownloadSummaryTxt = useCallback(() => {
-    if (!transcriptionResult || !isSummaryReady) return
-    const title = transcriptionResult.metadata?.title || 'Resumen'
+    if (!displayResult || !isSummaryReady) return
+    const title = displayResult.metadata?.title || 'Resumen'
     const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_')
 
     let content = `Summary\n\n`
@@ -368,15 +401,15 @@ export function useTranscriptionActions(
 
     downloadFile(content, `Resumen_${safeTitle}.txt`, 'text/plain;charset=utf-8')
     setShowSummaryDownloadMenu(false)
-  }, [transcriptionResult, isSummaryReady, summaryParagraphs, keyInsights])
+  }, [displayResult, isSummaryReady, summaryParagraphs, keyInsights])
 
   // Download summary as JSON
   const handleDownloadSummaryJson = useCallback(() => {
-    if (!transcriptionResult || !isSummaryReady) return
-    const safeTitle = (transcriptionResult.metadata?.title || 'Resumen').replace(/[^a-zA-Z0-9_-]/g, '_')
+    if (!displayResult || !isSummaryReady) return
+    const safeTitle = (displayResult.metadata?.title || 'Resumen').replace(/[^a-zA-Z0-9_-]/g, '_')
 
     const data = {
-      meeting_title: transcriptionResult.metadata?.title,
+      meeting_title: displayResult.metadata?.title,
       summary_paragraphs: summaryParagraphs,
       key_insights: keyInsights,
       summary_raw: summaryData,
@@ -384,10 +417,10 @@ export function useTranscriptionActions(
 
     downloadFile(JSON.stringify(data, null, 2), `Resumen_${safeTitle}.json`, 'application/json;charset=utf-8')
     setShowSummaryDownloadMenu(false)
-  }, [transcriptionResult, isSummaryReady, summaryParagraphs, keyInsights, summaryData])
+  }, [displayResult, isSummaryReady, summaryParagraphs, keyInsights, summaryData])
 
   return {
-    transcriptionResult,
+    transcriptionResult: displayResult,
     importantSegments,
     isGeneratingSummary,
     isSavingKB,
