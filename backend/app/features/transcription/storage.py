@@ -61,7 +61,10 @@ def _load_transcriptions_index() -> list[dict[str, Any]]:
   if not TRANSCRIPTIONS_INDEX_FILE.exists():
     return []
   try:
-    data = json.loads(TRANSCRIPTIONS_INDEX_FILE.read_text(encoding="utf-8"))
+    content = TRANSCRIPTIONS_INDEX_FILE.read_text(encoding="utf-8").strip()
+    if not content:
+      return []
+    data = json.loads(content)
     if isinstance(data, list):
       return data
     if isinstance(data, dict) and "items" in data:

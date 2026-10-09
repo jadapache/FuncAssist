@@ -61,7 +61,7 @@ export function useAiSettingsManager() {
     const active = jobs.find(
       (j) =>
         j.type === 'download' &&
-        !['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'].includes(j.id) &&
+        ['qwen', 'llama', 'deepseek', 'gemma'].some((k) => j.id.includes(k)) &&
         j.status !== 'complete' &&
         j.status !== 'failed' &&
         j.status !== 'cancelled'
@@ -73,7 +73,7 @@ export function useAiSettingsManager() {
     const active = jobs.find(
       (j) =>
         j.type === 'download' &&
-        ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'].includes(j.id) &&
+        !['qwen', 'llama', 'deepseek', 'gemma'].some((k) => j.id.includes(k)) &&
         j.status !== 'complete' &&
         j.status !== 'failed' &&
         j.status !== 'cancelled'

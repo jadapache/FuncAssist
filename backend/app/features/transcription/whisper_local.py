@@ -36,7 +36,13 @@ def get_local_models_info() -> List[Dict[str, Any]]:
       provider = m.get("provider", "builtin")
       clean_id = model_id.replace("whisper-", "")
 
-      if provider == "faster-whisper" or model_id.startswith("fw-"):
+      if provider == "onnx" or "parakeet" in model_id or "sense-voice" in model_id or "onnx" in model_id:
+        o_dir = cache_dir / f"onnx-{model_id}"
+        onnx_files = list(o_dir.glob("*.onnx")) if o_dir.exists() else []
+        is_downloaded = len(onnx_files) > 0 and sum(f.stat().st_size for f in onnx_files) > 1024 * 1024
+        disk_size_mb = round(sum(f.stat().st_size for f in onnx_files) / (1024 * 1024), 1) if is_downloaded else 0.0
+        file_path = str(o_dir) if is_downloaded else None
+      elif provider == "faster-whisper" or model_id.startswith("fw-"):
         fw_size = model_id.replace("fw-", "").replace("faster-whisper-", "")
         fw_dir = cache_dir / f"faster-whisper-{fw_size}"
         model_bin = fw_dir / "model.bin"
@@ -108,12 +114,16 @@ def get_active_whisper_downloads() -> List[Dict[str, Any]]:
 
 def prepare_whisper_download(model_id: str) -> str:
   """Synchronously initializes Whisper download tracking to 0% before background thread starts."""
+  from app.ai.builtin_local import load_builtin_catalog
+  catalog = load_builtin_catalog(task_type="transcription")
   clean_id = model_id.replace("whisper-", "").strip().lower()
+  meta = catalog.get(model_id) or catalog.get(clean_id) or catalog.get(f"whisper-{clean_id}")
+  name = meta.get("name") if meta else f"Whisper {clean_id.title()}"
   with _WHISPER_LOCK:
     _WHISPER_CANCEL_EVENTS.pop(clean_id, None)
     _WHISPER_DOWNLOADS[clean_id] = {
       "id": clean_id,
-      "title": f"Descargando Whisper {clean_id.title()}",
+      "title": f"Descargando {name}",
       "type": "download",
       "progress": 0,
       "status": "downloading",
@@ -150,53 +160,177 @@ def cancel_whisper_download(model_id: str) -> bool:
   return False
 
 
+def _make_hf_progress_tqdm(canonical_id: str, cancel_event: threading.Event):
+  """Create a custom tqdm class that updates _WHISPER_DOWNLOADS during snapshot_download."""
+  from tqdm.auto import tqdm
+  start_time = time.time()
+  last_update = [0.0]
+
+  class _HFTqdm(tqdm):
+    def update(self, n=1):
+      super().update(n)
+      if cancel_event.is_set():
+        raise RuntimeError("Descarga cancelada por el usuario.")
+      now = time.time()
+      if now - last_update[0] >= 0.2:
+        last_update[0] = now
+        downloaded = self.n
+        total_size = self.total or 0
+        elapsed = max(0.1, now - start_time)
+        speed_mb = (downloaded / (1024 * 1024)) / elapsed if elapsed > 0 else 0.0
+        speed_str = f"{speed_mb:.1f} MB/s" if speed_mb > 0 else ""
+
+        pct = round((downloaded / total_size) * 100, 1) if total_size > 0 else 0.0
+        dl_mb = round(downloaded / (1024 * 1024), 1)
+        tot_mb = round(total_size / (1024 * 1024), 1) if total_size > 0 else 0.0
+
+        eta_str = None
+        if speed_mb > 0 and total_size > downloaded:
+          eta_sec = int((total_size - downloaded) / (speed_mb * 1024 * 1024))
+          eta_str = f"{eta_sec // 60}m {eta_sec % 60}s" if eta_sec >= 60 else f"{eta_sec}s"
+
+        with _WHISPER_LOCK:
+          if canonical_id in _WHISPER_DOWNLOADS:
+            _WHISPER_DOWNLOADS[canonical_id].update({
+              "progress": int(pct),
+              "stageText": f"{dl_mb} MB de {tot_mb} MB ({speed_str})" if tot_mb > 0 else f"{dl_mb} MB ({speed_str})",
+              "speedOrSize": f"{dl_mb}/{tot_mb} MB" if tot_mb > 0 else f"{dl_mb} MB",
+              "eta": eta_str,
+            })
+
+  return _HFTqdm
+
+
 def download_model_file(
   model_id: str,
   progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Path:
-  """Downloads a Whisper model file (.pt) to the local cache directory with progress and cancellation."""
-  import whisper
-
+  """Downloads a local transcription model file (.pt for whisper, directory for faster-whisper/moonshine/onnx)."""
   clean_id = model_id.replace("whisper-", "").strip().lower()
-  if clean_id not in whisper._MODELS:
-    raise ValueError(f"Modelo Whisper desconocido: {clean_id}. Modelos disponibles: {list(whisper._MODELS.keys())}")
-
-  url = whisper._MODELS[clean_id]
-  cache_dir = get_whisper_cache_dir()
-  target_file = cache_dir / f"{clean_id}.pt"
-  tmp_file = cache_dir / f"{clean_id}.pt.download"
-
-  if target_file.exists() and target_file.stat().st_size > 1024 * 1024:
-    logger.info(f"Whisper model {clean_id} already exists at {target_file}")
-    return target_file
-
-  if tmp_file.exists():
-    try:
-      tmp_file.unlink()
-    except Exception:
-      pass
-
   cancel_event = threading.Event()
-  start_time = time.time()
-  last_update_time = 0.0
 
   with _WHISPER_LOCK:
     _WHISPER_CANCEL_EVENTS[clean_id] = cancel_event
-    _WHISPER_DOWNLOADS[clean_id] = {
-      "id": clean_id,
-      "title": f"Descargando Whisper {clean_id.title()}",
-      "type": "download",
-      "progress": 0,
-      "status": "downloading",
-      "stageText": "Iniciando descarga...",
-      "speedOrSize": "0 MB",
-      "eta": None,
-    }
+    if clean_id in _WHISPER_DOWNLOADS:
+      _WHISPER_DOWNLOADS[clean_id]["status"] = "downloading"
 
-  logger.info(f"Downloading Whisper model {clean_id} from {url} to {target_file}")
-
-  req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; QA-Project-MGMT/1.0)"})
   try:
+    # 0. ONNX Models (Parakeet, SenseVoice, Moonshine ONNX, Whisper ONNX)
+    if "parakeet" in model_id or "sense-voice" in model_id or "onnx" in model_id:
+      from app.features.transcription.providers.onnx_provider import OnnxTranscriptionProvider
+      op = OnnxTranscriptionProvider()
+      repo = op.HF_REPOS.get(clean_id, op.HF_REPOS.get(model_id, f"csukuangfj/{model_id}"))
+      target_dir = op._model_dir(model_id)
+      if op.is_model_downloaded(model_id):
+        return target_dir
+
+      try:
+        from huggingface_hub import snapshot_download
+        target_dir.mkdir(parents=True, exist_ok=True)
+        tqdm_cls = _make_hf_progress_tqdm(clean_id, cancel_event)
+        snapshot_download(repo_id=repo, local_dir=str(target_dir), tqdm_class=tqdm_cls)
+
+        with _WHISPER_LOCK:
+          if clean_id in _WHISPER_DOWNLOADS:
+            _WHISPER_DOWNLOADS[clean_id].update({
+              "progress": 100,
+              "status": "complete",
+              "stageText": "Descarga completada con éxito",
+              "speedOrSize": "Listo",
+              "eta": None,
+              "finished_at": time.time(),
+            })
+        return target_dir
+      except Exception as exc:
+        raise RuntimeError(f"Error descargando modelo ONNX {model_id} desde {repo}: {exc}") from exc
+
+    # 1. Faster Whisper models
+    if model_id.startswith("fw-") or "faster-whisper" in model_id:
+      from app.features.transcription.providers.faster_whisper import FasterWhisperProvider
+      fw = FasterWhisperProvider()
+      clean = fw._clean_model_id(model_id)
+      repo = fw.HF_REPOS.get(clean, f"Systran/faster-whisper-{clean}")
+      target_dir = fw._model_dir(clean)
+      if (target_dir / "model.bin").exists():
+        return target_dir
+
+      try:
+        from huggingface_hub import snapshot_download
+        target_dir.mkdir(parents=True, exist_ok=True)
+        tqdm_cls = _make_hf_progress_tqdm(clean_id, cancel_event)
+        snapshot_download(repo_id=repo, local_dir=str(target_dir), tqdm_class=tqdm_cls)
+
+        with _WHISPER_LOCK:
+          if clean_id in _WHISPER_DOWNLOADS:
+            _WHISPER_DOWNLOADS[clean_id].update({
+              "progress": 100,
+              "status": "complete",
+              "stageText": "Descarga completada con éxito",
+              "speedOrSize": "Listo",
+              "eta": None,
+              "finished_at": time.time(),
+            })
+        return target_dir
+      except Exception as exc:
+        raise RuntimeError(f"Error descargando modelo Faster Whisper {model_id} desde {repo}: {exc}") from exc
+
+    # 2. Moonshine models
+    if model_id.startswith("moonshine"):
+      from app.features.transcription.providers.moonshine import MoonshineProvider
+      mp = MoonshineProvider()
+      clean = mp._clean_model_id(model_id)
+      repo = mp.MODELS.get(clean, "UsefulSensors/moonshine-tiny")
+      target_dir = get_whisper_cache_dir() / clean
+      if target_dir.exists() and any(target_dir.iterdir()):
+        return target_dir
+
+      try:
+        from huggingface_hub import snapshot_download
+        target_dir.mkdir(parents=True, exist_ok=True)
+        tqdm_cls = _make_hf_progress_tqdm(clean_id, cancel_event)
+        snapshot_download(repo_id=repo, local_dir=str(target_dir), tqdm_class=tqdm_cls)
+
+        with _WHISPER_LOCK:
+          if clean_id in _WHISPER_DOWNLOADS:
+            _WHISPER_DOWNLOADS[clean_id].update({
+              "progress": 100,
+              "status": "complete",
+              "stageText": "Descarga completada con éxito",
+              "speedOrSize": "Listo",
+              "eta": None,
+              "finished_at": time.time(),
+            })
+        return target_dir
+      except Exception as exc:
+        raise RuntimeError(f"Error descargando modelo Moonshine {model_id} desde {repo}: {exc}") from exc
+
+    # 3. OpenAI Whisper models (.pt)
+    import whisper
+
+    if clean_id not in whisper._MODELS:
+      raise ValueError(f"Modelo Whisper desconocido: {clean_id}. Modelos disponibles: {list(whisper._MODELS.keys())}")
+
+    url = whisper._MODELS[clean_id]
+    cache_dir = get_whisper_cache_dir()
+    target_file = cache_dir / f"{clean_id}.pt"
+    tmp_file = cache_dir / f"{clean_id}.pt.download"
+
+    if target_file.exists() and target_file.stat().st_size > 1024 * 1024:
+      logger.info(f"Whisper model {clean_id} already exists at {target_file}")
+      return target_file
+
+    if tmp_file.exists():
+      try:
+        tmp_file.unlink()
+      except Exception:
+        pass
+
+    start_time = time.time()
+    last_update_time = 0.0
+
+    logger.info(f"Downloading Whisper model {clean_id} from {url} to {target_file}")
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; QA-Project-MGMT/1.0)"})
     with urllib.request.urlopen(req) as response:
       total_size = int(response.headers.get("content-length", 0))
       downloaded = 0
@@ -261,9 +395,10 @@ def download_model_file(
     return target_file
 
   except Exception as exc:
-    if tmp_file.exists():
+    tmp_file_check = cache_dir / f"{clean_id}.pt.download" if 'cache_dir' in locals() else None
+    if tmp_file_check and tmp_file_check.exists():
       try:
-        tmp_file.unlink()
+        tmp_file_check.unlink()
       except Exception:
         pass
 
@@ -291,8 +426,18 @@ def delete_model_file(model_id: str) -> bool:
   tmp_file = cache_dir / f"{clean}.pt.download"
   fw_dir = cache_dir / f"faster-whisper-{clean_fw}"
   m_dir = cache_dir / clean
+  onnx_dir = cache_dir / f"onnx-{clean}"
 
   deleted = False
+  if onnx_dir.exists() and onnx_dir.is_dir():
+    try:
+      shutil.rmtree(onnx_dir, ignore_errors=True)
+      deleted = True
+      logger.info(f"Deleted ONNX model dir: {onnx_dir}")
+    except Exception as exc:
+      logger.error(f"Error deleting model directory {onnx_dir}: {exc}")
+      raise
+
   if target_file.exists():
     try:
       target_file.unlink()
@@ -398,8 +543,9 @@ class WhisperLocalService:
     if self._model is None:
       try:
         import whisper
-        logger.info(f"Loading local Whisper model: {self.model_size}")
-        self._model = whisper.load_model(self.model_size)
+        cache_dir = get_whisper_cache_dir()
+        logger.info(f"Loading local Whisper model: {self.model_size} from {cache_dir}")
+        self._model = whisper.load_model(self.model_size, download_root=str(cache_dir))
       except ImportError:
         raise RuntimeError(
           "El paquete 'openai-whisper' no está instalado en el entorno local de Python. "

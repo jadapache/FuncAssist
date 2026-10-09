@@ -21,10 +21,10 @@ async def test_catalog_retrieval_and_task_types():
     assert m.task_label == "Redacción y Chat"
     assert "whisper" not in m.id.lower()
 
-  # Check voice models are Whisper
+  # Check voice models are Whisper, Faster-Whisper, Moonshine, Parakeet, SenseVoice, or ONNX
   for m in voice_models:
     assert m.task_label == "Transcripción y Voz"
-    assert "whisper" in m.id.lower()
+    assert any(k in f"{m.id} {m.raw_id} {m.name}".lower() for k in ("whisper", "fw-", "moonshine", "parakeet", "sense-voice", "sensevoice", "onnx"))
 
 
 @pytest.mark.asyncio
@@ -32,13 +32,13 @@ async def test_catalog_filter_by_task_type():
   # Filter chat_writing
   chat_catalog = await get_model_catalog(task_type="chat_writing")
   assert all(m.task_type == "chat_writing" for m in chat_catalog.models)
-  assert all("whisper" not in m.id.lower() for m in chat_catalog.models)
+  assert all("whisper" not in m.id.lower() and "moonshine" not in m.id.lower() and "parakeet" not in m.id.lower() and "sense-voice" not in m.id.lower() for m in chat_catalog.models)
 
   # Filter transcription
   voice_catalog = await get_model_catalog(task_type="transcription")
   assert len(voice_catalog.models) >= 2
   assert all(m.task_type == "transcription" for m in voice_catalog.models)
-  assert all("whisper" in m.id.lower() for m in voice_catalog.models)
+  assert all(any(k in f"{m.id} {m.raw_id} {m.name}".lower() for k in ("whisper", "fw-", "moonshine", "parakeet", "sense-voice", "sensevoice", "onnx")) for m in voice_catalog.models)
 
 
 @pytest.mark.asyncio

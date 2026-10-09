@@ -191,5 +191,59 @@
     "hf_repo": "UsefulSensors/moonshine-base",
     "language_restriction": "en",
     "aliases": ["moonshine-base"]
+  },
+  {
+    "id": "parakeet-multilingual-es",
+    "name": "Parakeet FastConformer (ONNX / Multilingüe)",
+    "tag": "onnx:parakeet-multilingual-es",
+    "description": "Modelo NVIDIA NeMo FastConformer CTC ejecutado con ONNX Runtime. Excelente precisión en español e inglés sin dependencias pesadas.",
+    "size": "~180 MB",
+    "accuracy": "Alta (Multilingüe)",
+    "task_type": "transcription",
+    "provider": "onnx",
+    "engine": "onnxruntime",
+    "hf_repo": "csukuangfj/sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-2024-07-16",
+    "aliases": ["parakeet-es", "parakeet-multilingual"]
+  },
+  {
+    "id": "parakeet-ctc-0.6b",
+    "name": "Parakeet CTC 0.6B (ONNX / Inglés)",
+    "tag": "onnx:parakeet-ctc-0.6b",
+    "description": "Arquitectura de frontera NVIDIA NeMo Parakeet optimizada en ONNX para alta precisión y velocidad de inferencia.",
+    "size": "~600 MB",
+    "accuracy": "Máxima (Inglés)",
+    "task_type": "transcription",
+    "provider": "onnx",
+    "engine": "onnxruntime",
+    "hf_repo": "csukuangfj/sherpa-onnx-nemo-ctc-en-conformer-small",
+    "language_restriction": "en",
+    "aliases": ["parakeet-0.6b", "parakeet-en"]
+  },
+  {
+    "id": "sense-voice-small",
+    "name": "SenseVoice Small (ONNX / Multi-idioma)",
+    "tag": "onnx:sense-voice-small",
+    "description": "Motor FunASR de última generación en ONNX Runtime. Inferencia 10× más rápida que Whisper con detección de eventos de audio.",
+    "size": "~230 MB",
+    "accuracy": "Muy Alta (Ultra Rápido)",
+    "task_type": "transcription",
+    "provider": "onnx",
+    "engine": "onnxruntime",
+    "hf_repo": "FunAudioLLM/SenseVoiceSmall",
+    "aliases": ["sensevoice", "sense-voice"]
+  },
+  {
+    "id": "moonshine-onnx-tiny",
+    "name": "Moonshine Tiny (ONNX Runtime)",
+    "tag": "onnx:moonshine-tiny",
+    "description": "Versión ONNX Runtime oficial de Moonshine por Useful Sensors. Ultra rápida y de bajísimo consumo de memoria.",
+    "size": "~90 MB",
+    "accuracy": "Básica (Inglés)",
+    "task_type": "transcription",
+    "provider": "onnx",
+    "engine": "onnxruntime",
+    "hf_repo": "csukuangfj/sherpa-onnx-moonshine-tiny-en-int8",
+    "language_restriction": "en",
+    "aliases": ["moonshine-onnx-tiny"]
   }
 ]

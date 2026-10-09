@@ -52,5 +52,12 @@ def _bootstrap() -> None:
   except Exception as exc:
     logger.debug(f"MoonshineProvider registration error: {exc}")
 
+  try:
+    from app.features.transcription.providers.onnx_provider import OnnxTranscriptionProvider
+
+    register_provider(OnnxTranscriptionProvider())
+  except Exception as exc:
+    logger.debug(f"OnnxTranscriptionProvider registration error: {exc}")
+
 
 _bootstrap()
