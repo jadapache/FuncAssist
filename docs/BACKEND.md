@@ -33,11 +33,12 @@ backend/app/
 │   ├── settings.py            # Configuración, salud
 │   └── history.py             # Historial de conversaciones
 │
-├── context/                     # RAG Engine
+├── context/                     # RAG Engine (SQLite FTS5 + BM25)
 │   ├── __init__.py
 │   ├── models.py              # ContextChunk, ContextBundle
-│   ├── knowledge.py           # Ingesta de documentos (PDF, DOCX)
-│   ├── retrieval.py           # BM25 ranking
+│   ├── knowledge.py           # Ingesta, chunking y almacenamiento SQLite FTS5
+│   ├── knowledge_migration.py # Migración JSON->SQLite, export y recovery
+│   ├── retrieval.py           # Búsqueda híbrida (FTS5 + BM25 fallback)
 │   └── service.py             # Orquestación (assemble_context)
 │
 ├── core/                        # Núcleo de infraestructura

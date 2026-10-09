@@ -9,6 +9,7 @@ Bienvenido a la documentación técnica de **QA Project MGMT**, un sistema local
 - **[Backend](./BACKEND.md)** — Módulos Python, endpoints FastAPI, AI engine, integración con servicios externos.
 - **[Frontend](./FRONTEND.md)** — Componentes React, hooks personalizados, gestión de estado, interfaz de usuario.
 - **[API Reference](./API_REFERENCE.md)** — Especificación completa de endpoints REST.
+- [x] **[Base de Conocimiento (SQLite FTS5)](./KNOWLEDGE_BASE_SQLITE_FTS5.md)** — Motor RAG con SQLite FTS5, BM25, soporte de red compartida y migración.
 - **[CI/CD & Desktop Releases](./CICD_RELEASE_GUIDE.md)** — Pipeline de GitHub Actions, compilación Windows MSI/EXE y auto-actualizaciones.
 - **[Database Schema](./DATABASE.md)** — Modelos de datos, tablas SQLite, relaciones.
 - **[Deployment](./DEPLOYMENT.md)** — Docker, Render.com, configuración de producción.
