@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { FileText, Paperclip, Send, Trash2, Upload, X } from 'lucide-react'
 import { api, type GroundedResult, type KnowledgeDocument } from '../api/client'
 import { GroundedResultView } from '../pages/pm/StandupPage'
+import { PageHeader } from './common'
 import { useToast } from '../context/ToastContext'
 
 type ChatMessage = {
@@ -182,11 +183,11 @@ export const FeatureWorkspace = ({
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">{eyebrow}</p>
-        <h1 className="page-title">{title}</h1>
-        <p className="page-subtitle max-w-3xl">{description}</p>
-      </header>
+      <PageHeader
+        eyebrow={eyebrow}
+        title={title}
+        subtitle={description}
+      />
 
 
 

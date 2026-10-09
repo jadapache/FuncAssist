@@ -7,6 +7,7 @@ import { KnowledgeBaseSection } from '../../components/settings/KnowledgeBaseSec
 import { TemplatesPanel } from '../../components/settings/TemplatesPanel'
 import { useIntegrationsManager } from '../../components/settings/hooks/useIntegrationsManager'
 import type { SettingsTabItem, TabType } from '../../components/settings/types'
+import { PageHeader } from '../../components/common'
 import { useUser } from '../../context/UserContext'
 
 export const SettingsPage = () => {
@@ -65,29 +66,24 @@ export const SettingsPage = () => {
     },
     ...(canSeeIntegrations
       ? [
-          {
-            id: 'integrations' as TabType,
-            label: 'Integraciones',
-            subtitle: 'Jira Software, GitHub, GitLab',
-            icon: Layers,
-            badgeCount: integrationsManager.connectedCount,
-          },
-        ]
+        {
+          id: 'integrations' as TabType,
+          label: 'Integraciones',
+          subtitle: 'Jira Software, GitHub, GitLab',
+          icon: Layers,
+          badgeCount: integrationsManager.connectedCount,
+        },
+      ]
       : []),
   ]
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Header */}
-      <header className="space-y-2">
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[#002777]">Sistema & Preferencias</p>
-        </div>
-        <h1 className="page-title">Configuración del Sistema</h1>
-        <p className="page-subtitle">
-          Administra los modelos de IA, base de conocimiento SQLite FTS5, plantillas corporativas e integraciones.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="SISTEMA & PREFERENCIAS"
+        title="Configuración del Sistema"
+        subtitle="Administra los modelos de IA, base de conocimiento, plantillas e integraciones."
+      />
 
       {/* Nav Tabs Bar */}
       <nav className="flex flex-wrap gap-2 rounded-2xl border border-[var(--color-border)] bg-slate-100/70 p-1.5 shadow-sm">

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type GroundedResult } from '../../api/client'
+import { PageHeader } from '../../components/common'
 import { useToast } from '../../context/ToastContext'
 
 export const StandupPage = () => {
@@ -29,15 +30,18 @@ export const StandupPage = () => {
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="page-title">Standup Diario</h1>
-        <p className="page-subtitle">
-          Fuentes permitidas: <strong>Únicamente Jira + GitHub</strong>. Rechaza responder si faltan datos en lugar de adivinar.
-        </p>
-        <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
-          ¿Necesitas configurar conexiones? <Link className="text-[var(--color-primary)] underline" to="/settings?tab=integrations">Abrir Integraciones</Link>
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="PROJECT MANAGEMENT"
+        title="Standup Diario"
+        subtitle={
+          <>
+            Fuentes permitidas: <strong>Únicamente Jira + GitHub</strong>. Rechaza responder si faltan datos en lugar de adivinar.{' '}
+            <span className="block mt-1 text-xs text-slate-500">
+              ¿Necesitas configurar conexiones? <Link className="text-[#002777] font-semibold underline hover:text-blue-800" to="/settings?tab=integrations">Abrir Integraciones</Link>
+            </span>
+          </>
+        }
+      />
 
       <button
         type="button"
