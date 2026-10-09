@@ -8,6 +8,7 @@ interface SummaryPanelProps {
   isSummaryReady: boolean
   isGeneratingSummary: boolean
   isJobActive: boolean
+  hasTranscriptContent?: boolean
   hasCopiedSummary: boolean
   showSummaryDownloadMenu: boolean
   summaryMenuRef: React.RefObject<HTMLDivElement | null>
@@ -24,6 +25,7 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
   isSummaryReady,
   isGeneratingSummary,
   isJobActive,
+  hasTranscriptContent = true,
   hasCopiedSummary,
   showSummaryDownloadMenu,
   summaryMenuRef,
@@ -165,10 +167,19 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
             <button
               type="button"
               onClick={onGenerateSummary}
-              disabled={isJobActive}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#002777] hover:bg-[#001e5c] text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-40"
+              disabled={isJobActive || isGeneratingSummary || !hasTranscriptContent}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition ${
+                hasTranscriptContent && !isJobActive && !isGeneratingSummary
+                  ? 'bg-[#002777] hover:bg-[#001e5c] text-white cursor-pointer'
+                  : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+              }`}
+              title={
+                !hasTranscriptContent
+                  ? 'Se requiere una transcripción con diálogos para generar el resumen'
+                  : 'Generar resumen con IA'
+              }
             >
-              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+              <Sparkles className={`h-3.5 w-3.5 ${hasTranscriptContent && !isJobActive && !isGeneratingSummary ? 'text-amber-300' : 'text-slate-400'}`} />
               <span>Generar Resumen</span>
             </button>
           </div>
