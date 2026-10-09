@@ -29,6 +29,8 @@ async def lifespan(app: FastAPI):
   set_main_loop(loop)
   ensure_local_dirs()
   migrate_paths_if_needed()
+  from app.context.knowledge_migration import migrate_json_to_sqlite_if_needed
+  migrate_json_to_sqlite_if_needed()
   ensure_knowledge_dirs()
   ensure_ai_files()
 
