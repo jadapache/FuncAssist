@@ -18,7 +18,7 @@ def get_jira_oauth_config() -> dict[str, str]:
   client_id = str(jira.get("client_id") or settings.jira_client_id or "").strip()
   client_secret = str(jira.get("client_secret") or settings.jira_client_secret or "").strip()
   redirect_uri = str(
-    jira.get("redirect_uri") or settings.jira_redirect_uri or "http://127.0.0.1:8000/api/integrations/jira/callback"
+    jira.get("redirect_uri") or settings.jira_redirect_uri or "http://127.0.0.1:6728/api/integrations/jira/callback"
   ).strip()
 
   return {
@@ -37,7 +37,7 @@ def get_github_oauth_config() -> dict[str, str]:
   client_id = str(github.get("client_id") or settings.github_client_id or "").strip()
   client_secret = str(github.get("client_secret") or settings.github_client_secret or "").strip()
   redirect_uri = str(
-    github.get("redirect_uri") or settings.github_redirect_uri or "http://127.0.0.1:8000/api/integrations/github/callback"
+    github.get("redirect_uri") or settings.github_redirect_uri or "http://127.0.0.1:6728/api/integrations/github/callback"
   ).strip()
 
   return {
@@ -57,7 +57,7 @@ def get_gitlab_oauth_config() -> dict[str, str]:
   client_secret = str(gitlab.get("client_secret") or settings.gitlab_client_secret or "").strip()
   base_url = str(gitlab.get("base_url") or settings.gitlab_base_url or "https://gitlab.com").strip().rstrip("/")
   redirect_uri = str(
-    gitlab.get("redirect_uri") or settings.gitlab_redirect_uri or "http://127.0.0.1:8000/api/integrations/gitlab/callback"
+    gitlab.get("redirect_uri") or settings.gitlab_redirect_uri or "http://127.0.0.1:6728/api/integrations/gitlab/callback"
   ).strip()
 
   return {

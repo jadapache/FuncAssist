@@ -13,7 +13,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 fn is_backend_listening() -> bool {
     use std::net::TcpStream;
     use std::time::Duration;
-    if let Ok(addr) = "127.0.0.1:8000".parse() {
+    if let Ok(addr) = "127.0.0.1:6728".parse() {
         TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
     } else {
         false
@@ -100,7 +100,7 @@ fn find_backend_executable() -> Option<PathBuf> {
 
 fn spawn_backend() -> Option<Child> {
     if is_backend_listening() {
-        println!("Backend is already running on 127.0.0.1:8000. Reusing existing instance.");
+        println!("Backend is already running. Reusing existing instance.");
         return None;
     }
 
@@ -121,7 +121,7 @@ fn spawn_backend() -> Option<Child> {
         }
 
         let mut c = Command::new(&python_exe);
-        c.args(["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"]);
+        c.args(["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "6728"]);
 
         if let Some(ref dir) = backend_dir {
             c.current_dir(dir);

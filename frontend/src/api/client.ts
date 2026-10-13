@@ -24,7 +24,7 @@ export const API_BASE =
     window.location.hostname === 'tauri.localhost' ||
     '__TAURI__' in window ||
     '__TAURI_INTERNALS__' in window)
-    ? 'http://127.0.0.1:8000'
+    ? 'http://127.0.0.1:6728'
     : '')
 
 export const handleResponse = async <T,>(response: Response): Promise<T> => {

@@ -13,8 +13,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PMQA_HOST=0.0.0.0 \
-    PMQA_PORT=8000
+    FA_HOST=0.0.0.0 \
+    FA_PORT=6728
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
@@ -29,6 +29,6 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 RUN mkdir -p local/connections local/cache local/settings local/knowledge local/ai/logs
 
 WORKDIR /app/backend
-EXPOSE 8000
+EXPOSE 6728
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-6728}"]
