@@ -17,6 +17,10 @@
   --color-bad: #dc2626;
 }
 
+:root {
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -25,6 +29,7 @@ html,
 body,
 #root {
   min-height: 100%;
+  background-color: #ffffff;
 }
 
 body {
