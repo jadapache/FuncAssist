@@ -84,33 +84,78 @@ fn find_python_executable(backend_dir: Option<&Path>) -> PathBuf {
     }
 }
 
+fn find_backend_executable() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    // 1. Next to current executable (installed layout: funcassist-backend.exe)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("funcassist-backend.exe"));
+            candidates.push(exe_dir.join("resources").join("bin").join("funcassist-backend.exe"));
+            candidates.push(exe_dir.join("resources").join("funcassist-backend.exe"));
+            candidates.push(exe_dir.join("bin").join("funcassist-backend.exe"));
+        }
+    }
+
+    // 2. In LocalAppData/funcassist/
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local_app_data).join("funcassist").join("funcassist-backend.exe"));
+    }
+
+    // 3. In workspace / dev bin
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("src-tauri").join("bin").join("funcassist-backend.exe"));
+        candidates.push(cwd.join("bin").join("funcassist-backend.exe"));
+    }
+
+    candidates.push(PathBuf::from("C:\\Dev\\QA_MGMT\\src-tauri\\bin\\funcassist-backend.exe"));
+
+    for candidate in candidates {
+        if candidate.is_file() && candidate.metadata().map(|m| m.len()).unwrap_or(0) > 10000 {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
 fn spawn_backend() -> Option<Child> {
     if is_backend_listening() {
         println!("Backend is already running on 127.0.0.1:8000. Reusing existing instance.");
         return None;
     }
 
-    let backend_dir = find_backend_dir();
-    let python_exe = find_python_executable(backend_dir.as_deref());
+    let mut cmd = if let Some(backend_exe) = find_backend_executable() {
+        println!("Starting standalone backend binary: {:?}", backend_exe);
+        let mut c = Command::new(&backend_exe);
+        if let Some(parent) = backend_exe.parent() {
+            c.current_dir(parent);
+        }
+        c
+    } else {
+        let backend_dir = find_backend_dir();
+        let python_exe = find_python_executable(backend_dir.as_deref());
 
-    println!("Starting backend with Python: {:?}", python_exe);
-    if let Some(ref dir) = backend_dir {
-        println!("Backend working directory: {:?}", dir);
-    }
+        println!("Starting backend with Python: {:?}", python_exe);
+        if let Some(ref dir) = backend_dir {
+            println!("Backend working directory: {:?}", dir);
+        }
 
-    let mut cmd = Command::new(&python_exe);
-    cmd.args(["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"]);
+        let mut c = Command::new(&python_exe);
+        c.args(["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"]);
 
-    if let Some(ref dir) = backend_dir {
-        cmd.current_dir(dir);
-    }
+        if let Some(ref dir) = backend_dir {
+            c.current_dir(dir);
+        }
+        c
+    };
 
     // Redirect output to log file in AppData/Local/funcassist/logs/backend.log
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
         let log_dir = PathBuf::from(local_app_data).join("funcassist").join("logs");
         let _ = std::fs::create_dir_all(&log_dir);
         let log_file_path = log_dir.join("backend.log");
-        if let Ok(log_file) = std::fs::File::create(log_file_path) {
+        if let Ok(log_file) = std::fs::OpenOptions::new().create(true).append(true).open(log_file_path) {
             if let Ok(err_file) = log_file.try_clone() {
                 cmd.stdout(Stdio::from(log_file));
                 cmd.stderr(Stdio::from(err_file));
