@@ -43,7 +43,11 @@ export const FirstTimeSetup = () => {
       toast.success('¡Perfil configurado exitosamente!')
     } catch (error) {
       console.error('Error completando setup:', error)
-      toast.error('Error al configurar el perfil. Inténtalo de nuevo.')
+      const message =
+        error instanceof Error && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))
+          ? 'No se pudo conectar con el backend. Comprueba que el servidor esté activo.'
+          : 'Error al configurar el perfil. Inténtalo de nuevo.'
+      toast.error(message)
     } finally {
       setIsSubmitting(false)
     }
