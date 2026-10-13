@@ -19,26 +19,48 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [isFirstTimeSetup, setIsFirstTimeSetup] = useState(false)
 
   useEffect(() => {
-    const loadUser = async () => {
-      try {
-        localStorage.removeItem('funcassist_auth_token')
-        const profile = await api.getUserProfile()
+    let isMounted = true
 
-        // Check if this is first-time setup (display_name is default or empty)
-        if (!profile.display_name || profile.display_name === 'Usuario') {
-          setIsFirstTimeSetup(true)
-        } else {
-          setUser(profile)
+    const loadUser = async () => {
+      localStorage.removeItem('funcassist_auth_token')
+      const maxRetries = 5
+      let lastError: unknown = null
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const profile = await api.getUserProfile()
+
+          if (!isMounted) return
+
+          // Check if this is first-time setup (display_name is default or empty)
+          if (!profile.display_name || profile.display_name === 'Usuario') {
+            setIsFirstTimeSetup(true)
+          } else {
+            setUser(profile)
+            setIsFirstTimeSetup(false)
+          }
+          setIsLoading(false)
+          return
+        } catch (error) {
+          lastError = error
+          // If connection failed, wait before retrying to give backend time to finish starting
+          if (attempt < maxRetries - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 700))
+          }
         }
-      } catch (error) {
-        console.error('Error loading user profile:', error)
-        setIsFirstTimeSetup(true)
-      } finally {
-        setIsLoading(false)
       }
+
+      if (!isMounted) return
+      console.error('Error loading user profile after retries:', lastError)
+      setIsFirstTimeSetup(true)
+      setIsLoading(false)
     }
 
     void loadUser()
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
