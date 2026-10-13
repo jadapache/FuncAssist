@@ -148,3 +148,6 @@ src-tauri/target/
 backend/app/ai/models/*
 !backend/app/ai/models/.gitkeep
 
+#Generated Signing Keys
+~/.tauri/qa_mgmt.key
+~/.tauri/qa_mgmt.key.pub
