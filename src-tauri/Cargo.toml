@@ -1,6 +1,6 @@
 [package]
 name = "funcassist"
-version = "0.2.1"
+version = "0.2.0"
 description = "FuncAssist Desktop App"
 authors = ["Daniel Pacheco"]
 edition = "2021"
