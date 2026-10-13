@@ -36,7 +36,7 @@ Los flujos de trabajo están ubicados en `.github/workflows/`:
 Se ejecuta en `push` a ramas `main` y `develop`, y en la creación de etiquetas de versión `v*`.
 
 * **Fase 1: Tests & Typechecks (`test`)**
-  - Configura Node.js 20 y Python 3.11.
+  - Configura Node.js 24 y Python 3.11.
   - Instala dependencias y ejecuta la suite de pruebas backend con `pytest` y generación de cobertura XML.
   - Valida tipos de TypeScript en el Frontend (`npm run typecheck --prefix frontend`).
   - Ejecuta el linter del frontend (`npm run lint --prefix frontend`).

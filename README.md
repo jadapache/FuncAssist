@@ -10,7 +10,7 @@
 ## 🚀 Inicio Rápido (< 5 minutos)
 
 ### Requisitos previos
-- **Node.js**: v18+ (v20+ recomendado)
+- **Node.js**: v20+ (v24+ recomendado)
 - **Python**: 3.11+ (probado en Python 3.11 – 3.14)
 - **Git**: v2+
 
