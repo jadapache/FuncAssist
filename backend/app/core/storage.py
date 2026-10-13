@@ -20,7 +20,7 @@ try:
 except ImportError:  # pragma: no cover
   keyring = None
 
-SERVICE_NAME = "qa-project-mgmt"
+SERVICE_NAME = "funcassist"
 KEYRING_USERNAME = "encryption-key"
 
 

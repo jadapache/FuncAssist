@@ -44,7 +44,7 @@ def create_mejoras_docx(markdown_content: str, title: str = "Documento de Mejora
 
   p_sub = doc.add_paragraph()
   p_sub.paragraph_format.space_after = Pt(18)
-  run_sub = p_sub.add_run("Generado automáticamente por QA Project MGMT - Módulo Funcional")
+  run_sub = p_sub.add_run("Generado automáticamente por FuncAssist - Módulo Funcional")
   run_sub.font.name = "Segoe UI"
   run_sub.font.size = Pt(9.5)
   run_sub.font.italic = True

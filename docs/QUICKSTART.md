@@ -1,6 +1,6 @@
-# Inicio Rápido — QA Project MGMT
+# Inicio Rápido — FuncAssist
 
-Instala, compila y ejecuta QA Project MGMT en tu máquina local en **menos de 5 minutos**.
+Instala, compila y ejecuta FuncAssist en tu máquina local en **menos de 5 minutos**.
 
 ---
 

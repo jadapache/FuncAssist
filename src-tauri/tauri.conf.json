@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "QA Project Management",
+  "productName": "FuncAssist",
   "version": "0.2.0",
-  "identifier": "com.qaprojectmgmt.app",
+  "identifier": "com.funcassist.app",
   "build": {
     "beforeDevCommand": "npm run dev:frontend",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "QA Project Management",
+        "title": "FuncAssist",
         "width": 1400,
         "height": 900,
         "minWidth": 960,

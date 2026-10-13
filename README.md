@@ -1,6 +1,6 @@
-# QA Project MGMT
+# FuncAssist
 
-> Centro de comando local con IA para Product Managers e Ingenieros de QA. Integra búsqueda RAG contextual, almacenamiento local cifrado, integraciones desacopladas (Jira, GitHub, GitLab), generación de documentos con editor en tiempo real y suite completa de herramientas QA/PM.
+> Asistente local con IA para Analistas Funcionales, Product Owners y QA. Especializado en levantamiento de requerimientos, estructuración de especificaciones, minutas de reunión, búsqueda RAG contextual y suite de documentación ágil con sincronización (Jira, GitHub, GitLab).
 
 **Estado**: 🚀 En desarrollo activo. V0.2.0+  
 **Documentación completa**: Consulta [`docs/`](./docs/) para guías detalladas de arquitectura, backend, frontend y despliegue.
@@ -85,7 +85,7 @@ La documentación técnica completa está disponible en **[`docs/`](./docs/)**:
 ## 📂 Estructura del Proyecto
 
 ```
-QA_MGMT/
+FuncAssist/
 ├── docs/                     # 📍 Documentación técnica completa (nuevo)
 │   ├── README.md            # Índice de documentación
 │   ├── QUICKSTART.md        # Guía de inicio rápido

@@ -1,6 +1,6 @@
 # Frontend — Especificación Técnica
 
-Guía completa de componentes React, hooks personalizados, gestión de estado y arquitectura del frontend de QA Project MGMT.
+Guía completa de componentes React, hooks personalizados, gestión de estado y arquitectura del frontend de FuncAssist.
 
 ---
 
@@ -499,7 +499,7 @@ const { user, token, login, logout } = useContext(AuthContext)
 ### Almacenamiento de Token
 
 ```typescript
-const AUTH_TOKEN_KEY = 'qa_mgmt_auth_token'
+const AUTH_TOKEN_KEY = 'funcassist_auth_token'
 
 // Al login
 localStorage.setItem(AUTH_TOKEN_KEY, token)
@@ -531,9 +531,9 @@ const getAuthHeaders = () => {
 
 ### localStorage
 
-- **Chat conversations**: `qa_mgmt_chats_{featureSlug}`
-- **Auth token**: `qa_mgmt_auth_token`
-- **Preferences**: `qa_mgmt_preferences`
+- **Chat conversations**: `funcassist_chats_{featureSlug}`
+- **Auth token**: `funcassist_auth_token`
+- **Preferences**: `funcassist_preferences`
 
 ### Lifting State Up
 

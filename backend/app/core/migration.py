@@ -67,8 +67,8 @@ def migrate_paths_if_needed() -> None:
         except Exception as exc:
           logger.warning(f"Error copying Whisper model {pt_file}: {exc}")
 
-  # Migrate GGUF models from ~/.cache/qa_mgmt/models
-  old_gguf = Path.home() / ".cache" / "qa_mgmt" / "models"
+  # Migrate GGUF models from ~/.cache/funcassist/models
+  old_gguf = Path.home() / ".cache" / "funcassist" / "models"
   new_gguf = USER_DATA_DIR / "models" / "builtin"
   if old_gguf.exists():
     new_gguf.mkdir(parents=True, exist_ok=True)

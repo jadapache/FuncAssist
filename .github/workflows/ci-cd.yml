@@ -187,7 +187,7 @@ jobs:
           Write-Host "=== Compile Tauri binary ==="
           cargo check `
             --manifest-path src-tauri/Cargo.toml `
-            --bin qa-project-mgmt `
+            --bin funcassist `
             --verbose
 
       - name: Build Tauri Desktop
@@ -235,11 +235,11 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/}"
 
           cat > RELEASE_NOTES.md <<EOF
-          ## QA Project Management Release ${VERSION}
+          ## FuncAssist Release ${VERSION}
 
           ### Highlights & Changes
           - Automated Build & Release generated via GitHub Actions
-          - Local AI Integration & Fast QA Dashboard
+          - Local AI Functional Assistant & Elicitation Hub
           - Automatic desktop updater support
 
           ### Downloads & Installation
@@ -247,7 +247,7 @@ jobs:
           - **Windows Portable / NSIS:** Check release assets below
 
           ### Upgrade Instructions
-          - If you already have QA Project Management installed, the in-app updater will notify you automatically.
+          - If you already have FuncAssist installed, the in-app updater will notify you automatically.
           - Or download and run the latest installer attached to this release.
           EOF
 

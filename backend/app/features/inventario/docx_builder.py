@@ -44,7 +44,7 @@ def create_inventario_docx(markdown_content: str, title: str = "Inventario de Re
 
   p_sub = doc.add_paragraph()
   p_sub.paragraph_format.space_after = Pt(16)
-  run_sub = p_sub.add_run("Generado a partir de Minutas y Transcripciones de Reunión - QA Project MGMT")
+  run_sub = p_sub.add_run("Generado a partir de Minutas y Transcripciones de Reunión - FuncAssist")
   run_sub.font.name = "Segoe UI"
   run_sub.font.size = Pt(9.5)
   run_sub.font.italic = True
