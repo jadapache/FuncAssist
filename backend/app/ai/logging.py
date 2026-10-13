@@ -7,9 +7,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from app.core.settings import LOCAL_DIR, ensure_local_dirs
+from app.core.settings import USER_DATA_DIR, ensure_local_dirs
 
-LOGS_DIR = LOCAL_DIR / "ai" / "logs"
+LOGS_DIR = USER_DATA_DIR / "ai" / "logs"
 
 
 def log_ai_call(entry: dict[str, Any]) -> dict[str, Any]:

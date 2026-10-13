@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.core.settings import LOCAL_DIR, ensure_local_dirs
+from app.core.settings import USER_DATA_DIR, ensure_local_dirs
 
-AI_DIR = LOCAL_DIR / "ai"
+AI_DIR = USER_DATA_DIR / "ai"
 PROMPTS_DIR = AI_DIR / "prompts"
 RUBRICS_DIR = AI_DIR / "rubrics"
 

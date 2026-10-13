@@ -24,10 +24,10 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Generator
 
-from app.core.settings import LOCAL_DIR, ensure_local_dirs
+from app.core.settings import USER_DATA_DIR, ensure_local_dirs
 from app.core.storage import load_app_settings
 
-KNOWLEDGE_DIR = LOCAL_DIR / "knowledge"
+KNOWLEDGE_DIR = USER_DATA_DIR / "knowledge"
 DOCUMENTS_DIR = KNOWLEDGE_DIR / "documents"
 
 CHUNK_SIZE = 900
@@ -44,7 +44,7 @@ def get_knowledge_base_dir() -> Path:
 
   Precedence:
     1. knowledge_base_path key in app.json (user-configured network share/custom path)
-    2. LOCAL_DIR / "knowledge" (default local path)
+    2. USER_DATA_DIR / "knowledge" (default local path)
   """
   try:
     settings = load_app_settings()

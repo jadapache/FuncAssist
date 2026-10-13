@@ -85,34 +85,13 @@ fn find_python_executable(backend_dir: Option<&Path>) -> PathBuf {
 }
 
 fn find_backend_executable() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-
-    // 1. Next to current executable (installed layout: funcassist-backend.exe)
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            candidates.push(exe_dir.join("funcassist-backend.exe"));
-            candidates.push(exe_dir.join("resources").join("bin").join("funcassist-backend.exe"));
-            candidates.push(exe_dir.join("resources").join("funcassist-backend.exe"));
-            candidates.push(exe_dir.join("bin").join("funcassist-backend.exe"));
-        }
-    }
-
-    // 2. In LocalAppData/funcassist/
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(local_app_data).join("funcassist").join("funcassist-backend.exe"));
-    }
-
-    // 3. In workspace / dev bin
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("src-tauri").join("bin").join("funcassist-backend.exe"));
-        candidates.push(cwd.join("bin").join("funcassist-backend.exe"));
-    }
-
-    candidates.push(PathBuf::from("C:\\Dev\\QA_MGMT\\src-tauri\\bin\\funcassist-backend.exe"));
-
-    for candidate in candidates {
-        if candidate.is_file() && candidate.metadata().map(|m| m.len()).unwrap_or(0) > 10000 {
-            return Some(candidate);
+        let exe = PathBuf::from(local_app_data)
+            .join("funcassist")
+            .join("bin")
+            .join("funcassist-backend.exe");
+        if exe.is_file() && exe.metadata().map(|m| m.len()).unwrap_or(0) > 10000 {
+            return Some(exe);
         }
     }
 
@@ -149,6 +128,10 @@ fn spawn_backend() -> Option<Child> {
         }
         c
     };
+
+    // Force UTF-8 environment variables for sidecar child process
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONIOENCODING", "utf-8");
 
     // Redirect output to log file in AppData/Local/funcassist/logs/backend.log
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
