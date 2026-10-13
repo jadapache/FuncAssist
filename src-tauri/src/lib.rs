@@ -133,7 +133,53 @@ fn spawn_backend() -> Option<Child> {
     }
 }
 
+fn ensure_ffmpeg_in_appdata() {
+    let local_app_data = match std::env::var("LOCALAPPDATA") {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let app_dir = PathBuf::from(local_app_data).join("funcassist");
+    let _ = std::fs::create_dir_all(&app_dir);
+
+    let target_root = app_dir.join("ffmpeg.exe");
+
+    // If already exists and is valid, nothing to do
+    if target_root.exists() && target_root.metadata().map(|m| m.len()).unwrap_or(0) > 10000 {
+        return;
+    }
+
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("resources").join("bin").join("ffmpeg.exe"));
+            candidates.push(exe_dir.join("resources").join("ffmpeg.exe"));
+            candidates.push(exe_dir.join("bin").join("ffmpeg.exe"));
+            candidates.push(exe_dir.join("ffmpeg.exe"));
+            candidates.push(exe_dir.join("..").join("resources").join("bin").join("ffmpeg.exe"));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("src-tauri").join("bin").join("ffmpeg.exe"));
+        candidates.push(cwd.join("bin").join("ffmpeg.exe"));
+        candidates.push(cwd.join("ffmpeg.exe"));
+    }
+
+    candidates.push(PathBuf::from("C:\\Dev\\QA_MGMT\\src-tauri\\bin\\ffmpeg.exe"));
+
+    for candidate in candidates {
+        if candidate.exists() && candidate.metadata().map(|m| m.len()).unwrap_or(0) > 10000 {
+            println!("Copying FFmpeg from {:?} to AppData/Local/funcassist/ffmpeg.exe...", candidate);
+            let _ = std::fs::copy(&candidate, &target_root);
+            break;
+        }
+    }
+}
+
 pub fn run() {
+    ensure_ffmpeg_in_appdata();
     let backend_handle = Arc::new(Mutex::new(spawn_backend()));
     let backend_cleanup = Arc::clone(&backend_handle);
 

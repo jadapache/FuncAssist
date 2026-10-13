@@ -148,3 +148,9 @@ def ensure_local_dirs() -> None:
     USER_DRAFTS_DIR / "Inventario",
   ):
     path.mkdir(parents=True, exist_ok=True)
+
+  try:
+    from app.features.transcription.ffmpeg_utils import ensure_ffmpeg_in_user_data
+    ensure_ffmpeg_in_user_data()
+  except Exception:
+    pass
