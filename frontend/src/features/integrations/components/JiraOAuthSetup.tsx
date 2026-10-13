@@ -29,7 +29,7 @@ export const JiraOAuthSetup = ({ onSaved, onContinueOAuth, onCancel }: JiraOAuth
   } | null>(null)
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
-  const [redirectUri, setRedirectUri] = useState('http://127.0.0.1:8000/api/integrations/jira/callback')
+  const [redirectUri, setRedirectUri] = useState('http://127.0.0.1:6728/api/integrations/jira/callback')
   const [busy, setBusy] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)

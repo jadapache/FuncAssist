@@ -234,7 +234,7 @@ export const IntegrationCard = ({
                   title="GitHub OAuth"
                   docsUrl="https://github.com/settings/developers"
                   docsLabel="github.com/settings/developers"
-                  defaultRedirect="http://127.0.0.1:8000/api/integrations/github/callback"
+                  defaultRedirect="http://127.0.0.1:6728/api/integrations/github/callback"
                   onSaved={onOAuthSaved}
                   onContinueOAuth={onOAuth}
                   onCancel={() => setShowConnectForm(false)}
@@ -245,7 +245,7 @@ export const IntegrationCard = ({
                   title="GitLab OAuth"
                   docsUrl="https://gitlab.com/-/user_settings/applications"
                   docsLabel="gitlab.com user applications"
-                  defaultRedirect="http://127.0.0.1:8000/api/integrations/gitlab/callback"
+                  defaultRedirect="http://127.0.0.1:6728/api/integrations/gitlab/callback"
                   showBaseUrl
                   onSaved={onOAuthSaved}
                   onContinueOAuth={onOAuth}
