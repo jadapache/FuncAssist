@@ -16,9 +16,9 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 def _get_user_data_dir() -> Path:
   """
   Returns the OS-standard user application data directory.
-  Precedence: DATA_DIR env var > LOCAL_DIR env var > platform default.
+  Precedence: DATA_DIR env var > platform default.
   """
-  env_override = os.getenv("DATA_DIR") or os.getenv("LOCAL_DIR")
+  env_override = os.getenv("DATA_DIR")
   if env_override:
     return Path(env_override)
 
@@ -57,7 +57,7 @@ def _get_user_documents_dir() -> Path:
 
 # Primary path constants
 USER_DATA_DIR = _get_user_data_dir()
-LOCAL_DIR = USER_DATA_DIR  # backward-compatible alias
+BIN_DIR = USER_DATA_DIR / "bin"
 SETTINGS_DIR = USER_DATA_DIR / "settings"
 CONNECTIONS_DIR = USER_DATA_DIR / "connections"
 CACHE_DIR = USER_DATA_DIR / "cache"
@@ -130,6 +130,7 @@ def get_settings() -> Settings:
 def ensure_local_dirs() -> None:
   for path in (
     USER_DATA_DIR,
+    BIN_DIR,
     SETTINGS_DIR,
     CONNECTIONS_DIR,
     CACHE_DIR,

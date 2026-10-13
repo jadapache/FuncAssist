@@ -2,6 +2,19 @@ import os
 import sys
 import multiprocessing
 from pathlib import Path
+# Force UTF-8 mode on Windows before importing anything (Tauri & PyInstaller best practice)
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONUTF8"] = "1"
+if sys.stdout and hasattr(sys.stdout, "encoding") and sys.stdout.encoding != "utf-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "encoding") and sys.stderr.encoding != "utf-8":
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Fix working directory and import paths for frozen/PyInstaller executables
 if getattr(sys, "frozen", False):

@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.core.settings import LOCAL_DIR
+from app.core.settings import USER_DATA_DIR
 
 client = TestClient(app)
 
@@ -10,7 +10,7 @@ client = TestClient(app)
 @pytest.fixture
 def clean_app_json():
     """Clean app.json before and after test."""
-    settings_path = LOCAL_DIR / "settings" / "app.json"
+    settings_path = USER_DATA_DIR / "settings" / "app.json"
     if settings_path.exists():
         settings_path.unlink()
     yield
