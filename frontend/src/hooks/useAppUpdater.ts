@@ -116,7 +116,7 @@ export function useAppUpdater() {
         const update = await updaterModule.check()
         if (update?.available) {
           const version = update.version || 'Nueva versión'
-          const stored = localStorage.getItem('qa_mgmt_update_dismissed')
+          const stored = localStorage.getItem('funcassist_update_dismissed')
           if (stored === version && !manual) return
 
           setUpdateInfo({
@@ -133,7 +133,7 @@ export function useAppUpdater() {
         const result = await updaterModule.checkUpdate()
         if (result?.shouldUpdate) {
           const version = result.manifest?.version || 'Nueva versión'
-          const stored = localStorage.getItem('qa_mgmt_update_dismissed')
+          const stored = localStorage.getItem('funcassist_update_dismissed')
           if (stored === version && !manual) return
 
           setUpdateInfo({
@@ -208,7 +208,7 @@ export function useAppUpdater() {
 
   const dismissUpdate = () => {
     if (updateInfo?.version) {
-      localStorage.setItem('qa_mgmt_update_dismissed', updateInfo.version)
+      localStorage.setItem('funcassist_update_dismissed', updateInfo.version)
       setUpdateInfo(null)
     }
   }

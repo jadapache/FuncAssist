@@ -1,7 +1,7 @@
 [package]
-name = "qa-project-mgmt"
+name = "funcassist"
 version = "0.2.1"
-description = "QA Project Management Desktop App"
+description = "FuncAssist Desktop App"
 authors = ["Daniel Pacheco"]
 edition = "2021"
 

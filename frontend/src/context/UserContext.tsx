@@ -21,7 +21,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const loadUser = async () => {
       try {
-        localStorage.removeItem('qa_mgmt_auth_token')
+        localStorage.removeItem('funcassist_auth_token')
         const profile = await api.getUserProfile()
 
         // Check if this is first-time setup (display_name is default or empty)

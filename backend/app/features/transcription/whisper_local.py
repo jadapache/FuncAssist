@@ -330,7 +330,7 @@ def download_model_file(
 
     logger.info(f"Downloading Whisper model {clean_id} from {url} to {target_file}")
 
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; QA-Project-MGMT/1.0)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; FuncAssist/1.0)"})
     with urllib.request.urlopen(req) as response:
       total_size = int(response.headers.get("content-length", 0))
       downloaded = 0

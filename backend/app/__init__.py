@@ -1,2 +1,2 @@
-"""QA Project MGMT backend."""
+"""FuncAssist backend."""
 

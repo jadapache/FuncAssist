@@ -421,14 +421,14 @@ export const TopNav = ({ displayName }: TopNavProps) => {
         <NavLink
           to="/"
           className="group flex shrink-0 items-center gap-2.5"
-          aria-label="QA Project MGMT home"
+          aria-label="FuncAssist home"
         >
           <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#002777] to-[#004497] text-white shadow-lg shadow-[#002777]/30 transition-transform duration-300 group-hover:scale-105">
             <Sparkles className="h-4 w-4" aria-hidden />
             <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-cyan-400 ring-2 ring-white animate-pulse-soft" aria-hidden />
           </div>
           <span className="text-sm font-bold tracking-tight text-[var(--color-ink)]">
-            QA Project <span className="font-normal text-[var(--color-primary-accent)]">MGMT</span>
+            Func<span className="font-normal text-[var(--color-primary-accent)]">Assist</span>
           </span>
         </NavLink>
 

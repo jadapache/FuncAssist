@@ -1,6 +1,6 @@
 # Backend — Especificación Técnica
 
-Guía completa de módulos Python, endpoints FastAPI, y patrones utilizados en el backend de QA Project MGMT.
+Guía completa de módulos Python, endpoints FastAPI, y patrones utilizados en el backend de FuncAssist.
 
 ---
 

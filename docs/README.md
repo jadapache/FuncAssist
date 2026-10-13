@@ -1,6 +1,6 @@
-# QA Project MGMT — Documentación del Sistema
+# FuncAssist — Documentación del Sistema
 
-Bienvenido a la documentación técnica de **QA Project MGMT**, un sistema local de gestión de QA y PM potenciado con IA generativa, integración empresarial y RAG grounded.
+Bienvenido a la documentación técnica de **FuncAssist**, un asistente local para Analistas Funcionales, Product Owners y QA potenciado con IA generativa, integración empresarial y RAG grounded.
 
 ## 📚 Índice
 
@@ -64,7 +64,7 @@ Para desarrollo local con Ollama:
 ## 🚀 Estructura del Repositorio
 
 ```
-QA_MGMT/
+FuncAssist/
 ├── backend/                    # FastAPI backend
 │   ├── app/
 │   │   ├── ai/                # Motor LLM (runner, templates, providers, catalog, logging)

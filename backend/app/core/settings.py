@@ -22,7 +22,7 @@ def _get_user_data_dir() -> Path:
   if env_override:
     return Path(env_override)
 
-  app_name = "qa-project-mgmt"
+  app_name = "funcassist"
 
   if sys.platform == "win32":
     local_app_data = os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
@@ -38,19 +38,21 @@ def _get_user_data_dir() -> Path:
 
 def _get_user_documents_dir() -> Path:
   """
-  Returns the user's Documents folder under 'QA MGMT'.
-  Precedence: DOCUMENTS_DIR env var > OS Documents / 'QA MGMT'.
+  Returns the user's Documents folder under 'FuncAssist'.
+  Precedence: DOCUMENTS_DIR env var > OS Documents / 'FuncAssist'.
   """
+  folder_name = "FuncAssist"
+
   env_override = os.getenv("DOCUMENTS_DIR")
   if env_override:
-    return Path(env_override) / "QA MGMT"
+    return Path(env_override) / folder_name
 
   if sys.platform == "win32":
     user_profile = os.getenv("USERPROFILE")
     if user_profile:
-      return Path(user_profile) / "Documents" / "QA MGMT"
+      return Path(user_profile) / "Documents" / folder_name
 
-  return Path.home() / "Documents" / "QA MGMT"
+  return Path.home() / "Documents" / folder_name
 
 
 # Primary path constants
