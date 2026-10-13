@@ -1,7 +1,7 @@
 {
   "name": "funcassist",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.0",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -11,6 +11,7 @@
     "dev:desktop": "tauri dev",
     "build:desktop": "tauri build",
     "tauri": "tauri",
+    "set-version": "node scripts/set-version.js",
     "install:all": "npm --prefix frontend install && cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt"
   },
   "devDependencies": {
