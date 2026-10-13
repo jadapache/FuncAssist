@@ -115,6 +115,9 @@ class Settings(BaseSettings):
       "http://127.0.0.1:5173",
       "http://localhost:8000",
       "http://127.0.0.1:8000",
+      "http://tauri.localhost",
+      "https://tauri.localhost",
+      "tauri://localhost",
     }
     return [origin for origin in origins if origin]
 

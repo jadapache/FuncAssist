@@ -1,4 +1,5 @@
-use std::process::{Child, Command};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "windows")]
@@ -9,21 +10,112 @@ struct BackendProcess(Arc<Mutex<Option<Child>>>);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-fn spawn_backend() -> Option<Child> {
-    let mut cmd = if std::path::Path::new("backend/.venv/Scripts/python.exe").exists() {
-        Command::new("backend/.venv/Scripts/python.exe")
-    } else if std::path::Path::new("../backend/.venv/Scripts/python.exe").exists() {
-        Command::new("../backend/.venv/Scripts/python.exe")
+fn is_backend_listening() -> bool {
+    use std::net::TcpStream;
+    use std::time::Duration;
+    if let Ok(addr) = "127.0.0.1:8000".parse() {
+        TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
     } else {
-        Command::new("python")
-    };
+        false
+    }
+}
 
+fn find_backend_dir() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    // 1. Next to current executable (installed or portable layouts)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("resources").join("backend"));
+            candidates.push(exe_dir.join("backend"));
+            candidates.push(exe_dir.join("..").join("backend"));
+            candidates.push(exe_dir.join("..").join("..").join("backend"));
+        }
+    }
+
+    // 2. Relative to current working directory
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("backend"));
+        candidates.push(cwd.join("..").join("backend"));
+    }
+
+    // 3. Fallback known dev workspace path
+    candidates.push(PathBuf::from("C:\\Dev\\QA_MGMT\\backend"));
+
+    for candidate in candidates {
+        if candidate.join("app").join("main.py").exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn find_python_executable(backend_dir: Option<&Path>) -> PathBuf {
+    // 1. Virtual environment in detected backend folder
+    if let Some(dir) = backend_dir {
+        #[cfg(target_os = "windows")]
+        let venv_python = dir.join(".venv").join("Scripts").join("python.exe");
+        #[cfg(not(target_os = "windows"))]
+        let venv_python = dir.join(".venv").join("bin").join("python");
+
+        if venv_python.exists() {
+            return venv_python;
+        }
+    }
+
+    // 2. Virtual environment in dev workspace
+    #[cfg(target_os = "windows")]
+    {
+        let dev_venv = Path::new("C:\\Dev\\QA_MGMT\\backend\\.venv\\Scripts\\python.exe");
+        if dev_venv.exists() {
+            return dev_venv.to_path_buf();
+        }
+    }
+
+    // 3. System python fallback
+    #[cfg(target_os = "windows")]
+    {
+        PathBuf::from("python")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        PathBuf::from("python3")
+    }
+}
+
+fn spawn_backend() -> Option<Child> {
+    if is_backend_listening() {
+        println!("Backend is already running on 127.0.0.1:8000. Reusing existing instance.");
+        return None;
+    }
+
+    let backend_dir = find_backend_dir();
+    let python_exe = find_python_executable(backend_dir.as_deref());
+
+    println!("Starting backend with Python: {:?}", python_exe);
+    if let Some(ref dir) = backend_dir {
+        println!("Backend working directory: {:?}", dir);
+    }
+
+    let mut cmd = Command::new(&python_exe);
     cmd.args(["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"]);
 
-    if std::path::Path::new("backend").exists() {
-        cmd.current_dir("backend");
-    } else if std::path::Path::new("../backend").exists() {
-        cmd.current_dir("../backend");
+    if let Some(ref dir) = backend_dir {
+        cmd.current_dir(dir);
+    }
+
+    // Redirect output to log file in AppData/Local/funcassist/logs/backend.log
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let log_dir = PathBuf::from(local_app_data).join("funcassist").join("logs");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_file_path = log_dir.join("backend.log");
+        if let Ok(log_file) = std::fs::File::create(log_file_path) {
+            if let Ok(err_file) = log_file.try_clone() {
+                cmd.stdout(Stdio::from(log_file));
+                cmd.stderr(Stdio::from(err_file));
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
