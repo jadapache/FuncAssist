@@ -69,7 +69,7 @@ export const FirstTimeSetup = () => {
             </svg>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-            Bienvenido a QA Project MGMT
+            Bienvenido a FuncAssist
           </h1>
           <p className="text-slate-500 text-xs sm:text-sm mt-1">
             Configura tu perfil inicial para personalizar las herramientas disponibles

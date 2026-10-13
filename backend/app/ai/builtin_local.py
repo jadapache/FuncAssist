@@ -232,7 +232,7 @@ def download_builtin_model_file(
     # Use browser-like User-Agent to avoid HF blocks
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; QA-Project-MGMT/1.0; +https://github.com)"},
+        headers={"User-Agent": "Mozilla/5.0 (compatible; FuncAssist/1.0; +https://github.com)"},
     )
 
     try:

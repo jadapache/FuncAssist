@@ -1,6 +1,6 @@
 # CI/CD Pipeline & Guía de Releases Desktop (Tauri)
 
-Guía completa para el manejo, mantenimiento y publicación de versiones del sistema **QA Project MGMT** utilizando **GitHub Actions** y **Tauri**.
+Guía completa para el manejo, mantenimiento y publicación de versiones del sistema **FuncAssist** utilizando **GitHub Actions** y **Tauri**.
 
 ---
 
@@ -69,17 +69,17 @@ Para habilitar la firma de paquetes y auto-actualizaciones seguras en Tauri:
 Ejecuta en tu terminal local:
 ```bash
 # Generar llaves privada y pública
-npx @tauri-apps/cli signer generate -w ~/.tauri/qa_mgmt.key
+npx @tauri-apps/cli signer generate -w ~/.tauri/funcassist.key
 ```
 El comando generará:
-1. **Clave privada**: Guardada en `~/.tauri/qa_mgmt.key` (con contraseña).
+1. **Clave privada**: Guardada en `~/.tauri/funcassist.key` (con contraseña).
 2. **Clave pública**: Cadena de texto mostrada en la terminal.
 
 ### 2.2 Configurar GitHub Secrets
 En el repositorio de GitHub:
 1. Ve a **Settings** → **Secrets and variables** → **Actions**.
 2. Añade los siguientes secretos:
-   - `TAURI_PRIVATE_KEY`: Contenido de la clave privada (`~/.tauri/qa_mgmt.key`).
+   - `TAURI_PRIVATE_KEY`: Contenido de la clave privada (`~/.tauri/funcassist.key`).
    - `TAURI_KEY_PASSWORD`: Contraseña asignada al generar la clave.
    - `CODECOV_TOKEN` *(Opcional)*: Token para métricas de cobertura de código.
 

@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 class DocumentMetadata:
     """Metadata for generated documents"""
     title: str
-    author: str = "QA_MGMT"
+    author: str = "FuncAssist"
     created_at: str = ""
     module: str = "general"
     tags: List[str] = field(default_factory=list)

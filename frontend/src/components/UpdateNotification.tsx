@@ -38,7 +38,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
             </span>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            Una nueva versión de QA Project Management está lista para ser instalada.
+            Una nueva versión de FuncAssist está lista para ser instalada.
           </p>
           {updateInfo.releaseNotes && (
             <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 rounded-lg p-2.5 max-h-24 overflow-y-auto border border-slate-100 dark:border-slate-800">

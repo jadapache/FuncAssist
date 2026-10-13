@@ -1,6 +1,6 @@
-# Arquitectura del Sistema — QA Project MGMT
+# Arquitectura del Sistema — FuncAssist
 
-Guía completa del diseño, patrones y decisiones arquitectónicas de QA Project MGMT.
+Guía completa del diseño, patrones y decisiones arquitectónicas de FuncAssist.
 
 ---
 

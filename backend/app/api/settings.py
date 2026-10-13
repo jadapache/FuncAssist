@@ -97,7 +97,7 @@ async def update_gitlab_oauth(body: GitLabOAuthUpdate) -> dict[str, Any]:
 
 class HealthResponse(BaseModel):
   status: str = "ok"
-  app: str = "QA Project MGMT"
+  app: str = "FuncAssist"
 
 
 health_router = APIRouter(tags=["health"])

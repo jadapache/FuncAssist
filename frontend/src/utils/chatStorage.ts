@@ -4,7 +4,7 @@
 
 import type { ChatConversation } from '../features/document/hooks/useChatPersistence'
 
-const STORAGE_PREFIX = 'qa_mgmt_chats_'
+const STORAGE_PREFIX = 'funcassist_chats_'
 
 export function getChatStorageKey(featureSlug: string): string {
   return `${STORAGE_PREFIX}${featureSlug}`

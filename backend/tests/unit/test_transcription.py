@@ -592,10 +592,10 @@ def test_user_data_dir_resolution():
 
   data_dir = _get_user_data_dir()
   assert data_dir is not None
-  assert str(data_dir).endswith("qa-project-mgmt") or "local" in str(data_dir).lower()
+  assert str(data_dir).endswith("funcassist") or "local" in str(data_dir).lower()
   assert WHISPER_MODELS_DIR == USER_DATA_DIR / "models" / "whisper"
   assert BUILTIN_MODELS_DIR == USER_DATA_DIR / "models" / "builtin"
-  assert USER_DOCUMENTS_DIR.name == "QA MGMT"
+  assert USER_DOCUMENTS_DIR.name == "FuncAssist"
   assert USER_TRANSCRIPTIONS_DIR == USER_DOCUMENTS_DIR / "Transcripciones"
 
 

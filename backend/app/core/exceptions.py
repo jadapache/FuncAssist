@@ -1,5 +1,5 @@
 """
-Custom exception hierarchy for QA_MGMT application.
+Custom exception hierarchy for FuncAssist application.
 
 Provides domain-specific exceptions that map to appropriate HTTP status codes
 and can be caught by error handling middleware for consistent error responses.
