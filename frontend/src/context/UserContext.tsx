@@ -23,7 +23,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     const loadUser = async () => {
       localStorage.removeItem('funcassist_auth_token')
-      const maxRetries = 5
+      const maxRetries = 25
       let lastError: unknown = null
 
       for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -45,7 +45,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           lastError = error
           // If connection failed, wait before retrying to give backend time to finish starting
           if (attempt < maxRetries - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 700))
+            await new Promise((resolve) => setTimeout(resolve, 800))
           }
         }
       }
