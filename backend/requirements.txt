@@ -15,3 +15,5 @@ openai-whisper>=20250625
 tenacity>=8.2.0
 faster-whisper>=1.0.3
 aiosqlite>=0.20.0
+psycopg[binary]>=3.1.0
+pgvector>=0.2.5

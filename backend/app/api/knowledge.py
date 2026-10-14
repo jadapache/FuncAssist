@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.context.knowledge import (
   delete_document,
+  get_db_status,
   get_knowledge_base_dir,
   ingest_document,
   list_documents,
@@ -18,7 +19,6 @@ from app.context.knowledge_migration import (
   verify_integrity,
 )
 from app.context.service import assemble_context
-from app.core.storage import load_app_settings, save_app_settings
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -30,7 +30,7 @@ class RetrieveRequest(BaseModel):
 
 
 class KnowledgeBasePathRequest(BaseModel):
-  path: str  # empty string = revert to local default
+  path: str = ""
 
 
 @router.get("/documents")
@@ -94,49 +94,45 @@ async def retrieve(body: RetrieveRequest) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Path Configuration Endpoints
+# Database Status & Engine Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/db-status")
+async def get_database_status() -> dict[str, Any]:
+  """Return detailed status of the active knowledge base engine (PostgreSQL RAG / pgvector)."""
+  return get_db_status()
 
 
 @router.get("/path")
 async def get_knowledge_path() -> dict[str, Any]:
-  settings = load_app_settings()
-  current_path = settings.get("knowledge_base_path", "")
+  """Backward-compatible endpoint returning active storage info and engine details."""
+  status = get_db_status()
   resolved = str(get_knowledge_base_dir())
   return {
-    "configured_path": current_path,
+    "configured_path": status.get("host", ""),
     "resolved_path": resolved,
-    "is_custom": bool(current_path.strip()),
-    "is_accessible": Path(resolved).exists() if current_path else True,
+    "is_custom": status.get("is_postgres", False),
+    "is_accessible": status.get("connected", True),
+    "engine": status.get("engine", "postgresql"),
+    "pgvector_enabled": status.get("pgvector_enabled", False),
+    "doc_count": status.get("doc_count", 0),
+    "chunk_count": status.get("chunk_count", 0),
   }
 
 
 @router.put("/path")
 async def set_knowledge_path(body: KnowledgeBasePathRequest) -> dict[str, Any]:
-  new_path = body.path.strip()
-
-  if new_path:
-    p = Path(new_path)
-    if not p.exists():
-      try:
-        p.mkdir(parents=True, exist_ok=True)
-      except Exception as exc:
-        raise HTTPException(
-          status_code=400,
-          detail=f"Cannot access or create path '{new_path}': {exc}",
-        ) from exc
-
-  settings = load_app_settings()
-  settings["knowledge_base_path"] = new_path
-  save_app_settings(settings)
-
-  resolved = str(get_knowledge_base_dir())
+  """In server mode, database connections are managed via KNOWLEDGE_DATABASE_URL environment variable."""
+  status = get_db_status()
   return {
     "ok": True,
-    "configured_path": new_path,
-    "resolved_path": resolved,
-    "is_custom": bool(new_path),
-    "is_accessible": Path(resolved).exists() if new_path else True,
+    "message": "En el servidor la conexión de PostgreSQL se gestiona mediante la variable de entorno KNOWLEDGE_DATABASE_URL.",
+    "configured_path": status.get("host", ""),
+    "resolved_path": str(get_knowledge_base_dir()),
+    "is_custom": status.get("is_postgres", False),
+    "is_accessible": status.get("connected", True),
+    "engine": status.get("engine", "postgresql"),
   }
 
 
