@@ -108,4 +108,21 @@ async def init_db() -> None:
             );
         """)
 
+        # Model Context Protocol (MCP) servers table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                transport TEXT NOT NULL DEFAULT 'sse',
+                url TEXT NOT NULL,
+                command TEXT,
+                args_json TEXT,
+                headers_json TEXT,
+                enabled INTEGER DEFAULT 1,
+                cached_tools_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         await db.commit()

@@ -7,6 +7,7 @@ from app.api import (
   history,
   integrations,
   knowledge,
+  mcp,
   settings as settings_api,
   transcription,
   transcription_stream,
@@ -28,6 +29,7 @@ api_router.include_router(user.router)
 api_router.include_router(integrations.router)
 api_router.include_router(settings_api.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(mcp.router)
 api_router.include_router(history.router)
 api_router.include_router(document_agent.router)
 api_router.include_router(drafts.router)

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Cpu, Database, FileText, Layers, ShieldCheck } from 'lucide-react'
+import { Cpu, Database, FileText, Layers, Network, ShieldCheck } from 'lucide-react'
 import { AiModelsPanel } from '../../../features/settings/components/AiModelsPanel'
 import { IntegrationsPanel } from '../../../features/settings/components/IntegrationsPanel'
 import { KnowledgeBaseSection } from '../../../features/settings/components/KnowledgeBaseSection'
+import { McpIntegrationPanel } from '../../../features/settings/components/McpIntegrationPanel'
 import { TemplatesPanel } from '../../../features/settings/components/TemplatesPanel'
 import { UserApprovalsPanel } from '../../../features/settings/components/UserApprovalsPanel'
 import { useIntegrationsManager } from '../../../features/settings/hooks/useIntegrationsManager'
@@ -25,6 +26,7 @@ export const SettingsPage = () => {
       t === 'ai_models' ||
       t === 'templates' ||
       t === 'knowledge' ||
+      t === 'mcp' ||
       t === 'approvals'
     ) {
       return t as TabType
@@ -50,6 +52,7 @@ export const SettingsPage = () => {
       tab === 'ai_models' ||
       tab === 'templates' ||
       tab === 'knowledge' ||
+      tab === 'mcp' ||
       tab === 'approvals'
     ) {
       setActiveTab(tab as TabType)
@@ -78,6 +81,12 @@ export const SettingsPage = () => {
       label: 'Base de Conocimiento',
       subtitle: 'Almacenamiento PostgreSQL RAG (Full-Text & Vector)',
       icon: Database,
+    },
+    {
+      id: 'mcp' as TabType,
+      label: 'Model Context Protocol (MCP)',
+      subtitle: 'Conexión de modelos agénticos y herramientas',
+      icon: Network,
     },
     ...(canSeeIntegrations
       ? [
@@ -161,6 +170,7 @@ export const SettingsPage = () => {
       {activeTab === 'ai_models' && <AiModelsPanel />}
       {activeTab === 'templates' && <TemplatesPanel />}
       {activeTab === 'knowledge' && <KnowledgeBaseSection />}
+      {activeTab === 'mcp' && <McpIntegrationPanel />}
       {activeTab === 'integrations' && canSeeIntegrations && (
         <IntegrationsPanel integrationsManager={integrationsManager} />
       )}

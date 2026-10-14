@@ -1,6 +1,6 @@
 import type { Cpu } from 'lucide-react'
 
-export type TabType = 'ai_models' | 'templates' | 'integrations' | 'knowledge' | 'approvals'
+export type TabType = 'ai_models' | 'templates' | 'integrations' | 'knowledge' | 'mcp' | 'approvals'
 
 export type BuiltInModel = {
   id: string
@@ -145,3 +145,39 @@ export type AIRubric = {
   criteria: string[]
   [key: string]: unknown
 }
+
+export type MCPTool = {
+  name: string
+  description: string
+  inputSchema?: Record<string, any>
+}
+
+export type MCPServer = {
+  id: string
+  name: string
+  transport: 'sse' | 'http'
+  url: string
+  enabled: boolean
+  cached_tools?: MCPTool[]
+  headers?: Record<string, string>
+  created_at?: string
+  updated_at?: string
+}
+
+export type MCPServerInfo = {
+  status: string
+  name: string
+  version: string
+  protocolVersion: string
+  directUrl: string
+  sseUrl: string
+  toolsCount: number
+  tools: MCPTool[]
+  resourcesCount: number
+  resources: Array<{ uri: string; name: string; description?: string }>
+  configSnippets: {
+    claudeDesktop: Record<string, any>
+    cursor: Record<string, any>
+  }
+}
+
