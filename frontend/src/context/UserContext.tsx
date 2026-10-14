@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import { api, type UserProfile, type UserRole } from '../api/client'
+import { useAuth } from './AuthContext'
 
 export type { UserRole, UserProfile }
 
@@ -14,46 +15,37 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined)
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isFirstTimeSetup, setIsFirstTimeSetup] = useState(false)
+  const { user: authUser, isLoading, updateUser } = useAuth()
 
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        localStorage.removeItem('funcassist_auth_token')
-        const profile = await api.getUserProfile()
-
-        // Check if this is first-time setup (display_name is default or empty)
-        if (!profile.display_name || profile.display_name === 'Usuario') {
-          setIsFirstTimeSetup(true)
-        } else {
-          setUser(profile)
-        }
-      } catch (error) {
-        console.error('Error loading user profile:', error)
-        setIsFirstTimeSetup(true)
-      } finally {
-        setIsLoading(false)
+  const userProfile: UserProfile | null = authUser
+    ? {
+        display_name: authUser.full_name || authUser.username,
+        user_role: (authUser.role as UserRole) || 'funcional',
       }
-    }
-
-    void loadUser()
-  }, [])
+    : null
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
-    const updated = await api.updateUserProfile(updates)
-    setUser(updated)
+    if (!authUser) return
+    const res = await api.updateProfile({
+      full_name: updates.display_name,
+    })
+    updateUser(res.user)
   }
 
-  const completeSetup = async (profile: UserProfile) => {
-    const created = await api.setupUser(profile)
-    setUser(created)
-    setIsFirstTimeSetup(false)
+  const completeSetup = async (_profile: UserProfile) => {
+    // Kept for backward compatibility
   }
 
   return (
-    <UserContext.Provider value={{ user, isLoading, isFirstTimeSetup, updateProfile, completeSetup }}>
+    <UserContext.Provider
+      value={{
+        user: userProfile,
+        isLoading,
+        isFirstTimeSetup: false,
+        updateProfile,
+        completeSetup,
+      }}
+    >
       {children}
     </UserContext.Provider>
   )

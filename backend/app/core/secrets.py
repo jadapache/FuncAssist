@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import secrets
 from typing import Any, Dict
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -18,12 +19,26 @@ SECRET_PREFIX = "enc::"
 
 
 
+from app.core.settings import SETTINGS_DIR
+
 def _get_master_secret() -> str:
-    """Obtiene la clave maestra desde variables de entorno o la huella del sistema."""
+    """Obtiene la clave maestra desde variables de entorno, archivo persistente o huella del sistema."""
     secret = os.getenv("PMQA_SECRET_KEY") or os.getenv("SECRET_KEY")
     if secret:
         return secret
-    return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
+
+    key_file = SETTINGS_DIR / "secret.key"
+    try:
+        if key_file.exists():
+            saved = key_file.read_text(encoding="utf-8").strip()
+            if saved:
+                return saved
+        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        new_secret = secrets.token_urlsafe(32)
+        key_file.write_text(new_secret, encoding="utf-8")
+        return new_secret
+    except Exception:
+        return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
 
 
 def _get_fernet() -> Fernet:
