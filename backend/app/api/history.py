@@ -43,6 +43,26 @@ class SettingSetRequest(BaseModel):
 # --- Users Endpoints ---
 @router.get("/users")
 async def get_users() -> dict[str, Any]:
+    from app.db.database import get_db
+    try:
+        async with get_db() as db:
+            async with db.execute("SELECT id, username, full_name, role, status FROM users WHERE status = 'approved'") as cursor:
+                rows = await cursor.fetchall()
+                if rows:
+                    return {
+                        "users": [
+                            {
+                                "id": r["id"],
+                                "username": r["username"],
+                                "display_name": r["full_name"] or r["username"],
+                                "role": r["role"],
+                            }
+                            for r in rows
+                        ]
+                    }
+    except Exception:
+        pass
+
     settings = load_app_settings()
     return {
         "users": [
