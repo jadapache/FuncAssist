@@ -76,7 +76,7 @@ export const SettingsPage = () => {
     {
       id: 'knowledge',
       label: 'Base de Conocimiento',
-      subtitle: 'Almacenamiento SQLite FTS5 y red compartida',
+      subtitle: 'Almacenamiento PostgreSQL RAG (Full-Text & Vector)',
       icon: Database,
     },
     ...(canSeeIntegrations
