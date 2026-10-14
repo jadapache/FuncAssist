@@ -97,7 +97,6 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
   "user_role": "admin",
   "theme": "command-center",
   "selected_repos": [],
-  "knowledge_base_path": "",
 }
 
 

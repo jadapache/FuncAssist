@@ -107,6 +107,106 @@ class Settings(BaseSettings):
   gitlab_base_url: str = "https://gitlab.com"
   cors_origins_str: str = ""
 
+  # PostgreSQL Knowledge Base & RAG connection (Separated variables)
+  knowledge_db_host: str = ""
+  knowledge_db_port: int = 5432
+  knowledge_db_user: str = ""
+  knowledge_db_password: str = ""
+  knowledge_db_database: str = ""
+
+  # Alternative / fallback variables
+  pghost: str = ""
+  pgport: int = 5432
+  pguser: str = ""
+  pgpassword: str = ""
+  pgdatabase: str = ""
+
+  # Optional connection URL override
+  knowledge_database_url: str | None = None
+  database_url: str | None = None
+  postgres_url: str | None = None
+
+  def get_knowledge_db_params(self) -> dict[str, Any]:
+    """Return dictionary of individual connection parameters."""
+    host = (
+      self.knowledge_db_host
+      or os.getenv("KNOWLEDGE_DB_HOST")
+      or self.pghost
+      or os.getenv("PGHOST")
+      or ""
+    ).strip()
+    port_str = (
+      str(self.knowledge_db_port)
+      if self.knowledge_db_port
+      else os.getenv("KNOWLEDGE_DB_PORT") or os.getenv("PGPORT") or "5432"
+    )
+    try:
+      port = int(port_str)
+    except ValueError:
+      port = 5432
+    user = (
+      self.knowledge_db_user
+      or os.getenv("KNOWLEDGE_DB_USER")
+      or self.pguser
+      or os.getenv("PGUSER")
+      or ""
+    ).strip()
+    password = (
+      self.knowledge_db_password
+      or os.getenv("KNOWLEDGE_DB_PASSWORD")
+      or self.pgpassword
+      or os.getenv("PGPASSWORD")
+      or ""
+    ).strip()
+    database = (
+      self.knowledge_db_database
+      or os.getenv("KNOWLEDGE_DB_DATABASE")
+      or os.getenv("KNOWLEDGE_DB_NAME")
+      or self.pgdatabase
+      or os.getenv("PGDATABASE")
+      or ""
+    ).strip()
+    return {
+      "host": host,
+      "port": port,
+      "user": user,
+      "password": password,
+      "database": database,
+    }
+
+  def get_knowledge_db_url(self) -> str | None:
+    """Return explicit database URL or construct from separated Host, User, Password, Database variables."""
+    # 1. URL override if explicitly set
+    url = (
+      self.knowledge_database_url
+      or os.getenv("KNOWLEDGE_DATABASE_URL")
+      or self.database_url
+      or os.getenv("DATABASE_URL")
+      or self.postgres_url
+      or os.getenv("POSTGRES_URL")
+    )
+    if url and url.strip():
+      return url.strip()
+
+    # 2. Construct from separated parameters
+    params = self.get_knowledge_db_params()
+    host = params["host"]
+    database = params["database"]
+    if host or database:
+      user = params["user"]
+      password = params["password"]
+      port = params["port"]
+      user_part = ""
+      if user:
+        from urllib.parse import quote_plus
+        if password:
+          user_part = f"{quote_plus(user)}:{quote_plus(password)}@"
+        else:
+          user_part = f"{quote_plus(user)}@"
+      db_part = database or "qa_mgmt_knowledge"
+      return f"postgresql://{user_part}{host or 'localhost'}:{port}/{db_part}"
+    return None
+
   @property
   def cors_origins(self) -> list[str]:
     if self.cors_origins_str.strip() == "*":

@@ -1,22 +1,26 @@
-"""Knowledge document storage — SQLite FTS5 backend.
+"""Knowledge document storage — PostgreSQL RAG backend (Full-Text & Vector).
 
-Public API is identical to the JSON-based version:
-  - ingest_document(filename, raw, tags) -> dict
+Public API:
+  - ingest_document(filename, raw, tags, embedding) -> dict
   - delete_document(document_id) -> bool
   - list_documents() -> list[dict]
   - load_chunks() -> list[dict]
   - get_chunks_for_documents(doc_ids) -> list[dict]
+  - search_chunks_fts(query, top_k, tags) -> list[dict]
+  - search_chunks_vector(query_vector, top_k, tags) -> list[dict]
   - ensure_knowledge_dirs() -> None
+  - get_db_status() -> dict
 
-Database location is resolved by get_knowledge_db_path() which
-honours the KNOWLEDGE_BASE_PATH setting from app.json.
+Connection parameters are managed via environment variables:
+  - KNOWLEDGE_DB_HOST, KNOWLEDGE_DB_PORT, KNOWLEDGE_DB_USER, KNOWLEDGE_DB_PASSWORD, KNOWLEDGE_DB_DATABASE
+  - (Optional override: KNOWLEDGE_DATABASE_URL or DATABASE_URL)
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
-import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -24,72 +28,146 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Generator
 
-from app.core.settings import LOCAL_DIR, ensure_local_dirs
-from app.core.storage import load_app_settings
+from app.core.settings import USER_DATA_DIR, ensure_local_dirs, get_settings
 
-KNOWLEDGE_DIR = LOCAL_DIR / "knowledge"
+logger = logging.getLogger(__name__)
+
+KNOWLEDGE_DIR = USER_DATA_DIR / "knowledge"
 DOCUMENTS_DIR = KNOWLEDGE_DIR / "documents"
 
 CHUNK_SIZE = 900
 CHUNK_OVERLAP = 120
 
-
 # ---------------------------------------------------------------------------
-# Path resolution
+# Path resolution — Server-local filesystem for uploaded raw documents
 # ---------------------------------------------------------------------------
 
 
 def get_knowledge_base_dir() -> Path:
-  """Resolve the knowledge base directory.
-
-  Precedence:
-    1. knowledge_base_path key in app.json (user-configured network share/custom path)
-    2. LOCAL_DIR / "knowledge" (default local path)
-  """
-  try:
-    settings = load_app_settings()
-    custom = settings.get("knowledge_base_path", "")
-    if isinstance(custom, str) and custom.strip():
-      p = Path(custom.strip())
-      p.mkdir(parents=True, exist_ok=True)
-      return p
-  except Exception:
-    pass
   return KNOWLEDGE_DIR
 
 
-def get_knowledge_db_path() -> Path:
-  return get_knowledge_base_dir() / "knowledge.db"
-
-
 def get_knowledge_documents_dir() -> Path:
-  """Raw uploaded files directory (local or on shared path)."""
-  return get_knowledge_base_dir() / "documents"
+  return DOCUMENTS_DIR
 
 
 # ---------------------------------------------------------------------------
-# Connection management
+# PostgreSQL Connection Management
 # ---------------------------------------------------------------------------
 
+_PGVECTOR_AVAILABLE: bool | None = None
 
-def _get_connection() -> sqlite3.Connection:
-  db_path = get_knowledge_db_path()
-  db_path.parent.mkdir(parents=True, exist_ok=True)
-  conn = sqlite3.connect(str(db_path), timeout=30, check_same_thread=False)
-  conn.row_factory = sqlite3.Row
 
-  # WAL mode — safe concurrent access on network shares / multi-process
-  conn.execute("PRAGMA journal_mode=WAL")
-  conn.execute("PRAGMA synchronous=NORMAL")
-  conn.execute("PRAGMA foreign_keys=ON")
+def is_postgres_configured() -> bool:
+  settings = get_settings()
+  params = settings.get_knowledge_db_params()
+  if params["host"] or params["database"]:
+    return True
+  url = settings.get_knowledge_db_url()
+  return bool(url and url.strip())
 
-  _ensure_schema(conn)
+
+def _get_pg_connection():
+  import psycopg
+  from psycopg.rows import dict_row
+
+  settings = get_settings()
+  url = settings.get_knowledge_db_url()
+  if not url:
+    raise ConnectionError(
+      "PostgreSQL no está configurado. Defina KNOWLEDGE_DB_HOST, KNOWLEDGE_DB_DATABASE, "
+      "KNOWLEDGE_DB_USER y KNOWLEDGE_DB_PASSWORD (o KNOWLEDGE_DATABASE_URL)."
+    )
+
+  conn = psycopg.connect(url, row_factory=dict_row, autocommit=False)
   return conn
 
 
+def _ensure_pg_schema(conn) -> None:
+  global _PGVECTOR_AVAILABLE
+  cur = conn.cursor()
+
+  # 1. Try enabling pgvector and unaccent
+  try:
+    cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    conn.commit()
+    _PGVECTOR_AVAILABLE = True
+  except Exception as e:
+    conn.rollback()
+    _PGVECTOR_AVAILABLE = False
+    logger.info("pgvector extension not enabled/available in PostgreSQL: %s", e)
+
+  try:
+    cur.execute("CREATE EXTENSION IF NOT EXISTS unaccent;")
+    conn.commit()
+  except Exception:
+    conn.rollback()
+
+  # 2. Register vector types in psycopg if available
+  if _PGVECTOR_AVAILABLE:
+    try:
+      from pgvector.psycopg import register_vector
+      register_vector(conn)
+    except Exception as e:
+      logger.warning("Could not register pgvector with psycopg: %s", e)
+
+  # 3. Create tables
+  cur.execute("""
+      CREATE TABLE IF NOT EXISTS documents (
+          id          VARCHAR(64) PRIMARY KEY,
+          filename    TEXT NOT NULL,
+          stored_as   TEXT NOT NULL,
+          tags        JSONB NOT NULL DEFAULT '[]'::jsonb,
+          chunk_count INTEGER NOT NULL DEFAULT 0,
+          char_count  INTEGER NOT NULL DEFAULT 0,
+          uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+  """)
+
+  vector_col = "embedding vector(1536)," if _PGVECTOR_AVAILABLE else "embedding JSONB,"
+  cur.execute(f"""
+      CREATE TABLE IF NOT EXISTS chunks (
+          chunk_id     VARCHAR(128) PRIMARY KEY,
+          document_id  VARCHAR(64) NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+          filename     TEXT NOT NULL,
+          tags         JSONB NOT NULL DEFAULT '[]'::jsonb,
+          chunk_index  INTEGER NOT NULL DEFAULT 0,
+          text         TEXT NOT NULL,
+          tsv          tsvector GENERATED ALWAYS AS (to_tsvector('spanish', text)) STORED,
+          {vector_col}
+          uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+  """)
+
+  # 4. Create Indexes
+  cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING gin(tsv);")
+  cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(document_id);")
+  cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tags ON chunks USING gin(tags);")
+
+  if _PGVECTOR_AVAILABLE:
+    try:
+      cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);"
+      )
+    except Exception:
+      pass
+
+  cur.execute("""
+      CREATE TABLE IF NOT EXISTS db_meta (
+          key   VARCHAR(64) PRIMARY KEY,
+          value TEXT NOT NULL
+      );
+      INSERT INTO db_meta (key, value) VALUES ('schema_version', '2')
+      ON CONFLICT (key) DO NOTHING;
+  """)
+  conn.commit()
+
+
 @contextmanager
-def _db() -> Generator[sqlite3.Connection, None, None]:
-  conn = _get_connection()
+def _db() -> Generator[Any, None, None]:
+  """PostgreSQL DB context manager."""
+  conn = _get_pg_connection()
+  _ensure_pg_schema(conn)
   try:
     yield conn
     conn.commit()
@@ -98,38 +176,6 @@ def _db() -> Generator[sqlite3.Connection, None, None]:
     raise
   finally:
     conn.close()
-
-
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-  conn.executescript("""
-        CREATE TABLE IF NOT EXISTS documents (
-            id          TEXT PRIMARY KEY,
-            filename    TEXT NOT NULL,
-            stored_as   TEXT NOT NULL,
-            tags        TEXT NOT NULL DEFAULT '[]',
-            chunk_count INTEGER NOT NULL DEFAULT 0,
-            char_count  INTEGER NOT NULL DEFAULT 0,
-            uploaded_at TEXT NOT NULL
-        );
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
-            chunk_id,
-            document_id,
-            filename,
-            tags,
-            chunk_index,
-            text,
-            uploaded_at,
-            tokenize="unicode61 remove_diacritics 1"
-        );
-
-        CREATE TABLE IF NOT EXISTS db_meta (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-
-        INSERT OR IGNORE INTO db_meta VALUES ('schema_version', '1');
-    """)
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +187,12 @@ def ensure_knowledge_dirs() -> None:
   ensure_local_dirs()
   KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
   DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
-  get_knowledge_documents_dir().mkdir(parents=True, exist_ok=True)
-  with _db():
-    pass
+  if is_postgres_configured():
+    try:
+      with _db():
+        pass
+    except Exception as exc:
+      logger.warning("Could not connect to PostgreSQL on ensure_knowledge_dirs: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +219,6 @@ def extract_text(filename: str, raw: bytes) -> str:
 def _extract_pdf(raw: bytes) -> str:
   try:
     from io import BytesIO
-
     from pypdf import PdfReader
 
     reader = PdfReader(BytesIO(raw))
@@ -182,7 +230,6 @@ def _extract_pdf(raw: bytes) -> str:
 def _extract_docx(raw: bytes) -> str:
   try:
     from io import BytesIO
-
     from docx import Document
 
     document = Document(BytesIO(raw))
@@ -229,7 +276,7 @@ def chunk_text(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Core CRUD
+# Core CRUD (PostgreSQL)
 # ---------------------------------------------------------------------------
 
 
@@ -238,6 +285,7 @@ def ingest_document(
   filename: str,
   raw: bytes,
   tags: list[str] | None = None,
+  embeddings: list[list[float]] | None = None,
 ) -> dict[str, Any]:
   ensure_knowledge_dirs()
   text = extract_text(filename, raw)
@@ -253,30 +301,39 @@ def ingest_document(
 
   pieces = chunk_text(text)
   now = datetime.now(timezone.utc).isoformat()
-  tags_json = json.dumps(tags or [])
+  tags_clean = tags or []
 
   with _db() as conn:
-    conn.execute(
+    cur = conn.cursor()
+    cur.execute(
       """INSERT INTO documents
              (id, filename, stored_as, tags, chunk_count, char_count, uploaded_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-      (doc_id, filename, stored_name, tags_json, len(pieces), len(text), now),
+             VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+      (doc_id, filename, stored_name, json.dumps(tags_clean), len(pieces), len(text), now),
     )
-    conn.executemany(
-      """INSERT INTO chunks
-             (chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-      [
-        (f"{doc_id}:{i}", doc_id, filename, tags_json, i, piece, now)
-        for i, piece in enumerate(pieces)
-      ],
-    )
+    for i, piece in enumerate(pieces):
+      chunk_emb = embeddings[i] if embeddings and i < len(embeddings) else None
+      cur.execute(
+        """INSERT INTO chunks
+               (chunk_id, document_id, filename, tags, chunk_index, text, embedding, uploaded_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (
+          f"{doc_id}:{i}",
+          doc_id,
+          filename,
+          json.dumps(tags_clean),
+          i,
+          piece,
+          chunk_emb,
+          now,
+        ),
+      )
 
   return {
     "id": doc_id,
     "filename": filename,
     "stored_as": stored_name,
-    "tags": tags or [],
+    "tags": tags_clean,
     "chunk_count": len(pieces),
     "uploaded_at": now,
     "char_count": len(text),
@@ -286,18 +343,16 @@ def ingest_document(
 def delete_document(document_id: str) -> bool:
   ensure_knowledge_dirs()
   with _db() as conn:
-    row = conn.execute(
-      "SELECT stored_as FROM documents WHERE id = ?", (document_id,)
-    ).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT stored_as FROM documents WHERE id = %s", (document_id,))
+    row = cur.fetchone()
     if not row:
       return False
-
     stored = get_knowledge_documents_dir() / row["stored_as"]
     if stored.exists():
       stored.unlink(missing_ok=True)
-
-    conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
-    conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    cur.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
+    cur.execute("DELETE FROM documents WHERE id = %s", (document_id,))
 
   return True
 
@@ -305,44 +360,53 @@ def delete_document(document_id: str) -> bool:
 def list_documents() -> list[dict[str, Any]]:
   ensure_knowledge_dirs()
   with _db() as conn:
-    rows = conn.execute("SELECT * FROM documents ORDER BY uploaded_at DESC").fetchall()
-  return [
-    {
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM documents ORDER BY uploaded_at DESC")
+    rows = cur.fetchall()
+
+  result = []
+  for row in rows:
+    raw_tags = row["tags"]
+    tags = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
+    up_at = row["uploaded_at"]
+    uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
+    result.append({
       "id": row["id"],
       "filename": row["filename"],
       "stored_as": row["stored_as"],
-      "tags": json.loads(row["tags"] or "[]"),
+      "tags": tags,
       "chunk_count": row["chunk_count"],
       "char_count": row["char_count"],
-      "uploaded_at": row["uploaded_at"],
-    }
-    for row in rows
-  ]
+      "uploaded_at": uploaded_at_str,
+    })
+  return result
 
 
 def load_chunks() -> list[dict[str, Any]]:
-  """Return all chunks as a list of dicts.
-
-  Used by retrieval.py for fallback scoring or full listing.
-  For normal queries, search_chunks_fts() is preferred.
-  """
   ensure_knowledge_dirs()
   with _db() as conn:
-    rows = conn.execute(
-      "SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at FROM chunks"
-    ).fetchall()
-  return [
-    {
+    cur = conn.cursor()
+    cur.execute(
+      "SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at FROM chunks ORDER BY document_id, chunk_index"
+    )
+    rows = cur.fetchall()
+
+  result = []
+  for row in rows:
+    raw_tags = row["tags"]
+    tags = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
+    up_at = row["uploaded_at"]
+    uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
+    result.append({
       "id": row["chunk_id"],
       "document_id": row["document_id"],
       "filename": row["filename"],
-      "tags": json.loads(row["tags"] or "[]"),
+      "tags": tags,
       "index": row["chunk_index"],
       "text": row["text"],
-      "uploaded_at": row["uploaded_at"],
-    }
-    for row in rows
-  ]
+      "uploaded_at": uploaded_at_str,
+    })
+  return result
 
 
 def get_chunks_for_documents(
@@ -353,42 +417,39 @@ def get_chunks_for_documents(
   if not document_ids:
     return []
   ensure_knowledge_dirs()
-  placeholders = ",".join("?" * len(document_ids))
   with _db() as conn:
-    rows = conn.execute(
-      f"""SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at
-          FROM chunks
-          WHERE document_id IN ({placeholders})
-          ORDER BY document_id, chunk_index
-          LIMIT ?""",
-      (*document_ids, max_chunks),
-    ).fetchall()
-  return [
-    {
+    cur = conn.cursor()
+    cur.execute(
+      """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at
+         FROM chunks
+         WHERE document_id = ANY(%s)
+         ORDER BY document_id, chunk_index
+         LIMIT %s""",
+      (document_ids, max_chunks),
+    )
+    rows = cur.fetchall()
+
+  result = []
+  for row in rows:
+    raw_tags = row["tags"]
+    tags = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
+    up_at = row["uploaded_at"]
+    uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
+    result.append({
       "id": row["chunk_id"],
       "document_id": row["document_id"],
       "filename": row["filename"],
-      "tags": json.loads(row["tags"] or "[]"),
+      "tags": tags,
       "index": row["chunk_index"],
       "text": row["text"],
-      "uploaded_at": row["uploaded_at"],
-    }
-    for row in rows
-  ]
+      "uploaded_at": uploaded_at_str,
+    })
+  return result
 
 
 # ---------------------------------------------------------------------------
-# FTS5 search
+# Search: Full-Text Search (Spanish) & Vector Similarity Search
 # ---------------------------------------------------------------------------
-
-
-def _sanitize_fts5_query(query: str) -> str:
-  """Sanitize user query for SQLite FTS5 MATCH syntax."""
-  terms = re.findall(r"[\w\u00C0-\u017F]+", query)
-  if not terms:
-    return ""
-  # Enclose each term in double quotes to prevent syntax errors with FTS5 operators
-  return " ".join(f'"{term}"' for term in terms)
 
 
 def search_chunks_fts(
@@ -397,10 +458,7 @@ def search_chunks_fts(
   top_k: int = 8,
   tags: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-  """FTS5 MATCH search with BM25 ranking and Spanish diacritics support.
-
-  Returns up to top_k chunks.
-  """
+  """Full-Text Search with ranking and Spanish diacritics support via PostgreSQL tsvector."""
   ensure_knowledge_dirs()
   if not query.strip():
     all_chunks = load_chunks()
@@ -413,54 +471,157 @@ def search_chunks_fts(
       ]
     return all_chunks[:top_k]
 
-  safe_query = _sanitize_fts5_query(query)
-  if not safe_query:
-    return []
-
-  try:
-    with _db() as conn:
-      if tags:
-        rows = conn.execute(
-          """SELECT chunk_id, document_id, filename, tags,
-                    chunk_index, text, uploaded_at,
-                    bm25(chunks) AS score
+  with _db() as conn:
+    cur = conn.cursor()
+    try:
+      cur.execute(
+        """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
+                  ts_rank_cd(tsv, websearch_to_tsquery('spanish', %(query)s)) AS score
+           FROM chunks
+           WHERE tsv @@ websearch_to_tsquery('spanish', %(query)s)
+           ORDER BY score DESC
+           LIMIT %(limit)s""",
+        {"query": query, "limit": top_k * 3 if tags else top_k},
+      )
+      rows = cur.fetchall()
+      if not rows:
+        cur.execute(
+          """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
+                    ts_rank_cd(tsv, plainto_tsquery('spanish', %(query)s)) AS score
              FROM chunks
-             WHERE chunks MATCH ?
-             ORDER BY score
-             LIMIT ?""",
-          (safe_query, top_k * 3),
-        ).fetchall()
-        tag_set = {t.lower() for t in tags}
-        filtered = [
-          row
-          for row in rows
-          if tag_set.intersection({t.lower() for t in json.loads(row["tags"] or "[]")})
-        ]
-        rows = filtered[:top_k]
-      else:
-        rows = conn.execute(
-          """SELECT chunk_id, document_id, filename, tags,
-                    chunk_index, text, uploaded_at,
-                    bm25(chunks) AS score
-             FROM chunks
-             WHERE chunks MATCH ?
-             ORDER BY score
-             LIMIT ?""",
-          (safe_query, top_k),
-        ).fetchall()
+             WHERE tsv @@ plainto_tsquery('spanish', %(query)s)
+             ORDER BY score DESC
+             LIMIT %(limit)s""",
+          {"query": query, "limit": top_k * 3 if tags else top_k},
+        )
+        rows = cur.fetchall()
+    except Exception as err:
+      logger.warning("PostgreSQL FTS error: %s", err)
+      return []
 
-    return [
-      {
+    if tags:
+      tag_set = {t.lower() for t in tags}
+      filtered = []
+      for row in rows:
+        rt = row["tags"]
+        row_tags = rt if isinstance(rt, list) else json.loads(rt or "[]")
+        if tag_set.intersection({str(t).lower() for t in row_tags}):
+          filtered.append(row)
+      rows = filtered[:top_k]
+
+    result = []
+    for row in rows:
+      raw_tags = row["tags"]
+      tags_list = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
+      up_at = row["uploaded_at"]
+      uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
+      result.append({
         "id": row["chunk_id"],
         "document_id": row["document_id"],
         "filename": row["filename"],
-        "tags": json.loads(row["tags"] or "[]"),
+        "tags": tags_list,
         "index": row["chunk_index"],
         "text": row["text"],
-        "uploaded_at": row["uploaded_at"],
-        "score": abs(float(row["score"])),
-      }
-      for row in rows
-    ]
-  except sqlite3.OperationalError:
+        "uploaded_at": uploaded_at_str,
+        "score": float(row["score"]),
+      })
+    return result
+
+
+def search_chunks_vector(
+  query_vector: list[float],
+  *,
+  top_k: int = 8,
+  tags: list[str] | None = None,
+) -> list[dict[str, Any]]:
+  """Vector similarity search (cosine distance) using PostgreSQL pgvector."""
+  if not is_postgres_configured() or not query_vector:
     return []
+
+  with _db() as conn:
+    cur = conn.cursor()
+    try:
+      cur.execute(
+        """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
+                  1 - (embedding <=> %(vector)s) AS score
+           FROM chunks
+           WHERE embedding IS NOT NULL
+           ORDER BY embedding <=> %(vector)s ASC
+           LIMIT %(limit)s""",
+        {"vector": query_vector, "limit": top_k * 3 if tags else top_k},
+      )
+      rows = cur.fetchall()
+    except Exception as exc:
+      logger.warning("Vector search query failed: %s", exc)
+      return []
+
+    if tags:
+      tag_set = {t.lower() for t in tags}
+      filtered = []
+      for row in rows:
+        rt = row["tags"]
+        row_tags = rt if isinstance(rt, list) else json.loads(rt or "[]")
+        if tag_set.intersection({str(t).lower() for t in row_tags}):
+          filtered.append(row)
+      rows = filtered[:top_k]
+
+    result = []
+    for row in rows:
+      raw_tags = row["tags"]
+      tags_list = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
+      up_at = row["uploaded_at"]
+      uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
+      result.append({
+        "id": row["chunk_id"],
+        "document_id": row["document_id"],
+        "filename": row["filename"],
+        "tags": tags_list,
+        "index": row["chunk_index"],
+        "text": row["text"],
+        "uploaded_at": uploaded_at_str,
+        "score": float(row["score"]),
+      })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics & Status
+# ---------------------------------------------------------------------------
+
+
+def get_db_status() -> dict[str, Any]:
+  """Return current PostgreSQL database engine and capabilities status."""
+  pg_configured = is_postgres_configured()
+  params = get_settings().get_knowledge_db_params()
+  status: dict[str, Any] = {
+    "engine": "postgresql",
+    "is_postgres": True,
+    "pgvector_enabled": bool(_PGVECTOR_AVAILABLE),
+    "spanish_fts_enabled": True,
+    "documents_dir": str(get_knowledge_documents_dir()),
+    "connected": False,
+    "host": params["host"] or "remote",
+    "database": params["database"] or "",
+    "doc_count": 0,
+    "chunk_count": 0,
+  }
+
+  if not pg_configured:
+    status["error"] = "PostgreSQL no está configurado en las variables de entorno."
+    return status
+
+  try:
+    with _db() as conn:
+      cur = conn.cursor()
+      cur.execute("SELECT COUNT(*) AS c FROM documents")
+      status["doc_count"] = cur.fetchone()["c"]
+      cur.execute("SELECT COUNT(*) AS c FROM chunks")
+      status["chunk_count"] = cur.fetchone()["c"]
+      status["host"] = params["host"] or (conn.info.host if hasattr(conn.info, "host") else "remote")
+      status["database"] = params["database"] or (conn.info.dbname if hasattr(conn.info, "dbname") else "")
+      status["connected"] = True
+  except Exception as e:
+    status["connected"] = False
+    status["error"] = str(e)
+
+  return status

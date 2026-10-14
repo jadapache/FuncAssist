@@ -179,7 +179,7 @@ export const KnowledgePage = () => {
       }
       await load()
       toast.success(
-        `"${uploaded.document.filename}" procesado e indexado con ${uploaded.document.chunk_count} fragmentos en SQLite FTS5.`,
+        `"${uploaded.document.filename}" procesado e indexado con ${uploaded.document.chunk_count} fragmentos en el motor RAG.`,
       )
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Falló la carga del documento'
@@ -270,14 +270,14 @@ export const KnowledgePage = () => {
       <PageHeader
         eyebrow="SISTEMA RAG & INDEXACIÓN"
         title="Biblioteca de Conocimiento"
-        subtitle="Indexa PRDs, especificaciones y actas de reunión. Almacenados en SQLite FTS5 con búsqueda BM25 nativa y soporte para diacríticos en español."
+        subtitle="Indexa PRDs, especificaciones y actas de reunión. Almacenados en PostgreSQL con búsqueda Full-Text en español y soporte vectorial."
         actions={
           <Link
             to="/settings?tab=knowledge"
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#002777] bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 rounded-xl transition shadow-2xs cursor-pointer group"
           >
             <Database className="h-4 w-4 text-[#002777] group-hover:scale-110 transition-transform" />
-            <span>Configurar Motor SQLite & Red</span>
+            <span>Configuración Base de Conocimiento</span>
           </Link>
         }
       />
