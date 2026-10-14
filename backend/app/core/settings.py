@@ -105,9 +105,12 @@ class Settings(BaseSettings):
   gitlab_client_secret: str = ""
   gitlab_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/gitlab/callback"
   gitlab_base_url: str = "https://gitlab.com"
+  cors_origins_str: str = ""
 
   @property
   def cors_origins(self) -> list[str]:
+    if self.cors_origins_str.strip() == "*":
+      return ["*"]
     origins = {
       self.pmqa_frontend_url.rstrip("/"),
       self.pmqa_backend_url.rstrip("/"),
@@ -116,6 +119,11 @@ class Settings(BaseSettings):
       "http://localhost:8000",
       "http://127.0.0.1:8000",
     }
+    if self.cors_origins_str:
+      for o in self.cors_origins_str.split(","):
+        cleaned = o.strip().rstrip("/")
+        if cleaned:
+          origins.add(cleaned)
     return [origin for origin in origins if origin]
 
 

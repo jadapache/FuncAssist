@@ -23,11 +23,13 @@ import {
   TestTube2,
   User,
   Wrench,
+  LogOut,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { toolsGroupLabel } from '../../constants/app'
 import { useUser, type UserRole } from '../../context/UserContext'
+import { useAuth } from '../../context/AuthContext'
 
 type NavItem = {
   to: string
@@ -289,6 +291,7 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
   }, [open])
 
   const { user } = useUser()
+  const { logout } = useAuth()
   const activeName = user?.display_name || displayName
   const roleLabel = roleLabels[user?.user_role || 'admin']
 
@@ -372,6 +375,21 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
             <Settings className="h-4 w-4 shrink-0 text-slate-500" />
             <span>Configuración</span>
           </NavLink>
+
+          <div className="border-t border-slate-100 my-1 pt-1" />
+
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              logout()
+            }}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
+          >
+            <LogOut className="h-4 w-4 shrink-0 text-red-500" />
+            <span>Cerrar Sesión</span>
+          </button>
         </div>
       </div>,
       document.body,

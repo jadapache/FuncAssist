@@ -1,3 +1,5 @@
+import { AUTH_TOKEN_KEY } from '../constants/app'
+import { authApi } from './modules/auth'
 import { knowledgeApi } from '../features/knowledge/api/knowledgeApi'
 import { aiSettingsApi } from '../features/settings/api/aiSettingsApi'
 import { featuresApi } from './modules/features'
@@ -19,6 +21,28 @@ export type * from '../features/transcription/api/transcriptionApi'
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
+export const getAuthHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY)
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export type AuthUser = {
+  id: string
+  username: string
+  email?: string
+  full_name?: string
+  role?: string
+  status?: string
+  created_at?: string
+}
+
+export type AuthResponse = {
+  token?: string
+  status?: string
+  message?: string
+  user: AuthUser
+}
+
 export const handleResponse = async <T,>(response: Response): Promise<T> => {
   if (!response.ok) {
     let detail = `Request failed (${response.status})`
@@ -27,6 +51,15 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
       detail = body.detail ?? detail
     } catch {
       // ignore
+    }
+    if (Array.isArray(detail)) {
+      detail = detail
+        .map((item: any) => {
+          if (typeof item === 'string') return item
+          const msg = item.msg ? item.msg.replace(/^Value error,\s*/i, '') : JSON.stringify(item)
+          return msg
+        })
+        .join('. ')
     }
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
   }
@@ -37,6 +70,7 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
 }
 
 export const api = {
+  ...authApi,
   ...userApi,
   ...knowledgeApi,
   ...aiSettingsApi,
