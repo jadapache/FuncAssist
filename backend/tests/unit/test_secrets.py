@@ -7,7 +7,7 @@ from app.core.secrets import (
     encrypt_ai_settings,
     decrypt_ai_settings,
 )
-from app.core.storage import save_app_settings, load_app_settings, _settings_path
+from app.core.storage import save_app_settings, load_app_settings, _CACHE_APP_SETTINGS
 
 
 def test_secret_encrypt_and_decrypt():
@@ -59,12 +59,10 @@ def test_storage_encryption_roundtrip():
     }
     save_app_settings(ai_payload)
 
-    # Inspect stored raw JSON file content on disk
-    path = _settings_path()
-    raw_json = json.loads(path.read_text(encoding="utf-8"))
-    stored_groq_key = raw_json["ai"]["groq_api_key"]
+    # Inspect stored raw state in storage/cache (no JSON file on disk)
+    stored_groq_key = _CACHE_APP_SETTINGS["ai"]["groq_api_key"]
     
-    # Assert key is encrypted in stored JSON file
+    # Assert key is encrypted in stored state
     assert stored_groq_key.startswith("enc::")
     assert "gsk_real_secret_key_999" not in stored_groq_key
 

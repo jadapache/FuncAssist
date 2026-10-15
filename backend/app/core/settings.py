@@ -6,6 +6,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -107,105 +108,51 @@ class Settings(BaseSettings):
   gitlab_base_url: str = "https://gitlab.com"
   cors_origins_str: str = ""
 
-  # PostgreSQL Knowledge Base & RAG connection (Separated variables)
-  knowledge_db_host: str = ""
-  knowledge_db_port: int = 5432
-  knowledge_db_user: str = ""
-  knowledge_db_password: str = ""
-  knowledge_db_database: str = ""
-
-  # Alternative / fallback variables
-  pghost: str = ""
-  pgport: int = 5432
-  pguser: str = ""
-  pgpassword: str = ""
-  pgdatabase: str = ""
-
-  # Optional connection URL override
-  knowledge_database_url: str | None = None
+  # Database Connection
   database_url: str | None = None
-  postgres_url: str | None = None
 
-  def get_knowledge_db_params(self) -> dict[str, Any]:
-    """Return dictionary of individual connection parameters."""
-    host = (
-      self.knowledge_db_host
-      or os.getenv("KNOWLEDGE_DB_HOST")
-      or self.pghost
-      or os.getenv("PGHOST")
-      or ""
-    ).strip()
-    port_str = (
-      str(self.knowledge_db_port)
-      if self.knowledge_db_port
-      else os.getenv("KNOWLEDGE_DB_PORT") or os.getenv("PGPORT") or "5432"
-    )
-    try:
-      port = int(port_str)
-    except ValueError:
-      port = 5432
-    user = (
-      self.knowledge_db_user
-      or os.getenv("KNOWLEDGE_DB_USER")
-      or self.pguser
-      or os.getenv("PGUSER")
-      or ""
-    ).strip()
-    password = (
-      self.knowledge_db_password
-      or os.getenv("KNOWLEDGE_DB_PASSWORD")
-      or self.pgpassword
-      or os.getenv("PGPASSWORD")
-      or ""
-    ).strip()
-    database = (
-      self.knowledge_db_database
-      or os.getenv("KNOWLEDGE_DB_DATABASE")
-      or os.getenv("KNOWLEDGE_DB_NAME")
-      or self.pgdatabase
-      or os.getenv("PGDATABASE")
-      or ""
-    ).strip()
-    return {
-      "host": host,
-      "port": port,
-      "user": user,
-      "password": password,
-      "database": database,
-    }
+  def get_database_url(self, for_sqlalchemy: bool = False) -> str | None:
+    """Return configured PostgreSQL connection URL.
+    
+    If for_sqlalchemy is True, ensures the URL dialect is postgresql+psycopg://.
+    """
+    url = self.database_url or os.getenv("DATABASE_URL")
+    if url and url.strip():
+      clean_url = url.strip()
+      if for_sqlalchemy:
+        if clean_url.startswith("postgresql://"):
+          clean_url = "postgresql+psycopg://" + clean_url[len("postgresql://"):]
+        elif clean_url.startswith("postgres://"):
+          clean_url = "postgresql+psycopg://" + clean_url[len("postgres://"):]
+      return clean_url
+    return None
 
   def get_knowledge_db_url(self) -> str | None:
-    """Return explicit database URL or construct from separated Host, User, Password, Database variables."""
-    # 1. URL override if explicitly set
-    url = (
-      self.knowledge_database_url
-      or os.getenv("KNOWLEDGE_DATABASE_URL")
-      or self.database_url
-      or os.getenv("DATABASE_URL")
-      or self.postgres_url
-      or os.getenv("POSTGRES_URL")
-    )
-    if url and url.strip():
-      return url.strip()
+    return self.get_database_url(for_sqlalchemy=False)
 
-    # 2. Construct from separated parameters
-    params = self.get_knowledge_db_params()
-    host = params["host"]
-    database = params["database"]
-    if host or database:
-      user = params["user"]
-      password = params["password"]
-      port = params["port"]
-      user_part = ""
-      if user:
-        from urllib.parse import quote_plus
-        if password:
-          user_part = f"{quote_plus(user)}:{quote_plus(password)}@"
-        else:
-          user_part = f"{quote_plus(user)}@"
-      db_part = database or "qa_mgmt_knowledge"
-      return f"postgresql://{user_part}{host or 'localhost'}:{port}/{db_part}"
-    return None
+  def get_database_params(self) -> dict[str, Any]:
+    """Parse connection parameters from database_url if needed."""
+    url = self.get_database_url(for_sqlalchemy=False)
+    if not url:
+      return {
+        "host": "",
+        "port": 5432,
+        "user": "",
+        "password": "",
+        "database": "",
+      }
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    return {
+      "host": parsed.hostname or "",
+      "port": parsed.port or 5432,
+      "user": parsed.username or "",
+      "password": parsed.password or "",
+      "database": (parsed.path or "").lstrip("/"),
+    }
+
+  def get_knowledge_db_params(self) -> dict[str, Any]:
+    return self.get_database_params()
 
   @property
   def cors_origins(self) -> list[str]:

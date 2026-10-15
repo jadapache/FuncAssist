@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from unittest.mock import patch
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -277,12 +278,16 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   assert summary_edit_res.status_code == 200
 
   # 6. Save to knowledge base
-  kb_res = client.post(
-    f"/api/transcription/save-to-knowledge/{transcription_id}",
-    json={"custom_tags": ["sprint_1", "kickoff"]},
-  )
-  assert kb_res.status_code == 200
-  assert kb_res.json()["ok"] is True
+  with patch(
+    "app.api.transcription.transcription_service.save_to_knowledge_base",
+    return_value={"ok": True, "transcription_id": transcription_id, "document_id": "doc-test-123"},
+  ):
+    kb_res = client.post(
+      f"/api/transcription/save-to-knowledge/{transcription_id}",
+      json={"custom_tags": ["sprint_1", "kickoff"]},
+    )
+    assert kb_res.status_code == 200
+    assert kb_res.json()["ok"] is True
 
   # 7. List all
   list_res = client.get("/api/transcription/list")

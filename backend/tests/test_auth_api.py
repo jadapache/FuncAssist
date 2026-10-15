@@ -9,13 +9,15 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def isolated_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    test_db_path = tmp_path / "test_app.db"
-    monkeypatch.setattr(db_module, "get_db_path", lambda: test_db_path)
-    # Also initialize
-    import asyncio
-    asyncio.run(db_module.init_db())
-    yield test_db_path
+def isolated_db():
+    from tests.fake_session import GLOBAL_FAKE_STORAGE, fake_async_db, fake_sync_db
+    GLOBAL_FAKE_STORAGE.clear()
+    db_module.set_session_override(fake_async_db)
+    db_module.set_sync_session_override(fake_sync_db)
+    yield
+    GLOBAL_FAKE_STORAGE.clear()
+    db_module.set_session_override(None)
+    db_module.set_sync_session_override(None)
 
 
 def test_auth_full_lifecycle():
