@@ -1,111 +1,132 @@
-"""Async SQLite Database Connection and Schema Initialization."""
+"""SQLAlchemy Async and Sync PostgreSQL Database Connection and ORM Initialization.
+"""
 
 from __future__ import annotations
 
-import os
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import AsyncGenerator
+import logging
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncGenerator, Callable, Generator, Optional
 
-import aiosqlite
-from app.core.settings import USER_DATA_DIR, ensure_local_dirs
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session, sessionmaker
 
-def get_db_path() -> Path:
-    ensure_local_dirs()
-    return USER_DATA_DIR / "app.db"
+from app.core.settings import get_settings
+from app.db.models import Base
+
+logger = logging.getLogger(__name__)
+
+# Global engine and sessionmaker singletons
+_async_engine: Optional[AsyncEngine] = None
+_async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+
+_sync_engine = None
+_sync_session_factory: Optional[sessionmaker[Session]] = None
+
+# Overrides for testing
+_async_session_override: Optional[Callable[[], AsyncGenerator[AsyncSession, None]]] = None
+_sync_session_override: Optional[Callable[[], Generator[Session, None]]] = None
+
+
+def set_session_override(override: Optional[Callable[[], AsyncGenerator[AsyncSession, None]]]) -> None:
+  """Set an override generator for get_db() during testing."""
+  global _async_session_override
+  _async_session_override = override
+
+
+def set_sync_session_override(override: Optional[Callable[[], Generator[Session, None]]]) -> None:
+  """Set an override generator for get_sync_db() during testing."""
+  global _sync_session_override
+  _sync_session_override = override
+
+
+def get_async_engine() -> AsyncEngine:
+  """Get or create singleton async SQLAlchemy engine."""
+  global _async_engine, _async_session_factory
+  if _async_engine is None:
+    url = get_settings().get_database_url(for_sqlalchemy=True)
+    if not url:
+      url = "postgresql+psycopg://postgres:postgres@localhost:5432/qa_mgmt"
+    _async_engine = create_async_engine(
+      url,
+      echo=False,
+      future=True,
+      pool_pre_ping=True,
+      connect_args={"connect_timeout": 3},
+    )
+    _async_session_factory = async_sessionmaker(
+      bind=_async_engine,
+      class_=AsyncSession,
+      expire_on_commit=False,
+      autoflush=False,
+    )
+  return _async_engine
+
+
+def get_sync_engine():
+  """Get or create singleton sync SQLAlchemy engine."""
+  global _sync_engine, _sync_session_factory
+  if _sync_engine is None:
+    url = get_settings().get_database_url(for_sqlalchemy=True)
+    if not url:
+      url = "postgresql+psycopg://postgres:postgres@localhost:5432/funcAssist"
+    _sync_engine = create_engine(
+      url,
+      echo=False,
+      future=True,
+      pool_pre_ping=True,
+      connect_args={"connect_timeout": 3},
+    )
+    _sync_session_factory = sessionmaker(
+      bind=_sync_engine,
+      expire_on_commit=False,
+      autoflush=False,
+    )
+  return _sync_engine
 
 
 @asynccontextmanager
-async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
-    db_path = get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA foreign_keys = ON;")
-        await db.execute("PRAGMA journal_mode = WAL;")
-        await db.execute("PRAGMA synchronous = NORMAL;")
-        yield db
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+  """Provide an asynchronous SQLAlchemy session with automatic commit / rollback."""
+  if _async_session_override is not None:
+    async with _async_session_override() as session:
+      yield session
+    return
+
+  get_async_engine()
+  assert _async_session_factory is not None
+  async with _async_session_factory() as session:
+    try:
+      yield session
+    except Exception:
+      await session.rollback()
+      raise
+
+
+@contextmanager
+def get_sync_db() -> Generator[Session, None]:
+  """Provide a synchronous SQLAlchemy session with automatic commit / rollback."""
+  if _sync_session_override is not None:
+    with _sync_session_override() as session:
+      yield session
+    return
+
+  get_sync_engine()
+  assert _sync_session_factory is not None
+  with _sync_session_factory() as session:
+    try:
+      yield session
+    except Exception:
+      session.rollback()
+      raise
 
 
 async def init_db() -> None:
-    """Initialize database tables and run lightweight migrations."""
-    ensure_local_dirs()
-    async with get_db() as db:
-        # Users table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT,
-                full_name TEXT,
-                role TEXT DEFAULT 'user',
-                password_hash TEXT,
-                password_salt TEXT,
-                status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Settings table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value_json TEXT NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Chat history table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                user_id TEXT,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                context_sources_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id);
-        """)
-
-        # Standups history table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS standups (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                sources_json TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # PRD reviews history table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS prd_reviews (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                prd_title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                score INTEGER DEFAULT 0,
-                risk_level TEXT DEFAULT 'MEDIUM',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Test plans history table
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS test_plans (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                feature_name TEXT NOT NULL,
-                test_type TEXT DEFAULT 'regression',
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        await db.commit()
+  """Initialize PostgreSQL schema and tables using SQLAlchemy ORM Metadata."""
+  try:
+    engine = get_async_engine()
+    async with engine.begin() as conn:
+      await conn.run_sync(Base.metadata.create_all)
+    logger.info("PostgreSQL database tables initialized successfully via SQLAlchemy ORM.")
+  except Exception as exc:
+    logger.warning("Could not automatically initialize PostgreSQL tables: %s", exc)

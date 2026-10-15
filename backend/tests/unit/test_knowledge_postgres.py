@@ -213,11 +213,7 @@ def mock_postgres_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
   monkeypatch.setattr("app.context.knowledge.KNOWLEDGE_DIR", kb_dir)
   monkeypatch.setattr("app.context.knowledge.DOCUMENTS_DIR", kb_dir / "documents")
 
-  monkeypatch.setenv("KNOWLEDGE_DB_HOST", "pg.internal.test")
-  monkeypatch.setenv("KNOWLEDGE_DB_PORT", "5432")
-  monkeypatch.setenv("KNOWLEDGE_DB_USER", "postgres")
-  monkeypatch.setenv("KNOWLEDGE_DB_PASSWORD", "secret")
-  monkeypatch.setenv("KNOWLEDGE_DB_DATABASE", "test_knowledge_db")
+  monkeypatch.setenv("DATABASE_URL", "postgresql://postgres:secret@pg.internal.test:5432/test_knowledge_db")
 
   shared_storage = {"documents": {}, "chunks": [], "db_meta": {}}
 
@@ -346,20 +342,14 @@ def test_db_status_diagnostics(mock_postgres_db):
 
 def test_separated_postgres_environment_variables(monkeypatch: pytest.MonkeyPatch):
   get_settings.cache_clear()
-  monkeypatch.delenv("KNOWLEDGE_DATABASE_URL", raising=False)
-  monkeypatch.delenv("DATABASE_URL", raising=False)
-  monkeypatch.setenv("KNOWLEDGE_DB_HOST", "db.cluster.internal")
-  monkeypatch.setenv("KNOWLEDGE_DB_PORT", "5433")
-  monkeypatch.setenv("KNOWLEDGE_DB_USER", "admin_user")
-  monkeypatch.setenv("KNOWLEDGE_DB_PASSWORD", "p@ssword!123")
-  monkeypatch.setenv("KNOWLEDGE_DB_DATABASE", "qa_vector_db")
+  monkeypatch.setenv("DATABASE_URL", "postgresql://admin_user:secret_pass123@db.cluster.internal:5433/qa_vector_db")
 
   settings = get_settings()
   params = settings.get_knowledge_db_params()
   assert params["host"] == "db.cluster.internal"
   assert params["port"] == 5433
   assert params["user"] == "admin_user"
-  assert params["password"] == "p@ssword!123"
+  assert params["password"] == "secret_pass123"
   assert params["database"] == "qa_vector_db"
 
   url = settings.get_knowledge_db_url()

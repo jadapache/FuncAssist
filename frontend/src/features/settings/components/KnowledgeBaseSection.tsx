@@ -140,7 +140,7 @@ export const KnowledgeBaseSection = () => {
               <span>Motor Activo</span>
             </div>
             <p className="text-sm font-bold text-slate-900 capitalize">
-              {isPostgres ? 'PostgreSQL' : 'SQLite Local (Fallback)'}
+              PostgreSQL
             </p>
             <p className="text-[11px] font-mono text-slate-500 truncate" title={dbInfo?.configured_path || 'Servidor'}>
               Host: {dbInfo?.configured_path || 'Servidor Administrado'}

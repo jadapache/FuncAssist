@@ -2,153 +2,156 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import (
-    get_chat_repository,
-    get_prd_repository,
-    get_standup_repository,
-    get_test_plan_repository,
-)
-from app.core.json_history import (
-    JsonChatRepository,
-    JsonPRDRepository,
-    JsonStandupRepository,
-    JsonTestPlanRepository,
+  get_chat_repository,
+  get_prd_repository,
+  get_standup_repository,
+  get_test_plan_repository,
 )
 from app.core.storage import load_app_settings, save_app_settings
+from app.db.database import get_db
+from app.db.models import UserModel
+from app.db.repositories import (
+  ChatRepository,
+  PRDRepository,
+  StandupRepository,
+  TestPlanRepository,
+)
 
 router = APIRouter(tags=["db-history"])
 
 
 class UserCreate(BaseModel):
-    username: str = Field(min_length=1)
-    email: str = ""
-    full_name: str = ""
-    role: str = "user"
+  username: str = Field(min_length=1)
+  email: str = ""
+  full_name: str = ""
+  role: str = "user"
 
 
 class ChatMessageCreate(BaseModel):
-    role: str = Field(pattern="^(user|assistant|system)$")
-    content: str = Field(min_length=1)
-    context_sources: Optional[List[dict[str, Any]]] = None
+  role: str = Field(pattern="^(user|assistant|system)$")
+  content: str = Field(min_length=1)
+  context_sources: Optional[List[dict[str, Any]]] = None
 
 
 class SettingSetRequest(BaseModel):
-    key: str = Field(min_length=1)
-    value: Any
+  key: str = Field(min_length=1)
+  value: Any
 
 
 # --- Users Endpoints ---
 @router.get("/users")
 async def get_users() -> dict[str, Any]:
-    from app.db.database import get_db
-    try:
-        async with get_db() as db:
-            async with db.execute("SELECT id, username, full_name, role, status FROM users WHERE status = 'approved'") as cursor:
-                rows = await cursor.fetchall()
-                if rows:
-                    return {
-                        "users": [
-                            {
-                                "id": r["id"],
-                                "username": r["username"],
-                                "display_name": r["full_name"] or r["username"],
-                                "role": r["role"],
-                            }
-                            for r in rows
-                        ]
-                    }
-    except Exception:
-        pass
-
-    settings = load_app_settings()
-    return {
-        "users": [
+  try:
+    async with get_db() as db:
+      stmt = select(UserModel).where(UserModel.status == "approved")
+      result = await db.execute(stmt)
+      users = result.scalars().all()
+      if users:
+        return {
+          "users": [
             {
-                "id": "local",
-                "username": settings.get("display_name", "Usuario"),
-                "display_name": settings.get("display_name", "Usuario"),
-                "role": settings.get("user_role", "admin"),
+              "id": u.id,
+              "username": u.username,
+              "display_name": u.full_name or u.username,
+              "role": u.role,
             }
-        ]
-    }
+            for u in users
+          ]
+        }
+  except Exception:
+    pass
+
+  settings = load_app_settings()
+  return {
+    "users": [
+      {
+        "id": "local",
+        "username": settings.get("display_name", "Usuario"),
+        "display_name": settings.get("display_name", "Usuario"),
+        "role": settings.get("user_role", "admin"),
+      }
+    ]
+  }
 
 
 # --- Settings Endpoints ---
 @router.get("/db/settings")
 async def get_db_settings() -> dict[str, Any]:
-    all_settings = load_app_settings()
-    return {"settings": all_settings}
+  all_settings = load_app_settings()
+  return {"settings": all_settings}
 
 
 @router.post("/db/settings")
 async def set_db_setting(body: SettingSetRequest) -> dict[str, Any]:
-    settings = load_app_settings()
-    settings[body.key] = body.value
-    save_app_settings(settings)
-    return {"ok": True, "key": body.key, "value": body.value}
+  settings = load_app_settings()
+  settings[body.key] = body.value
+  save_app_settings(settings)
+  return {"ok": True, "key": body.key, "value": body.value}
 
 
 # --- Chat History Endpoints ---
 @router.get("/chat/history/{session_id}")
 async def get_chat_messages(
-    session_id: str,
-    limit: int = 50,
-    repo: JsonChatRepository = Depends(get_chat_repository),
+  session_id: str,
+  limit: int = 50,
+  repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-    history = await repo.get_session_messages(session_id, limit=limit)
-    return {"session_id": session_id, "messages": history}
+  history = await repo.get_session_messages(session_id, limit=limit)
+  return {"session_id": session_id, "messages": history}
 
 
 @router.post("/chat/history/{session_id}")
 async def post_chat_message(
-    session_id: str,
-    body: ChatMessageCreate,
-    repo: JsonChatRepository = Depends(get_chat_repository),
+  session_id: str,
+  body: ChatMessageCreate,
+  repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-    message = await repo.save_message(
-        session_id=session_id,
-        role=body.role,
-        content=body.content,
-        context_sources=body.context_sources,
-    )
-    return {"message": message}
+  message = await repo.save_message(
+    session_id=session_id,
+    role=body.role,
+    content=body.content,
+    context_sources=body.context_sources,
+  )
+  return {"message": message}
 
 
 @router.delete("/chat/history/{session_id}")
 async def delete_chat_messages(
-    session_id: str,
-    repo: JsonChatRepository = Depends(get_chat_repository),
+  session_id: str,
+  repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-    await repo.clear_session(session_id)
-    return {"ok": True, "session_id": session_id}
+  await repo.clear_session(session_id)
+  return {"ok": True, "session_id": session_id}
 
 
 # --- Feature History Endpoints ---
 @router.get("/history/standups")
 async def get_standup_history(
-    limit: int = 20,
-    repo: JsonStandupRepository = Depends(get_standup_repository),
+  limit: int = 20,
+  repo: StandupRepository = Depends(get_standup_repository),
 ) -> dict[str, Any]:
-    items = await repo.get_all_standups(limit=limit)
-    return {"standups": items}
+  items = await repo.get_all_standups(limit=limit)
+  return {"standups": items}
 
 
 @router.get("/history/prd-reviews")
 async def get_prd_history(
-    limit: int = 20,
-    repo: JsonPRDRepository = Depends(get_prd_repository),
+  limit: int = 20,
+  repo: PRDRepository = Depends(get_prd_repository),
 ) -> dict[str, Any]:
-    items = await repo.get_all_prd_reviews(limit=limit)
-    return {"prd_reviews": items}
+  items = await repo.get_all_prd_reviews(limit=limit)
+  return {"prd_reviews": items}
 
 
 @router.get("/history/test-plans")
 async def get_test_plan_history(
-    limit: int = 20,
-    repo: JsonTestPlanRepository = Depends(get_test_plan_repository),
+  limit: int = 20,
+  repo: TestPlanRepository = Depends(get_test_plan_repository),
 ) -> dict[str, Any]:
-    items = await repo.get_all_test_plans(limit=limit)
-    return {"test_plans": items}
+  items = await repo.get_all_test_plans(limit=limit)
+  return {"test_plans": items}

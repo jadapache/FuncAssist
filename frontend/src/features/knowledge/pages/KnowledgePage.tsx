@@ -841,7 +841,7 @@ export const KnowledgePage = () => {
                   onChange={(e) => setSources((prev) => ({ ...prev, [key]: e.target.checked }))}
                   className="rounded text-[#002777] focus:ring-[#002777]"
                 />
-                <span>{key === 'knowledge' ? 'Biblioteca SQLite FTS5' : key.toUpperCase()}</span>
+                <span>{key === 'knowledge' ? 'Biblioteca PostgreSQL RAG' : key.toUpperCase()}</span>
               </label>
             ))}
           </div>
@@ -916,7 +916,7 @@ export const KnowledgePage = () => {
       <ConfirmationModal
         isOpen={Boolean(docToDelete)}
         title="Eliminar Documento de la Biblioteca"
-        message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" y todos sus fragmentos indexados de la base de conocimiento SQLite?`}
+        message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" y todos sus fragmentos indexados de la base de conocimiento PostgreSQL?`}
         confirmLabel="Eliminar Definitivamente"
         cancelLabel="Cancelar"
         variant="danger"

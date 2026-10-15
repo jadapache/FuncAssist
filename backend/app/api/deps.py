@@ -5,40 +5,40 @@ from __future__ import annotations
 from typing import Any
 from fastapi import Depends, Header, HTTPException, status
 
-from app.core.json_history import (
-    JsonChatRepository,
-    JsonPRDRepository,
-    JsonStandupRepository,
-    JsonTestPlanRepository,
-)
 from app.core.security import decode_access_token
 from app.db.interfaces import IUserRepository
-from app.db.repositories import UserRepository
+from app.db.repositories import (
+  ChatRepository,
+  PRDRepository,
+  StandupRepository,
+  TestPlanRepository,
+  UserRepository,
+)
 
 
 def get_user_repository() -> IUserRepository:
-    """Dependency provider for User Repository."""
-    return UserRepository()
+  """Dependency provider for User Repository."""
+  return UserRepository()
 
 
-def get_chat_repository() -> JsonChatRepository:
-    """Dependency provider for Chat Repository."""
-    return JsonChatRepository()
+def get_chat_repository() -> ChatRepository:
+  """Dependency provider for Chat Repository."""
+  return ChatRepository()
 
 
-def get_standup_repository() -> JsonStandupRepository:
-    """Dependency provider for Standup Repository."""
-    return JsonStandupRepository()
+def get_standup_repository() -> StandupRepository:
+  """Dependency provider for Standup Repository."""
+  return StandupRepository()
 
 
-def get_prd_repository() -> JsonPRDRepository:
-    """Dependency provider for PRD Repository."""
-    return JsonPRDRepository()
+def get_prd_repository() -> PRDRepository:
+  """Dependency provider for PRD Repository."""
+  return PRDRepository()
 
 
-def get_test_plan_repository() -> JsonTestPlanRepository:
-    """Dependency provider for Test Plan Repository."""
-    return JsonTestPlanRepository()
+def get_test_plan_repository() -> TestPlanRepository:
+  """Dependency provider for Test Plan Repository."""
+  return TestPlanRepository()
 
 
 async def get_current_user(
