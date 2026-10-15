@@ -99,13 +99,13 @@ FuncAssist/
 │   │   ├── api/            # Routers FastAPI (auth, features, knowledge, doc-agent, integrations)
 │   │   ├── context/        # RAG: ingesta, BM25, ensamblaje de contexto
 │   │   ├── core/           # Settings, security, secrets (Fernet), storage
-│   │   ├── db/             # Repository pattern, interfaces, SQLite
+│   │   ├── db/             # Repository pattern, interfaces, SQLAlchemy ORM, PostgreSQL
 │   │   ├── features/       # Servicios (standup, mejoras funcionales)
 │   │   ├── integrations/   # Adaptadores (Jira OAuth/PAT, GitHub PAT, GitLab PAT)
 │   │   ├── models/         # Pydantic models (AI catalog)
 │   │   ├── schemas/        # Schemas de validación (user, chat, prd, test_plan)
 │   │   └── main.py         # Entry point
-│   ├── requirements.txt    # Dependencias Python (openpyxl, litellm, etc)
+│   ├── requirements.txt    # Dependencias Python (SQLAlchemy, psycopg, openpyxl, litellm, etc)
 │   └── tests/              # Tests unitarios
 │
 ├── frontend/               # React 19 SPA (Vite + Tailwind)
@@ -122,10 +122,8 @@ FuncAssist/
 │   └── vite.config.ts
 │
 ├── local/                 # Almacenamiento en tiempo de ejecución
-│   ├── connections/       # Credenciales encriptadas (.enc)
 │   ├── ai/               # Prompts, rúbricas, logs, catálogo de modelos
-│   ├── knowledge/        # Documentos, chunks indexados
-│   └── database.db       # SQLite
+│   └── knowledge/        # Documentos temporales de subida
 │
 ├── Dockerfile            # Contenedor multietapa para producción
 ├── .env.example          # Template de variables de entorno
@@ -190,12 +188,12 @@ FuncAssist/
 
 ---
 
-## 🔐 Seguridad y Almacenamiento Local
+## 🔐 Seguridad y Almacenamiento Centralizado
 
-- **Sin base de datos remota**: Almacenamiento 100% local (SQLite, JSON, Fernet)
-- **Secretos Cifrados**: Tokens y PATs encriptados con Fernet usando keyring del sistema
+- **Base de Datos PostgreSQL**: Almacenamiento centralizado, relacional y transaccional mediante SQLAlchemy ORM (PostgreSQL)
+- **Secretos Cifrados**: Tokens y PATs encriptados con Fernet y persistidos de forma segura en PostgreSQL
 - **Jerarquía de Claves**: `keyring` → hardware fingerprint → `PMQA_SECRET_KEY`
-- **Desconexión Limpia**: Eliminación permanente de archivos `.enc` al desconectar servicios
+- **Desconexión Limpia**: Eliminación segura de credenciales en base de datos al desconectar servicios
 - **Validación Pydantic**: Schemas estrictos en todos los endpoints
 
 ---

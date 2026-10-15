@@ -143,7 +143,7 @@ async def set_knowledge_path(body: KnowledgeBasePathRequest) -> dict[str, Any]:
 
 @router.get("/admin/integrity")
 async def check_integrity() -> dict[str, Any]:
-  """Run SQLite + FTS5 integrity checks. Safe to call at any time."""
+  """Run PostgreSQL integrity checks. Safe to call at any time."""
   return verify_integrity()
 
 
