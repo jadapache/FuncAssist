@@ -187,9 +187,8 @@ export const KnowledgeBaseSection = () => {
             <p className="text-slate-600 leading-relaxed">
               La conexión a la base de datos se configura centralizadamente a través de{' '}
               <code className="px-1.5 py-0.5 rounded bg-blue-100 font-mono text-[#002777] font-semibold">
-                KNOWLEDGE_DATABASE_URL
-              </code>{' '}
-              (o <code className="px-1.5 py-0.5 rounded bg-blue-100 font-mono text-[#002777] font-semibold">DATABASE_URL</code>).
+                DATABASE_URL
+              </code>.
               Los archivos adjuntos físicos se custodian de forma segura en el volumen de datos del servidor:
             </p>
             <p className="font-mono text-slate-700 text-[11px] pt-1 break-all select-all font-semibold">

@@ -13,7 +13,7 @@ La Base de Conocimiento gestiona la ingestión, fragmentación (*chunking*), alm
 2. **Normalización y Full-Text Search en Español**: Indexación nativa con `to_tsvector('spanish', text)`, índice `GIN` y ranking con `ts_rank_cd` / `websearch_to_tsquery`. Coincidencias insensibles a tildes y variantes lematizadas (ej. buscar `reunion` encuentra `reunión`).
 3. **Soporte Semántico Vectorial (`pgvector`)**: Columna `embedding vector(1536)` (o adaptable), índice `HNSW` con métrica de distancia coseno (`vector_cosine_ops`) y operador `<=>`.
 4. **Búsqueda RAG Híbrida**: Capacidad de recuperar contexto por coincidencia textual directa, similitud semántica de alta dimensionalidad o combinación de ambas.
-5. **Administración por Variables de Entorno**: Conexión y credenciales configuradas a nivel de servidor mediante `KNOWLEDGE_DATABASE_URL` (o `DATABASE_URL`).
+5. **Administración por Variables de Entorno**: Conexión y credenciales configuradas a nivel de servidor mediante `DATABASE_URL`.
 6. **Migración Automática**: Detección y migración transparente de bases SQLite o respaldos JSON preexistentes hacia PostgreSQL en el arranque.
 7. **Herramientas de Diagnóstico en UI**: Panel de estado en tiempo real, verificación de integridad, reindexación y exportación de respaldos JSON.
 
@@ -67,18 +67,11 @@ CREATE TABLE IF NOT EXISTS db_meta (
 
 ## ⚙️ 3. Configuración y Variables de Entorno
 
-En el servidor (Render, Railway, Docker, Kubernetes o VM), defina en su archivo `.env` o en las variables de entorno de la plataforma las credenciales separadas:
+En el servidor (Render, Railway, Docker, Kubernetes o VM), defina en su archivo `.env` o en las variables de entorno de la plataforma la cadena de conexión centralizada:
 
 ```bash
-# Conexión PostgreSQL — Variables Separadas
-KNOWLEDGE_DB_HOST=servidor-db.host
-KNOWLEDGE_DB_PORT=5432
-KNOWLEDGE_DB_USER=usuario_pg
-KNOWLEDGE_DB_PASSWORD=contraseña_segura
-KNOWLEDGE_DB_DATABASE=qa_mgmt_knowledge
-
-# Opcional: Cadena de conexión completa única (si se prefiere sobre variables separadas)
-# KNOWLEDGE_DATABASE_URL=postgresql://usuario:contraseña@servidor-db.host:5432/qa_mgmt_knowledge
+# Conexión PostgreSQL centralizada para toda la aplicación
+DATABASE_URL=postgresql://usuario:contraseña@servidor-db.host:5432/qa_mgmt
 ```
 
 ### Ubicación de archivos físicos:
