@@ -123,11 +123,11 @@ async def get_knowledge_path() -> dict[str, Any]:
 
 @router.put("/path")
 async def set_knowledge_path(body: KnowledgeBasePathRequest) -> dict[str, Any]:
-  """In server mode, database connections are managed via KNOWLEDGE_DATABASE_URL environment variable."""
+  """In server mode, database connections are managed via DATABASE_URL environment variable."""
   status = get_db_status()
   return {
     "ok": True,
-    "message": "En el servidor la conexión de PostgreSQL se gestiona mediante la variable de entorno KNOWLEDGE_DATABASE_URL.",
+    "message": "En el servidor la conexión de PostgreSQL se gestiona mediante la variable de entorno DATABASE_URL.",
     "configured_path": status.get("host", ""),
     "resolved_path": str(get_knowledge_base_dir()),
     "is_custom": status.get("is_postgres", False),

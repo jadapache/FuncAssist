@@ -11,9 +11,7 @@ Public API:
   - ensure_knowledge_dirs() -> None
   - get_db_status() -> dict
 
-Connection parameters are managed via environment variables:
-  - KNOWLEDGE_DB_HOST, KNOWLEDGE_DB_PORT, KNOWLEDGE_DB_USER, KNOWLEDGE_DB_PASSWORD, KNOWLEDGE_DB_DATABASE
-  - (Optional override: KNOWLEDGE_DATABASE_URL or DATABASE_URL)
+Connection parameters are managed via the DATABASE_URL environment variable.
 """
 
 from __future__ import annotations
@@ -75,8 +73,7 @@ def _get_pg_connection():
   url = settings.get_knowledge_db_url()
   if not url:
     raise ConnectionError(
-      "PostgreSQL no está configurado. Defina KNOWLEDGE_DB_HOST, KNOWLEDGE_DB_DATABASE, "
-      "KNOWLEDGE_DB_USER y KNOWLEDGE_DB_PASSWORD (o KNOWLEDGE_DATABASE_URL)."
+      "PostgreSQL no está configurado. Defina la variable de entorno DATABASE_URL."
     )
 
   conn = psycopg.connect(url, row_factory=dict_row, autocommit=False)
