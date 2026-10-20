@@ -1,20 +1,19 @@
 import { RefreshCw, ShieldCheck, UserCheck, UserX } from 'lucide-react'
 import { Skeleton } from '../../../components/common/Skeleton'
-import { useUserApprovalsManager } from '../hooks/useUserApprovalsManager'
+import type { useUserApprovalsManager } from '../hooks/useUserApprovalsManager'
 
 export type UserApprovalsPanelProps = {
-  userApprovalsManager?: ReturnType<typeof useUserApprovalsManager>
+  userApprovalsManager: ReturnType<typeof useUserApprovalsManager>
 }
 
-export const UserApprovalsPanel = ({ userApprovalsManager: externalManager }: UserApprovalsPanelProps) => {
-  const internalManager = useUserApprovalsManager()
+export const UserApprovalsPanel = ({ userApprovalsManager }: UserApprovalsPanelProps) => {
   const {
     pendingRequests,
     loadingRequests,
     loadAccessRequests,
     handleApproveRequest,
     handleRejectRequest,
-  } = externalManager || internalManager
+  } = userApprovalsManager
 
   return (
     <div className="card space-y-6 border border-[var(--color-border)] p-6 md:p-8 bg-white rounded-2xl shadow-sm">

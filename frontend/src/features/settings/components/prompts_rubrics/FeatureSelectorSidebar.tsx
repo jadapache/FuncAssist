@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Search } from 'lucide-react'
 import type { AIPromptTemplate, AIRubric } from '../../../../api/client'
 import type { FeatureMeta } from './types'
@@ -21,6 +22,22 @@ export const FeatureSelectorSidebar = ({
   onSearchChange,
   onSelectFeature,
 }: FeatureSelectorSidebarProps) => {
+  const promptsMap = useMemo(() => {
+    const map = new Map<string, AIPromptTemplate>()
+    for (const p of promptsList) {
+      if (p.feature) map.set(p.feature, p)
+    }
+    return map
+  }, [promptsList])
+
+  const rubricsMap = useMemo(() => {
+    const map = new Map<string, AIRubric>()
+    for (const r of rubricsList) {
+      if (r.feature) map.set(r.feature, r)
+    }
+    return map
+  }, [rubricsList])
+
   return (
     <div className="card p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3">
       <div className="flex items-center justify-between">
@@ -48,8 +65,8 @@ export const FeatureSelectorSidebar = ({
       <div className="space-y-1.5 max-h-[600px] overflow-y-auto pr-1">
         {features.map((f) => {
           const isSelected = selectedFeature === f.id
-          const pItem = promptsList.find((p) => p.feature === f.id)
-          const rItem = rubricsList.find((r) => r.feature === f.id)
+          const pItem = promptsMap.get(f.id)
+          const rItem = rubricsMap.get(f.id)
 
           return (
             <button
