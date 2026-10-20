@@ -6,85 +6,12 @@ from typing import Any, List, Optional
 
 from sqlalchemy import desc, select
 
-from app.db.database import get_db, get_sync_db
+from app.db.database import get_db
 from app.db.models import AITemplateModel, AITemplateVersionModel
 
 
 class AITemplateRepository:
   """PostgreSQL ORM repository for AI prompts, rubrics, and version history."""
-
-  def get_template_sync(self, template_type: str, feature: str) -> Optional[dict[str, Any]]:
-    template_id = f"{template_type}:{feature}"
-    with get_sync_db() as db:
-      stmt = select(AITemplateModel).where(AITemplateModel.id == template_id)
-      result = db.execute(stmt)
-      tmpl = result.scalar_one_or_none()
-      return tmpl.to_dict() if tmpl else None
-
-  def list_templates_sync(self, template_type: str) -> List[dict[str, Any]]:
-    with get_sync_db() as db:
-      stmt = (
-        select(AITemplateModel)
-        .where(AITemplateModel.template_type == template_type)
-        .order_by(AITemplateModel.feature.asc())
-      )
-      result = db.execute(stmt)
-      items = result.scalars().all()
-      return [item.to_dict() for item in items]
-
-  def upsert_template_sync(
-    self,
-    template_type: str,
-    feature: str,
-    payload: dict[str, Any],
-    version: int = 1,
-    updated_by: Optional[str] = None,
-    change_summary: Optional[str] = None,
-    record_history: bool = True,
-  ) -> dict[str, Any]:
-    template_id = f"{template_type}:{feature}"
-    # Payload excludes metadata columns
-    cleaned_payload = {
-      k: v for k, v in payload.items()
-      if k not in ("id", "template_type", "feature", "version", "updated_by", "created_at", "updated_at")
-    }
-    payload_json = json.dumps(cleaned_payload, ensure_ascii=False)
-
-    with get_sync_db() as db:
-      stmt = select(AITemplateModel).where(AITemplateModel.id == template_id)
-      result = db.execute(stmt)
-      tmpl = result.scalar_one_or_none()
-
-      if tmpl is None:
-        tmpl = AITemplateModel(
-          id=template_id,
-          template_type=template_type,
-          feature=feature,
-          version=version,
-          payload_json=payload_json,
-          updated_by=updated_by,
-        )
-        db.add(tmpl)
-      else:
-        tmpl.version = version
-        tmpl.payload_json = payload_json
-        tmpl.updated_by = updated_by
-
-      if record_history:
-        version_entry = AITemplateVersionModel(
-          id=str(uuid.uuid4()),
-          template_id=template_id,
-          template_type=template_type,
-          feature=feature,
-          version=version,
-          payload_json=payload_json,
-          change_summary=change_summary,
-          created_by=updated_by,
-        )
-        db.add(version_entry)
-
-      db.commit()
-      return tmpl.to_dict()
 
   async def get_template(self, template_type: str, feature: str) -> Optional[dict[str, Any]]:
     template_id = f"{template_type}:{feature}"
