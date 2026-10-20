@@ -39,12 +39,18 @@ export const SettingsPage = () => {
     return 'ai_models'
   })
 
-  // Managers
-  const integrationsManager = useIntegrationsManager()
-  const userApprovalsManager = useUserApprovalsManager()
+  const integrationsManager = useIntegrationsManager({ enabled: activeTab === 'integrations' })
+  const userApprovalsManager = useUserApprovalsManager({ enabled: isAdmin && activeTab === 'approvals' })
+
+  const [aiModelsMounted, setAiModelsMounted] = useState(activeTab === 'ai_models')
+  const [templatesMounted, setTemplatesMounted] = useState(activeTab === 'templates')
+  const [knowledgeMounted, setKnowledgeMounted] = useState(activeTab === 'knowledge')
+  const [integrationsMounted, setIntegrationsMounted] = useState(activeTab === 'integrations')
+  const [approvalsMounted, setApprovalsMounted] = useState(activeTab === 'approvals')
 
   useEffect(() => {
     const tab = searchParams.get('tab')
+    let next: TabType | null = null
     if (
       tab === 'integrations' ||
       tab === 'ai_models' ||
@@ -52,9 +58,17 @@ export const SettingsPage = () => {
       tab === 'knowledge' ||
       tab === 'approvals'
     ) {
-      setActiveTab(tab as TabType)
+      next = tab as TabType
     } else if (searchParams.get('jira') || searchParams.get('github') || searchParams.get('gitlab')) {
-      setActiveTab('integrations')
+      next = 'integrations'
+    }
+    if (next) {
+      setActiveTab(next)
+      if (next === 'ai_models') setAiModelsMounted(true)
+      if (next === 'templates') setTemplatesMounted(true)
+      if (next === 'knowledge') setKnowledgeMounted(true)
+      if (next === 'integrations') setIntegrationsMounted(true)
+      if (next === 'approvals') setApprovalsMounted(true)
     }
   }, [searchParams])
 
@@ -123,6 +137,11 @@ export const SettingsPage = () => {
               onClick={() => {
                 setActiveTab(t.id)
                 setSearchParams({ tab: t.id }, { replace: true })
+                if (t.id === 'ai_models') setAiModelsMounted(true)
+                if (t.id === 'templates') setTemplatesMounted(true)
+                if (t.id === 'knowledge') setKnowledgeMounted(true)
+                if (t.id === 'integrations') setIntegrationsMounted(true)
+                if (t.id === 'approvals') setApprovalsMounted(true)
               }}
               className={[
                 'flex flex-1 min-w-[200px] items-center gap-3 rounded-xl px-4 py-3 text-left transition-all duration-200 cursor-pointer',
@@ -130,14 +149,14 @@ export const SettingsPage = () => {
                   ? 'bg-white text-[#002777] shadow-md ring-1 ring-black/5 font-bold'
                   : 'text-slate-600 hover:bg-white/60 hover:text-slate-900 font-medium',
               ].join(' ')
-            }
+              }
             >
               <div
                 className={[
                   'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
                   isActive ? 'bg-[#002777] text-white' : 'bg-slate-200/80 text-slate-600',
                 ].join(' ')
-              }
+                }
               >
                 <Icon className="h-5 w-5" />
               </div>
@@ -157,15 +176,29 @@ export const SettingsPage = () => {
         })}
       </nav>
 
-      {/* Tab Panels */}
-      {activeTab === 'ai_models' && <AiModelsPanel />}
-      {activeTab === 'templates' && <TemplatesPanel />}
-      {activeTab === 'knowledge' && <KnowledgeBaseSection />}
-      {activeTab === 'integrations' && canSeeIntegrations && (
-        <IntegrationsPanel integrationsManager={integrationsManager} />
+      {/* Tab Panels - lazy mount to avoid re-fetching on tab switch */}
+      <div className={activeTab === 'ai_models' ? 'block' : 'hidden'}>
+        {aiModelsMounted && <AiModelsPanel />}
+      </div>
+      <div className={activeTab === 'templates' ? 'block' : 'hidden'}>
+        {templatesMounted && <TemplatesPanel />}
+      </div>
+      <div className={activeTab === 'knowledge' ? 'block' : 'hidden'}>
+        {knowledgeMounted && <KnowledgeBaseSection />}
+      </div>
+      {canSeeIntegrations && (
+        <div className={activeTab === 'integrations' ? 'block' : 'hidden'}>
+          {integrationsMounted && (
+            <IntegrationsPanel integrationsManager={integrationsManager} />
+          )}
+        </div>
       )}
-      {activeTab === 'approvals' && isAdmin && (
-        <UserApprovalsPanel userApprovalsManager={userApprovalsManager} />
+      {isAdmin && (
+        <div className={activeTab === 'approvals' ? 'block' : 'hidden'}>
+          {approvalsMounted && (
+            <UserApprovalsPanel userApprovalsManager={userApprovalsManager} />
+          )}
+        </div>
       )}
     </div>
   )
