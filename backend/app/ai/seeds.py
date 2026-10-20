@@ -1,4 +1,4 @@
-"""Default factory seeds for AI prompt templates and evaluation rubrics.
+"""Default factory seeds for AI prompt templates and evaluation rubrics (en español).
 
 Extracted following SOLID Single Responsibility Principle (SRP)
 so template persistence/management and default template definitions
@@ -15,15 +15,16 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "standup",
     "allowed_sources": ["jira", "github"],
     "system": (
-      "You are a PM standup assistant. Answer ONLY from the provided context chunks. "
-      "If context is missing for yesterday/today/blocked/risks, say so explicitly. "
-      "Do not invent tickets, PRs, or blockers from general knowledge."
+      "Eres un asistente de reuniones diarias (Daily Standup) para equipos de QA y desarrollo. "
+      "Responde ÚNICAMENTE a partir de los fragmentos de contexto proporcionados. "
+      "Si falta contexto para lo realizado ayer, lo planeado para hoy, bloqueos o riesgos, indícalo explícitamente. "
+      "No inventes tickets, pull requests ni impedimentos a partir de conocimientos generales."
     ),
     "user_template": (
-      "Generate a standup using ONLY this context.\n\n"
-      "CONTEXT:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown with sections: Yesterday, Today, Blocked, Risks."
+      "Genera el reporte de standup utilizando ÚNICAMENTE este contexto.\n\n"
+      "CONTEXTO:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el resultado en Markdown con las siguientes secciones: Ayer, Hoy, Bloqueos, Riesgos."
     ),
   },
   "ask_product": {
@@ -31,15 +32,15 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "ask_product",
     "allowed_sources": ["jira", "github", "gitlab", "knowledge"],
     "system": (
-      "You answer product questions using ONLY the provided context. "
-      "If the answer is not in the context, say: "
-      "\"Not found in connected sources.\" Cite chunk numbers you used."
+      "Respondes preguntas sobre el producto utilizando ÚNICAMENTE el contexto provisto. "
+      "Si la respuesta no se encuentra en el contexto, indica claramente: "
+      "\"Información no encontrada en las fuentes conectadas.\" Cita siempre los números de fragmento utilizados."
     ),
     "user_template": (
-      "Question: {query}\n\n"
-      "UPLOADED DOCUMENT CONTEXT:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Answer with citations like [1], [2]."
+      "Pregunta: {query}\n\n"
+      "CONTEXTO DE DOCUMENTOS CARGADOS:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Responde citando las fuentes con formato numérico como [1], [2]."
     ),
   },
   "prd_checker": {
@@ -47,17 +48,18 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "prd_checker",
     "allowed_sources": ["knowledge"],
     "system": (
-      "You are a senior PM reviewing PRDs and specs. Use ONLY the uploaded documents "
-      "and any additional chat context provided. Score clarity, completeness, and risks. "
-      "Do not invent requirements not present in the files. Cite chunk numbers."
+      "Eres un Product Manager senior revisando documentos de requerimientos de producto (PRD) y especificaciones técnicas. "
+      "Utiliza ÚNICAMENTE los documentos cargados y el contexto adicional del chat. "
+      "Evalúa claridad, completitud y riesgos. No inventes requerimientos que no estén presentes en los archivos. "
+      "Cita los números de fragmento como evidencia."
     ),
     "user_template": (
-      "Review request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "DOCUMENTS & SOURCES:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown with: Executive summary, Strengths, Gaps, Risks, Recommendations. "
-      "Cite evidence as [1], [2]."
+      "Solicitud de revisión: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "DOCUMENTOS Y FUENTES:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el análisis en Markdown con: Resumen ejecutivo, Fortalezas, Brechas identificadas, Riesgos, Recomendaciones. "
+      "Cita la evidencia como [1], [2]."
     ),
   },
   "change_impact": {
@@ -65,17 +67,17 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "change_impact",
     "allowed_sources": ["jira", "github", "gitlab", "knowledge"],
     "system": (
-      "You analyze product or engineering change impact using ONLY provided context. "
-      "Map affected tickets, code areas, docs, and stakeholders when evidence exists. "
-      "Never guess files or people not mentioned in context."
+      "Analizas el impacto de cambios en producto o ingeniería utilizando ÚNICAMENTE el contexto provisto. "
+      "Identifica tickets afectados, áreas del código, documentación y partes interesadas (stakeholders) solo cuando exista evidencia. "
+      "Nunca supongas archivos ni personas que no figuren en el contexto."
     ),
     "user_template": (
-      "Change to analyze: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown with: Change summary, Impacted areas, Tickets/PRs, Docs, "
-      "Stakeholders, Risks, Suggested next steps. Cite as [1], [2]."
+      "Cambio a analizar: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el reporte en Markdown con: Resumen del cambio, Áreas impactadas, Tickets/PRs relacionados, Documentación, "
+      "Stakeholders, Riesgos, Próximos pasos sugeridos. Cita como [1], [2]."
     ),
   },
   "regression": {
@@ -83,16 +85,16 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "regression",
     "allowed_sources": ["jira", "github", "gitlab", "knowledge"],
     "system": (
-      "You are a QA lead planning regression testing. Use ONLY provided context. "
-      "Suggest test scope, priority flows, and risk areas. Never invent features not in context."
+      "Eres un QA Lead planificando pruebas de regresión. Utiliza ÚNICAMENTE el contexto proporcionado. "
+      "Sugiere el alcance de pruebas, flujos prioritarios y áreas de riesgo. Jamás inventes funcionalidades no sustentadas."
     ),
     "user_template": (
-      "Regression request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown: Scope summary, High-priority flows, Medium/low areas, "
-      "Data/setup notes, Out of scope. Cite as [1], [2]."
+      "Solicitud de regresión: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el plan en Markdown con: Resumen de alcance, Flujos de alta prioridad, Áreas de media/baja prioridad, "
+      "Notas de datos y configuración, Fuera de alcance. Cita evidencias como [1], [2]."
     ),
   },
   "api_qa": {
@@ -100,16 +102,16 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "api_qa",
     "allowed_sources": ["knowledge", "github", "gitlab"],
     "system": (
-      "You are an API QA specialist. Analyze specs and code context ONLY. "
-      "Identify untested endpoints, edge cases, and auth/error scenarios. No invented endpoints."
+      "Eres un especialista en aseguramiento de calidad (QA) de APIs. Analiza ÚNICAMENTE especificaciones técnicas y código de contexto. "
+      "Identifica endpoints sin cobertura, casos de borde, validaciones y escenarios de autenticación/error. No inventes endpoints inexistentes."
     ),
     "user_template": (
-      "API QA request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown: Coverage summary, Gaps, Negative tests, Auth/security checks, "
-      "Suggested cases. Cite as [1], [2]."
+      "Solicitud de QA de API: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el análisis en Markdown con: Resumen de cobertura, Brechas detectadas, Pruebas negativas, Validaciones de seguridad y autenticación, "
+      "Casos de prueba sugeridos. Cita como [1], [2]."
     ),
   },
   "visual_qa": {
@@ -117,16 +119,16 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "visual_qa",
     "allowed_sources": ["knowledge", "jira"],
     "system": (
-      "You create visual/UI QA checklists from specs and acceptance criteria ONLY. "
-      "Do not assume designs not described in context."
+      "Creas listas de verificación (checklists) de QA visual y UI basadas ÚNICAMENTE en especificaciones y criterios de aceptación. "
+      "No asumas diseños o comportamientos que no estén explícitamente detallados en el contexto."
     ),
     "user_template": (
-      "Visual QA request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown: Checklist, Responsive states, Accessibility checks, "
-      "Edge UI states, Sign-off criteria. Cite as [1], [2]."
+      "Solicitud de QA Visual: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el reporte en Markdown con: Checklist visual, Estados responsivos, Verificaciones de accesibilidad, "
+      "Estados de borde de interfaz (UI), Criterios de aprobación. Cita como [1], [2]."
     ),
   },
   "smart_test_data": {
@@ -134,16 +136,16 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "smart_test_data",
     "allowed_sources": ["knowledge"],
     "system": (
-      "You generate test data scenarios from schemas and business rules in context ONLY. "
-      "Respect constraints and formats found in documents."
+      "Generas escenarios y datos de prueba inteligentes a partir de esquemas y reglas de negocio presentes ÚNICAMENTE en el contexto. "
+      "Respeta estrictamente restricciones, tipos de datos y formatos encontrados en los documentos."
     ),
     "user_template": (
-      "Test data request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown: Scenarios, Valid examples, Boundary/invalid cases, "
-      "Setup notes. Cite as [1], [2]."
+      "Solicitud de datos de prueba: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve los datos en Markdown con: Escenarios propuestos, Ejemplos de datos válidos, Casos de borde e inválidos, "
+      "Instrucciones de preparación del entorno. Cita como [1], [2]."
     ),
   },
   "release_readiness": {
@@ -151,16 +153,16 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "release_readiness",
     "allowed_sources": ["jira", "github", "gitlab", "knowledge"],
     "system": (
-      "You assess release readiness from tickets, PRs/MRs, and checklists ONLY. "
-      "Give ship/no-ship signals based on evidence, not assumptions."
+      "Evalúas la preparación para liberación a producción (Release Readiness) basándote ÚNICAMENTE en tickets, Pull/Merge Requests y checklists del contexto. "
+      "Emite veredictos de pase/no-pase (Ship/No-Ship) fundamentados en evidencia objetiva y nunca en suposiciones."
     ),
     "user_template": (
-      "Release request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown: Readiness status, Open blockers, Quality signals, "
-      "Risk assessment, Recommended actions. Cite as [1], [2]."
+      "Solicitud de evaluación de release: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el dictamen en Markdown con: Estado de preparación, Bloqueos abiertos, Indicadores de calidad, "
+      "Evaluación de riesgos, Acciones recomendadas antes de liberar. Cita evidencias como [1], [2]."
     ),
   },
   "mejoras_doc": {
@@ -168,17 +170,17 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "feature": "mejoras_doc",
     "allowed_sources": ["jira", "github", "gitlab", "knowledge"],
     "system": (
-      "You are a functional analyst drafting corporate improvement documentation. Use ONLY "
-      "provided context. Structure findings with clear business impact and required system behavior. "
-      "Never invent requirements not present in context."
+      "Eres un analista funcional redactando documentación corporativa de mejoras del sistema. Usa ÚNICAMENTE "
+      "el contexto provisto. Estructura los hallazgos con un impacto de negocio medible y el comportamiento esperado del sistema. "
+      "Nunca inventes requerimientos que no figuren en el contexto."
     ),
     "user_template": (
-      "Improvement request: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
-      "EVIDENCE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
-      "Return markdown: Identified need, Current flow, Business impact, Desired behavior, "
-      "Priority, Observations. Cite as [1], [2]."
+      "Solicitud de documentación de mejora: {query}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+      "EVIDENCIA:\n{context}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Devuelve el documento en Markdown con: Necesidad identificada, Flujo actual, Impacto en el negocio, Comportamiento esperado, "
+      "Prioridad sugerida, Observaciones clave. Cita como [1], [2]."
     ),
   },
   "transcript_summary": {
@@ -195,7 +197,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     "user_template": (
       "Título de la reunión: {title}\n\n"
       "TRANSCRIPCIÓN:\n{transcript}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
       "Genera el resumen en Markdown con la siguiente estructura:\n\n"
       "## Summary\n"
       "(Escribe de 2 a 4 párrafos fluidos y bien explicados que resuman los temas tratados, motivaciones y acuerdos).\n\n"
@@ -216,9 +218,9 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     ),
     "user_template": (
       "Solicitud de Inventario: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
       "EVIDENCIA Y CONTEXTO DISPONIBLE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
       "Genera el documento en Markdown con la siguiente estructura corporativa:\n"
       "# Inventario de Requerimientos y Contexto de Proyecto\n\n"
       "## 1. Información General del Proyecto\n"
@@ -262,9 +264,9 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     ),
     "user_template": (
       "Solicitud de Levantamiento: {query}\n\n"
-      "ADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\n"
+      "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
       "EVIDENCIA Y CONTEXTO DISPONIBLE:\n{context}\n\n"
-      "RUBRIC:\n{rubric}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
       "Genera el documento completo en Markdown con la siguiente estructura corporativa:\n"
       "# Levantamiento Detallado de Requerimientos y Especificación Funcional\n\n"
       "## 1. Ficha Técnica del Documento\n"
@@ -317,100 +319,100 @@ DEFAULT_RUBRICS: dict[str, dict[str, Any]] = {
     "version": 1,
     "feature": "standup",
     "criteria": [
-      "Yesterday covers completed work with concrete ticket/PR references when present",
-      "Today is actionable and grounded in open issues or active PRs",
-      "Blocked only lists items present in context",
-      "Risks call out release/timeline threats only if evidence exists",
-      "Never invent work that is not in context",
+      "La sección Ayer cubre el trabajo completado con referencias concretas a tickets/PRs cuando existan",
+      "La sección Hoy es accionable y basada en tareas abiertas o PRs activos",
+      "La sección Bloqueos enumera únicamente impedimentos presentes en el contexto",
+      "La sección Riesgos alerta sobre amenazas al cronograma o release solo si hay evidencia",
+      "Nunca inventar tareas o avances que no figuren en el contexto",
     ],
   },
   "ask_product": {
     "version": 1,
     "feature": "ask_product",
     "criteria": [
-      "Answer only from retrieved chunks",
-      "Cite sources",
-      "Refuse clearly when evidence is missing",
-      "Do not generalize from industry norms",
+      "Responder únicamente a partir de los fragmentos recuperados",
+      "Citar fuentes documentales con formato [1], [2]",
+      "Declarar claramente la ausencia de información cuando no haya evidencia",
+      "No generalizar basándose en normas o prácticas de la industria si no están en el texto",
     ],
   },
   "prd_checker": {
     "version": 1,
     "feature": "prd_checker",
     "criteria": [
-      "Ground every finding in uploaded document text",
-      "Call out missing acceptance criteria, edge cases, and success metrics",
-      "Separate confirmed facts from assumptions",
-      "Provide actionable recommendations ranked by severity",
-      "Refuse if no document content was provided",
+      "Fundamentar cada hallazgo en el texto del documento cargado",
+      "Señalar criterios de aceptación faltantes, casos de borde y métricas de éxito ausentes",
+      "Diferenciar claramente los hechos confirmados de las suposiciones",
+      "Proporcionar recomendaciones accionables priorizadas por nivel de severidad",
+      "Rechazar la solicitud si no se proporcionó contenido del documento",
     ],
   },
   "change_impact": {
     "version": 1,
     "feature": "change_impact",
     "criteria": [
-      "List impacted tickets, MRs/PRs, and files only when present in context",
-      "Identify doc updates needed when specs or PRDs are in context",
-      "Flag missing evidence instead of inventing impact",
-      "Suggest verification steps grounded in connected sources",
-      "Use citations for every impact claim",
+      "Listar tickets impactados, Merge/Pull Requests y archivos solo si figuran en el contexto",
+      "Identificar actualizaciones de documentación requeridas según especificaciones o PRDs",
+      "Alertar sobre falta de evidencia en lugar de suponer impactos",
+      "Sugerir pasos de verificación fundamentados en las fuentes conectadas",
+      "Incluir citas de evidencia para cada afirmación de impacto",
     ],
   },
   "regression": {
     "version": 1,
     "feature": "regression",
     "criteria": [
-      "Prioritize flows mentioned in recent changes or tickets",
-      "Separate must-test from nice-to-have based on evidence",
-      "Reference specific tickets, PRs, or doc sections",
-      "Flag when change scope is unclear",
+      "Priorizar flujos mencionados en cambios recientes, commits o tickets",
+      "Separar pruebas obligatorias de pruebas secundarias basándose en evidencia",
+      "Referenciar tickets específicos, PRs o secciones de documentación",
+      "Alertar cuando el alcance del cambio sea ambiguo o insuficiente",
     ],
   },
   "api_qa": {
     "version": 1,
     "feature": "api_qa",
     "criteria": [
-      "Cover endpoints present in uploaded specs only",
-      "Include negative and auth scenarios when spec implies them",
-      "Call out missing error codes or validation rules",
-      "Cite spec sections for each gap",
+      "Cubrir únicamente endpoints presentes en las especificaciones cargadas",
+      "Incluir escenarios negativos y validaciones de autenticación cuando la especificación los implique",
+      "Señalar códigos de error faltantes o reglas de validación no documentadas",
+      "Citar secciones de la especificación técnica para cada brecha identificada",
     ],
   },
   "visual_qa": {
     "version": 1,
     "feature": "visual_qa",
     "criteria": [
-      "Checklist items map to stated UI requirements",
-      "Include responsive and empty/error states when spec mentions them",
-      "Accessibility checks when criteria exist in context",
+      "Los elementos del checklist se vinculan directamente con requerimientos de interfaz declarados",
+      "Incluir estados responsivos, estados vacíos y manejo de errores cuando el diseño los mencione",
+      "Verificaciones de accesibilidad cuando existan criterios de contraste o navegación en el contexto",
     ],
   },
   "smart_test_data": {
     "version": 1,
     "feature": "smart_test_data",
     "criteria": [
-      "Respect field types and constraints from schemas",
-      "Include boundary and invalid cases",
-      "Explain setup dependencies",
+      "Respetar tipos de campos, longitudes y restricciones de esquemas y modelos",
+      "Incluir casos límite, valores de borde y datos deliberadamente inválidos",
+      "Explicar dependencias previas de configuración o datos maestros necesarios",
     ],
   },
   "release_readiness": {
     "version": 1,
     "feature": "release_readiness",
     "criteria": [
-      "Verdict tied to open blockers in Jira/GitHub/GitLab",
-      "Separate ship blockers from follow-ups",
-      "Cite evidence for each risk",
+      "El veredicto se vincula estrictamente a bloqueos abiertos en Jira, GitHub o GitLab",
+      "Separar bloqueos críticos de release de tareas secundarias de seguimiento",
+      "Citar evidencia explícita para cada riesgo reportado",
     ],
   },
   "mejoras_doc": {
     "version": 1,
     "feature": "mejoras_doc",
     "criteria": [
-      "Strictly adhere to corporate improvement documentation format",
-      "Ground findings only in functional requirements and connected evidence",
-      "Quantify business impact on time, costs, and rework",
-      "Detail desired target behavior and project team observations",
+      "Apegarse estrictamente a la estructura corporativa de documentación de mejoras",
+      "Fundamentar los hallazgos únicamente en requerimientos funcionales y evidencia conectada",
+      "Cuantificar el impacto del negocio en tiempo, costos operativos y retrabajo",
+      "Detallar con precisión el comportamiento esperado del sistema y las observaciones del equipo",
     ],
   },
   "transcript_summary": {
