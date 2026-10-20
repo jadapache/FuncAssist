@@ -12,24 +12,24 @@ from app.db.models import AIModelCatalogModel, CorporateTemplateModel
 class CorporateTemplateRepository:
   """PostgreSQL ORM repository for corporate document templates."""
 
-  def get_sync(self, template_id: str) -> Optional[dict[str, Any]]:
-    with get_sync_db() as db:
+  async def get(self, template_id: str) -> Optional[dict[str, Any]]:
+    async with get_db() as db:
       stmt = select(CorporateTemplateModel).where(CorporateTemplateModel.id == template_id)
-      result = db.execute(stmt)
+      result = await db.execute(stmt)
       row = result.scalar_one_or_none()
       return row.to_dict() if row else None
 
-  def list_sync(self) -> List[dict[str, Any]]:
-    with get_sync_db() as db:
+  async def list(self) -> List[dict[str, Any]]:
+    async with get_db() as db:
       stmt = select(CorporateTemplateModel).order_by(CorporateTemplateModel.title.asc())
-      result = db.execute(stmt)
+      result = await db.execute(stmt)
       items = result.scalars().all()
       return [item.to_dict() for item in items]
 
-  def upsert_sync(self, item: dict[str, Any]) -> dict[str, Any]:
+  async def upsert(self, item: dict[str, Any]) -> dict[str, Any]:
     tid = item.get("id")
     if not tid:
-      raise ValueError("Corporate template must have an 'id'")
+      raise ValueError("La plantilla corporativa debe tener un 'id'")
 
     title = item.get("title") or "Plantilla Corporativa"
     filename = item.get("filename") or f"{tid}.docx"
@@ -40,9 +40,9 @@ class CorporateTemplateRepository:
     tags = item.get("tags") or []
     custom_content = item.get("custom_content")
 
-    with get_sync_db() as db:
+    async with get_db() as db:
       stmt = select(CorporateTemplateModel).where(CorporateTemplateModel.id == tid)
-      result = db.execute(stmt)
+      result = await db.execute(stmt)
       row = result.scalar_one_or_none()
 
       if row is None:
@@ -69,18 +69,18 @@ class CorporateTemplateRepository:
         if custom_content is not None:
           row.custom_content = custom_content
 
-      db.commit()
-      db.refresh(row)
+      await db.commit()
+      await db.refresh(row)
       return row.to_dict()
 
-  def delete_sync(self, template_id: str) -> bool:
-    with get_sync_db() as db:
+  async def delete(self, template_id: str) -> bool:
+    async with get_db() as db:
       stmt = select(CorporateTemplateModel).where(CorporateTemplateModel.id == template_id)
-      result = db.execute(stmt)
+      result = await db.execute(stmt)
       row = result.scalar_one_or_none()
       if row:
-        db.delete(row)
-        db.commit()
+        await db.delete(row)
+        await db.commit()
         return True
       return False
 
