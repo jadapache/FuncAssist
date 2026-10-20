@@ -45,8 +45,8 @@ async def _prepare_grounded_context(
     Retorna un _GroundedPrep listo para llamar al LLM,
     o un dict con refused=True si hay que rechazar sin llamar al LLM.
     """
-    prompt = get_prompt(feature)
-    rubric = get_rubric(feature)
+    prompt = await get_prompt(feature)
+    rubric = await get_rubric(feature)
     allowed = list(sources or prompt.get("allowed_sources") or [])
 
     if not allowed:
