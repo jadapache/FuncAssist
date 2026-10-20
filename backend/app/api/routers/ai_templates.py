@@ -1,11 +1,12 @@
 from typing import Any
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.ai.logging import list_logs
 from app.ai.templates import (
     get_prompt,
     get_rubric,
+    get_template_history,
     list_prompts,
     list_rubrics,
     reset_prompt,
@@ -23,11 +24,15 @@ class TemplateUpdate(BaseModel):
     system: str | None = None
     user_template: str | None = None
     allowed_sources: list[str] | None = None
+    change_summary: str | None = None
+    updated_by: str | None = None
 
 
 class RubricUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
     criteria: list[str]
+    change_summary: str | None = None
+    updated_by: str | None = None
 
 
 @router.get("/prompts")
@@ -45,11 +50,25 @@ async def prompt_detail(feature: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/prompts/{feature}/history")
+@handle_grounded_errors
+async def prompt_history(feature: str, limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
+    return {"history": get_template_history("prompt", feature, limit=limit)}
+
+
 @router.put("/prompts/{feature}")
 @handle_grounded_errors
 async def update_prompt(feature: str, body: TemplateUpdate = Body(...)) -> dict[str, Any]:
     try:
-        return save_prompt(feature, body.model_dump(exclude_none=True))
+        dump = body.model_dump(exclude_none=True)
+        change_summary = dump.pop("change_summary", None)
+        updated_by = dump.pop("updated_by", None)
+        return save_prompt(
+            feature,
+            dump,
+            updated_by=updated_by,
+            change_summary=change_summary,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -78,11 +97,25 @@ async def rubric_detail(feature: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/rubrics/{feature}/history")
+@handle_grounded_errors
+async def rubric_history(feature: str, limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
+    return {"history": get_template_history("rubric", feature, limit=limit)}
+
+
 @router.put("/rubrics/{feature}")
 @handle_grounded_errors
 async def update_rubric(feature: str, body: RubricUpdate = Body(...)) -> dict[str, Any]:
     try:
-        return save_rubric(feature, body.model_dump())
+        dump = body.model_dump(exclude_none=True)
+        change_summary = dump.pop("change_summary", None)
+        updated_by = dump.pop("updated_by", None)
+        return save_rubric(
+            feature,
+            dump,
+            updated_by=updated_by,
+            change_summary=change_summary,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
