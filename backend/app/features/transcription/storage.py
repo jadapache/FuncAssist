@@ -465,13 +465,17 @@ def update_media_entry_after_audio_extraction(media_id: str, audio_path: Path) -
             logger.warning(f"Could not delete original non-wav file {orig}: {exc}")
 
   record = get_transcription_record(media_id)
-  if record and "media" in record:
-    record["media"]["stored_filename"] = audio_path.name
-    record["media"]["is_video"] = False
-    if audio_path.exists():
-      size = audio_path.stat().st_size
-      record["media"]["size_bytes"] = size
-      record["media"]["file_size_formatted"] = _format_size_bytes(size)
+  if record:
+    record["stored_filename"] = audio_path.name
+    record["path"] = str(audio_path)
+    if "media" in record and isinstance(record["media"], dict):
+      record["media"]["stored_filename"] = audio_path.name
+      record["media"]["path"] = str(audio_path)
+      record["media"]["is_video"] = False
+      if audio_path.exists():
+        size = audio_path.stat().st_size
+        record["media"]["size_bytes"] = size
+        record["media"]["file_size_formatted"] = _format_size_bytes(size)
     save_transcription_record(record)
   return get_media_entry(media_id)
 
@@ -581,6 +585,13 @@ def save_transcription_record(record: dict[str, Any]) -> dict[str, Any]:
       except Exception as exc:
         logger.warning(f"Could not write summary.txt for {transcription_id}: {exc}")
 
+  # Persist into PostgreSQL
+  try:
+    from app.db.repositories.transcription_repository import TranscriptionRepository
+    TranscriptionRepository().upsert_sync(record)
+  except Exception as exc:
+    logger.debug(f"DB save_transcription_record error: {exc}")
+
   _sync_transcription_in_index(record)
   return record
 
@@ -607,6 +618,15 @@ def _enrich_record_metadata(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_transcription_record(transcription_id: str) -> Optional[dict[str, Any]]:
+  # Query PostgreSQL first
+  try:
+    from app.db.repositories.transcription_repository import TranscriptionRepository
+    db_record = TranscriptionRepository().get_sync(transcription_id)
+    if db_record:
+      return _enrich_record_metadata(db_record)
+  except Exception as exc:
+    logger.debug(f"DB get_transcription_record error: {exc}")
+
   ensure_transcription_dirs()
   json_path = get_transcription_json_path(transcription_id)
   if json_path.exists():
@@ -629,6 +649,14 @@ def get_transcription_record(transcription_id: str) -> Optional[dict[str, Any]]:
 
 
 def list_transcriptions() -> list[dict[str, Any]]:
+  try:
+    from app.db.repositories.transcription_repository import TranscriptionRepository
+    db_items = TranscriptionRepository().list_sync()
+    if db_items:
+      return [_enrich_record_metadata(item) for item in db_items]
+  except Exception as exc:
+    logger.debug(f"DB list_transcriptions fallback: {exc}")
+
   ensure_transcription_dirs()
   records: list[dict[str, Any]] = []
 
@@ -729,6 +757,15 @@ def delete_transcription_record(transcription_id: str) -> bool:
       pass
 
   _remove_transcription_from_index(transcription_id)
+
+  try:
+    from app.db.repositories.transcription_repository import TranscriptionRepository
+    db_deleted = TranscriptionRepository().delete_sync(transcription_id)
+    if db_deleted:
+      deleted = True
+  except Exception as exc:
+    logger.debug(f"DB delete_transcription_record error: {exc}")
+
   return deleted
 
 
