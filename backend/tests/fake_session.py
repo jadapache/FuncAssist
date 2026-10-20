@@ -208,6 +208,9 @@ class FakeSyncSession:
   def rollback(self) -> None:
     pass
 
+  def refresh(self, obj: Any) -> None:
+    pass
+
   def delete(self, obj: Any) -> None:
     t = type(obj)
     if t in self.storage.tables:
@@ -221,6 +224,10 @@ class FakeSyncSession:
   def scalar(self, stmt: Any) -> Any:
     res = self.execute(stmt)
     return res.scalar()
+
+  def scalar_one_or_none(self) -> Any:
+    res = self.execute(stmt)
+    return res.scalar_one_or_none()
 
 
 @asynccontextmanager

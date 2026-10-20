@@ -694,15 +694,13 @@ def test_active_jobs_and_transcriptions_index_location():
 @pytest.mark.asyncio
 async def test_index_refresher_tasks():
   from app.core.index_refresher import (
-    _refresh_templates_index,
     _refresh_builtin_model_catalog,
-    _refresh_transcription_index,
+    _refresh_frontier_models_catalog,
   )
 
   # Should run without throwing errors
-  await _refresh_templates_index()
   await _refresh_builtin_model_catalog()
-  await _refresh_transcription_index()
+  await _refresh_frontier_models_catalog(force=True)
 
 
 def test_non_wav_media_cleanup_after_conversion():

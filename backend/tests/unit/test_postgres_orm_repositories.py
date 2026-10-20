@@ -2,31 +2,39 @@
 
 import pytest
 
-from app.db.database import set_session_override
+from app.db.database import set_session_override, set_sync_session_override
 from app.db.models import (
+  AIModelCatalogModel,
   ChatMessageModel,
+  CorporateTemplateModel,
   PRDReviewModel,
   StandupModel,
   TestPlanModel,
+  TranscriptionModel,
   UserModel,
 )
 from app.db.repositories import (
+  AIModelCatalogRepository,
   ChatRepository,
+  CorporateTemplateRepository,
   PRDRepository,
   StandupRepository,
   TestPlanRepository,
+  TranscriptionRepository,
   UserRepository,
 )
-from tests.fake_session import GLOBAL_FAKE_STORAGE, fake_async_db
+from tests.fake_session import GLOBAL_FAKE_STORAGE, fake_async_db, fake_sync_db
 
 
 @pytest.fixture(autouse=True)
 def setup_fake_db():
   GLOBAL_FAKE_STORAGE.clear()
   set_session_override(fake_async_db)
+  set_sync_session_override(fake_sync_db)
   yield
   GLOBAL_FAKE_STORAGE.clear()
   set_session_override(None)
+  set_sync_session_override(None)
 
 
 @pytest.mark.asyncio
@@ -154,3 +162,112 @@ async def test_test_plan_repository_orm():
   plans = await repo.get_all_test_plans()
   assert len(plans) == 1
   assert plans[0]["feature_name"] == "Payment Gateway"
+
+
+def test_transcription_repository_crud():
+  repo = TranscriptionRepository()
+
+  record = {
+    "id": "tx-1001",
+    "title": "Daily Planning Sprint 24",
+    "description": "Team planning meeting",
+    "original_filename": "meeting.wav",
+    "stored_filename": "audio.wav",
+    "path": "c:/Dev/QA_MGMT/local/transcriptions/tx-1001/audio.wav",
+    "duration_seconds": 125.5,
+    "language": "es",
+    "status": "completed",
+    "model_info": "Whisper Large",
+    "text": "Bienvenidos a la planeación del sprint.",
+    "segments": [{"start": 0.0, "end": 4.5, "text": "Bienvenidos a la planeación.", "speaker": "Speaker 1"}],
+    "summary": {"topics": ["Sprint 24", "QA Automation"], "decisions": ["Deploy to staging on Thursday"]},
+  }
+
+  # 1. Upsert
+  saved = repo.upsert_sync(record)
+  assert saved["id"] == "tx-1001"
+  assert saved["title"] == "Daily Planning Sprint 24"
+  assert saved["duration_seconds"] == 125.5
+  assert len(saved["segments"]) == 1
+  assert saved["summary"]["topics"] == ["Sprint 24", "QA Automation"]
+
+  # 2. Get
+  fetched = repo.get_sync("tx-1001")
+  assert fetched is not None
+  assert fetched["text"] == "Bienvenidos a la planeación del sprint."
+
+  # 3. List
+  all_items = repo.list_sync()
+  assert len(all_items) == 1
+  assert all_items[0]["id"] == "tx-1001"
+
+  # 4. Delete
+  deleted = repo.delete_sync("tx-1001")
+  assert deleted is True
+  assert repo.get_sync("tx-1001") is None
+
+
+@pytest.mark.asyncio
+async def test_corporate_template_repository_crud():
+  repo = CorporateTemplateRepository()
+
+  tmpl = {
+    "id": "corp-tpl-1",
+    "title": "Acta de Reunión Corporativa",
+    "filename": "acta_reunion.docx",
+    "stored_filename": "corp-tpl-1.docx",
+    "file_type": "docx",
+    "file_size": 15420,
+    "module": "qa",
+    "tags": ["NECESIDAD", "ACUERDOS"],
+    "custom_content": "# Acta de Reunión",
+  }
+
+  saved = await repo.upsert(tmpl)
+  assert saved["id"] == "corp-tpl-1"
+  assert saved["title"] == "Acta de Reunión Corporativa"
+  assert saved["tags"] == ["NECESIDAD", "ACUERDOS"]
+
+  fetched = await repo.get("corp-tpl-1")
+  assert fetched is not None
+  assert fetched["custom_content"] == "# Acta de Reunión"
+
+  all_tmpls = await repo.list()
+  assert len(all_tmpls) == 1
+
+  assert await repo.delete("corp-tpl-1") is True
+  assert await repo.get("corp-tpl-1") is None
+
+
+def test_ai_model_catalog_repository():
+  repo = AIModelCatalogRepository()
+
+  models = [
+    {
+      "id": "llama-3.3-70b-versatile",
+      "provider": "groq",
+      "task_type": "chat_writing",
+      "name": "Llama 3.3 70B",
+      "is_free": True,
+      "context_length": 131072,
+    },
+    {
+      "id": "whisper-large-v3",
+      "provider": "groq",
+      "task_type": "transcription",
+      "name": "Whisper Large v3 (Groq)",
+      "is_free": True,
+      "context_length": 0,
+    },
+  ]
+
+  count = repo.bulk_upsert_sync(models)
+  assert count == 2
+
+  chat_models = repo.list_sync(task_type="chat_writing")
+  assert len(chat_models) == 1
+  assert chat_models[0]["id"] == "llama-3.3-70b-versatile"
+
+  single = repo.get_sync("whisper-large-v3")
+  assert single is not None
+  assert single["provider"] == "groq"
