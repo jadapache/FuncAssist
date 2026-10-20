@@ -40,6 +40,7 @@ interface TemplatesListSectionProps {
   onSetEditModule: (module: string) => void
   onSaveEdit: () => void
   formatFileSize: (bytes: number) => string
+  onReload?: () => void
 }
 
 export const TemplatesListSection: React.FC<TemplatesListSectionProps> = ({
@@ -66,6 +67,7 @@ export const TemplatesListSection: React.FC<TemplatesListSectionProps> = ({
   onSetEditModule,
   onSaveEdit,
   formatFileSize,
+  onReload,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedModuleFilter, setSelectedModuleFilter] = React.useState<string>('todos')
@@ -86,14 +88,29 @@ export const TemplatesListSection: React.FC<TemplatesListSectionProps> = ({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => onSetShowUploadModal(true)}
-          className="btn btn-primary text-xs py-2 px-4 flex items-center gap-2 shadow-xs cursor-pointer"
-        >
-          <Upload className="h-4 w-4" />
-          <span>Subir Nueva Plantilla</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {onReload && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={onReload}
+              className="btn btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5 bg-white border border-slate-200 shadow-2xs cursor-pointer"
+              title="Recargar desde la base de datos"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Recargar</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onSetShowUploadModal(true)}
+            className="btn btn-primary text-xs py-2 px-4 flex items-center gap-2 shadow-xs cursor-pointer"
+          >
+            <Upload className="h-4 w-4" />
+            <span>Subir Nueva Plantilla</span>
+          </button>
+        </div>
       </div>
 
       {/* Module Filters */}
@@ -114,11 +131,40 @@ export const TemplatesListSection: React.FC<TemplatesListSectionProps> = ({
         ))}
       </div>
 
-      {/* Templates Grid */}
-      {loading ? (
-        <div className="p-12 text-center text-slate-500 flex flex-col items-center justify-center gap-2 bg-white rounded-2xl border border-slate-200">
-          <RefreshCw className="h-6 w-6 animate-spin text-[#002777]" />
-          <span className="text-xs font-semibold">Cargando plantillas...</span>
+      {loading && filteredTemplates.length === 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-pulse">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div
+              key={i}
+              className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-4"
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-200" />
+                    <div className="space-y-1.5">
+                      <div className="h-4 w-32 bg-slate-200 rounded" />
+                      <div className="h-3 w-12 bg-slate-100 rounded" />
+                    </div>
+                  </div>
+                  <div className="h-4 w-16 bg-slate-100 rounded-full" />
+                </div>
+                <div className="h-3 w-48 bg-slate-100 rounded" />
+                <div className="flex gap-1.5 pt-1">
+                  <div className="h-4 w-14 bg-slate-100 rounded-md" />
+                  <div className="h-4 w-16 bg-slate-100 rounded-md" />
+                  <div className="h-4 w-12 bg-slate-100 rounded-md" />
+                </div>
+              </div>
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                <div className="h-7 w-24 bg-slate-200 rounded-lg" />
+                <div className="flex gap-1">
+                  <div className="h-7 w-7 bg-slate-100 rounded-lg" />
+                  <div className="h-7 w-7 bg-slate-100 rounded-lg" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : filteredTemplates.length === 0 ? (
         <div className="p-12 text-center bg-white rounded-2xl border border-dashed border-slate-300 text-slate-500 space-y-2">

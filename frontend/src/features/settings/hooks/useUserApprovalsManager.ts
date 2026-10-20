@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type AuthUser } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
 
-export function useUserApprovalsManager() {
+export function useUserApprovalsManager(options?: { enabled?: boolean }) {
   const { toast } = useToast()
   const [pendingRequests, setPendingRequests] = useState<AuthUser[]>([])
   const [loadingRequests, setLoadingRequests] = useState(false)
+
+  const isEnabled = options?.enabled ?? true
 
   const loadAccessRequests = useCallback(async () => {
     setLoadingRequests(true)
@@ -20,8 +22,9 @@ export function useUserApprovalsManager() {
   }, [])
 
   useEffect(() => {
+    if (!isEnabled) return
     void loadAccessRequests()
-  }, [loadAccessRequests])
+  }, [loadAccessRequests, isEnabled])
 
   const handleApproveRequest = async (userId: string, uname: string) => {
     try {
