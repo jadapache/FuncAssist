@@ -639,6 +639,14 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
         target_file.parent.mkdir(parents=True, exist_ok=True)
         target_file.write_text(json.dumps(validated_list, indent=2, ensure_ascii=False), encoding="utf-8")
 
+        # Persist to PostgreSQL database entity
+        try:
+            from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
+            _cat_repo = AIModelCatalogRepository()
+            _cat_repo.bulk_upsert_sync(validated_list)
+        except Exception as db_err:
+            logger.debug(f"Failed to persist frontier models catalog into DB: {db_err}")
+
         # Invalidate catalog memory cache in catalog module
         try:
             from app.ai import catalog as cat_mod
