@@ -142,9 +142,9 @@ async def summarize_transcript(
 
   formatted_transcript = format_transcript_for_llm(segments)
 
-  prompt_cfg = get_prompt("transcript_summary")
+  prompt_cfg = await get_prompt("transcript_summary")
   try:
-    rubric_cfg = get_rubric("transcript_summary")
+    rubric_cfg = await get_rubric("transcript_summary")
     rubric_text = rubric_to_text(rubric_cfg)
   except Exception:
     rubric_text = ""
