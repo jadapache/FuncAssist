@@ -87,6 +87,10 @@ def _resolve_provider(provider_id: str, model_id: str):
     p = get_provider("moonshine")
     if p and p.is_available():
       return p
+  if model_id.startswith("parakeet") or model_id.startswith("sense-voice") or "onnx" in model_id:
+    p = get_provider("onnx")
+    if p and p.is_available():
+      return p
 
   # Default: openai-whisper
   p = get_provider("whisper-python")
@@ -197,12 +201,8 @@ class TranscriptionService:
       available.append("openai")
 
     active_label = "Whisper Auto"
-    if provider in ("local", "builtin") or (provider == "auto" and local_avail and not groq_key and not openai_key):
-      try:
-        resolved_prov = _resolve_provider(provider, model)
-        active_label = f"{resolved_prov.display_name} ({model or 'base'})"
-      except Exception:
-        active_label = f"Whisper Local ({model or 'base'})"
+    if provider in ("local", "builtin", "onnx") or (provider == "auto" and not groq_key and not openai_key):
+      active_label = f"ONNX Runtime Web ({model or 'whisper-tiny'})"
     elif provider == "groq" or (groq_key and provider in ("groq", "auto", "cloud")):
       active_label = f"Groq Whisper ({model or 'whisper-large-v3'})"
     elif provider == "openai" or (openai_key and provider in ("openai", "auto", "cloud")):
