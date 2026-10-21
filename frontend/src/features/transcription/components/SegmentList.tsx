@@ -27,10 +27,10 @@ export const SegmentList: React.FC<SegmentListProps> = ({
         <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
           <Loader2 className="h-8 w-8 animate-spin text-[#002777]" />
           <p className="text-xs font-bold text-slate-700">
-            Decodificando audio...
+            Procesando...
           </p>
           <p className="text-[11px] text-slate-400 max-w-xs">
-            Los segmentos y la identificación de interlocutores aparecerán aparecerán aquí a medida que se reconozcan.
+            Los segmentos y la identificación de interlocutores aparecerán aquí a medida que se reconozcan.
           </p>
         </div>
       )

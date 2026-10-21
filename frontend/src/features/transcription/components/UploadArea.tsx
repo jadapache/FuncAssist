@@ -7,9 +7,7 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
-  FolderOpen,
 } from 'lucide-react'
-import { transcriptionApi } from '../api/transcriptionApi'
 
 export type UploadTarget =
   | File
@@ -38,7 +36,6 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
-  const [isOpeningPicker, setIsOpeningPicker] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const cleanTitleFromFilename = (filename: string): string => {
@@ -49,31 +46,10 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
       .trim()
   }
 
-  const handleNativePick = async () => {
-    if (isOpeningPicker || isUploading || selectedTarget) return
-    setIsOpeningPicker(true)
+  const handlePickerClick = () => {
+    if (isUploading || selectedTarget) return
     setValidationError(null)
-    try {
-      const res = await transcriptionApi.pickLocalFile()
-      if (res.ok && res.selected && res.path) {
-        setSelectedTarget({
-          path: res.path,
-          name: res.filename || res.path.split(/[/\\]/).pop() || 'archivo',
-          size: res.size_bytes || 0,
-          isVideo: res.is_video,
-        })
-        if (!title.trim()) {
-          setTitle(cleanTitleFromFilename(res.filename || res.path))
-        }
-      } else if (!res.cancelled && res.error) {
-        setValidationError(res.error)
-      }
-    } catch {
-      // Fallback a selector tradicional si el endpoint local no responde
-      fileInputRef.current?.click()
-    } finally {
-      setIsOpeningPicker(false)
-    }
+    fileInputRef.current?.click()
   }
 
   const handleFile = async (file: File) => {
@@ -88,17 +64,8 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
       return
     }
 
-    const localPath = ((file as any).path || (file as any).filePath || '') as string
-    if (localPath && typeof localPath === 'string' && localPath.trim().length > 0) {
-      setSelectedTarget({
-        path: localPath.trim(),
-        name: file.name,
-        size: file.size,
-        isVideo: file.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi|wmv|m4v|flv|ts)$/i.test(file.name),
-      })
-    } else {
-      setSelectedTarget(file)
-    }
+    // Always keep File object for in-browser AudioContext & Transformers.js processing
+    setSelectedTarget(file)
 
     if (!title.trim()) {
       setTitle(cleanTitleFromFilename(file.name))
@@ -155,7 +122,6 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
       ? selectedTarget.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|avi|wmv|m4v|flv|ts)$/i.test(selectedTarget.name)
       : Boolean(selectedTarget.isVideo || /\.(mp4|webm|mkv|mov|avi|wmv|m4v|flv|ts)$/i.test(selectedTarget.name))
     : false
-  const isLocalDirect = selectedTarget ? !(selectedTarget instanceof File) && Boolean(selectedTarget.path) : false
 
   return (
     <div className="card p-6 bg-white border border-slate-200 shadow-sm rounded-2xl space-y-5">
@@ -166,7 +132,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
           onDrop={handleDrop}
-          onClick={handleNativePick}
+          onClick={handlePickerClick}
           className={`relative rounded-2xl border-2 border-dashed p-8 transition flex flex-col items-center justify-center text-center cursor-pointer ${dragActive
             ? 'border-blue-500 bg-blue-50/70 shadow-md ring-4 ring-blue-500/10'
             : selectedTarget
@@ -185,14 +151,17 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
           {!selectedTarget ? (
             <div className="space-y-3.5">
               <div className="flex h-14 w-14 mx-auto items-center justify-center rounded-2xl bg-blue-50 text-[#002777] shadow-inner ring-1 ring-blue-100 group-hover:scale-105 transition-transform">
-                {isOpeningPicker ? <FolderOpen className="h-7 w-7 animate-pulse" /> : <Upload className="h-7 w-7" />}
+                <Upload className="h-7 w-7" />
               </div>
               <div>
                 <p className="text-base font-bold text-slate-800">
-                  {isOpeningPicker ? 'Abriendo explorador de archivos...' : 'Haz clic para explorar o arrastra tu grabación aquí'}
+                  Haz clic para explorar o arrastra tu grabación aquí
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
                   Audio o video (MP3, WAV, M4A, MP4, WebM, FLAC, OGG, OPUS, AAC, MKV, WMV, AVI)
+                </p>
+                <p className="text-[11px] text-blue-700/80 mt-1.5 font-medium">
+                  Decodificación y transcripción 100% privada en el navegador
                 </p>
               </div>
             </div>
@@ -211,7 +180,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
                     <span>•</span>
                     <span className="text-emerald-700 font-semibold flex items-center gap-1">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      {isLocalDirect ? 'Archivo local vinculado (Directo)' : 'Archivo listo'}
+                      Listo para procesar en navegador
                     </span>
                   </p>
                 </div>
