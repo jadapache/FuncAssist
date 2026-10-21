@@ -80,3 +80,15 @@ class RenameSpeakerRequest(BaseModel):
 
 class SaveToKnowledgeRequest(BaseModel):
   custom_tags: List[str] = Field(default_factory=list)
+
+
+class SubmitClientTranscriptionRequest(BaseModel):
+  id: str
+  title: str = "Reunión"
+  description: Optional[str] = ""
+  language: str = "es"
+  duration_seconds: float = 0.0
+  text: str
+  segments: List[TranscriptionSegment] = Field(default_factory=list)
+  generate_summary_now: bool = True
+

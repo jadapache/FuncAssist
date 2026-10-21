@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import hashlib
 import logging
 import re
@@ -24,11 +25,13 @@ from app.features.transcription.storage import (
   list_transcriptions,
   register_local_media_path,
   rename_transcription_speakers,
+  save_transcription_record,
   update_transcription_summary,
 )
 from app.schemas.transcription import (
   RenameSpeakerRequest,
   SaveToKnowledgeRequest,
+  SubmitClientTranscriptionRequest,
   TranscribeRequest,
   TranscriptionProgress,
   TranscriptionResult,
@@ -145,6 +148,53 @@ async def start_transcription(
   }
 
 
+@router.post("/submit-client-transcription")
+async def submit_client_transcription(req: SubmitClientTranscriptionRequest) -> dict[str, Any]:
+  """
+  Receive client-side transcribed text and segments directly from the browser.
+  Persists record and generates AI summary without needing heavy media transfer.
+  """
+  now_iso = datetime.now(timezone.utc).isoformat()
+  record: dict[str, Any] = {
+    "id": req.id,
+    "media_id": req.id,
+    "metadata": {
+      "title": req.title,
+      "description": req.description or "",
+      "size_bytes": 0,
+      "file_size_formatted": "Procesado en navegador",
+      "engine": "Transformers.js (Client-side)",
+    },
+    "language": req.language or "es",
+    "duration_seconds": req.duration_seconds,
+    "created_at": now_iso,
+    "segments": [seg.model_dump() for seg in req.segments],
+    "text": req.text,
+    "summary": None,
+    "saved_to_knowledge": False,
+    "document_id": None,
+    "model_info": "Whisper Web (Client)",
+  }
+
+  save_transcription_record(record)
+
+  summary_res = None
+  if req.generate_summary_now and req.segments:
+    try:
+      summary_res = await summarize_transcript(record["segments"], title=req.title)
+      record["summary"] = summary_res.model_dump()
+      update_transcription_summary(req.id, record["summary"])
+    except Exception as exc:
+      logger.warning("Could not auto-generate summary for client transcription %s: %s", req.id, exc)
+
+  return {
+    "ok": True,
+    "transcription": record,
+    "summary": summary_res.model_dump() if summary_res else None,
+    "message": "Transcripción del cliente registrada exitosamente.",
+  }
+
+
 @router.post("/retranscribe/{transcription_id}")
 async def retranscribe(
   transcription_id: str,
@@ -215,7 +265,7 @@ async def get_transcription_status(transcription_id: str) -> TranscriptionProgre
         progress=100,
         message="Transcripción completa.",
         eta="0 s",
-        model_info=record.get("model_info", "Whisper"),
+        model_info=record.get("model_info", "Whisper Web (Client)"),
       )
     raise HTTPException(status_code=404, detail="Trabajo de transcripción no encontrado.")
   return prog

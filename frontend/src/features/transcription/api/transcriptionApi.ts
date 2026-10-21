@@ -268,4 +268,28 @@ export const transcriptionApi = {
     }
     return response.blob()
   },
+
+  async submitClientTranscription(payload: {
+    id: string
+    title: string
+    description?: string
+    text: string
+    segments: TranscriptionSegment[]
+    duration_seconds: number
+    language?: string
+    generate_summary_now?: boolean
+  }): Promise<{ ok: boolean; transcription: TranscriptionResult; summary?: TranscriptionSummary }> {
+    const response = await fetch(`${API_BASE}/api/transcription/submit-client-transcription`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...payload,
+        generate_summary_now: payload.generate_summary_now ?? true,
+      }),
+    })
+    return handleResponse(response)
+  },
 }
+

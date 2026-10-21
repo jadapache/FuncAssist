@@ -12,10 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.core.settings import (
-  ACTIVE_JOBS_DIR,
   APP_TRANSCRIPTIONS_DIR,
-  TRANSCRIPTIONS_INDEX_FILE,
-  USER_DATA_DIR,
   USER_TRANSCRIPTIONS_DIR,
   ensure_local_dirs,
 )
@@ -23,7 +20,6 @@ from app.core.settings import (
 logger = logging.getLogger(__name__)
 
 TRANSCRIPTIONS_DIR = USER_TRANSCRIPTIONS_DIR
-LEGACY_TRANSCRIPTIONS_DIR = USER_DATA_DIR / "transcriptions"
 
 SUPPORTED_AUDIO_EXTS = {
   ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma", ".aac", ".opus", ".oga", ".weba"
@@ -38,59 +34,10 @@ def ensure_transcription_dirs() -> None:
   ensure_local_dirs()
   TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
   APP_TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
-  ACTIVE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
-
-  # Auto-migrate any existing transcriptions from USER_DATA_DIR/transcriptions to Documents/QA MGMT/Transcripciones
-  if LEGACY_TRANSCRIPTIONS_DIR.exists() and LEGACY_TRANSCRIPTIONS_DIR != TRANSCRIPTIONS_DIR:
-    try:
-      for item in LEGACY_TRANSCRIPTIONS_DIR.iterdir():
-        if item.name in ("active_jobs", "transcriptions_index.json"):
-          continue
-        target = TRANSCRIPTIONS_DIR / item.name
-        if not target.exists():
-          if item.is_dir():
-            shutil.copytree(item, target)
-          elif item.is_file():
-            shutil.copy2(item, target)
-    except Exception as exc:
-      logger.warning(f"Could not migrate legacy transcriptions to documents: {exc}")
-
-
-def _load_transcriptions_index() -> list[dict[str, Any]]:
-  ensure_transcription_dirs()
-  if not TRANSCRIPTIONS_INDEX_FILE.exists():
-    return []
-  try:
-    content = TRANSCRIPTIONS_INDEX_FILE.read_text(encoding="utf-8").strip()
-    if not content:
-      return []
-    data = json.loads(content)
-    if isinstance(data, list):
-      return data
-    if isinstance(data, dict) and "items" in data:
-      return data["items"]
-    return []
-  except Exception as exc:
-    logger.warning(f"Error loading {TRANSCRIPTIONS_INDEX_FILE}: {exc}")
-    return []
-
-
-def _save_transcriptions_index(items: list[dict[str, Any]]) -> None:
-  ensure_transcription_dirs()
-  payload = {
-    "updated_at": datetime.now(timezone.utc).isoformat(),
-    "count": len(items),
-    "items": items,
-  }
-  TRANSCRIPTIONS_INDEX_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def get_transcription_dir(transcription_id: str) -> Path:
   return TRANSCRIPTIONS_DIR / transcription_id
-
-
-def get_transcription_json_path(transcription_id: str) -> Path:
-  return get_transcription_dir(transcription_id) / "transcription.json"
 
 
 def get_media_path_for_transcription(transcription_id: str) -> Optional[Path]:
@@ -109,7 +56,7 @@ def get_media_path_for_transcription(transcription_id: str) -> Optional[Path]:
       if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS:
         return item
 
-  # Check if there is a local file source reference in transcription.json
+  # Check if there is a local file source reference in transcription record
   record = get_transcription_record(transcription_id)
   if record:
     src = (
@@ -164,7 +111,7 @@ def allocate_transcription_folder(
 ) -> dict[str, Any]:
   """
   Create the GUID subfolder and write the original media file into it.
-  Saves the initial transcription.json immediately to preserve user-assigned title.
+  Saves the initial record in the database immediately to preserve user-assigned title.
   """
   ensure_transcription_dirs()
   valid, err = validate_file(original_filename, len(file_bytes))
@@ -480,120 +427,37 @@ def update_media_entry_after_audio_extraction(media_id: str, audio_path: Path) -
   return get_media_entry(media_id)
 
 
-def _sync_transcription_in_index(record: dict[str, Any]) -> None:
-  try:
-    tid = record.get("id")
-    if not tid:
-      return
-    items = _load_transcriptions_index()
-    meta = record.get("metadata", {})
-    entry = {
-      "id": tid,
-      "title": meta.get("title") or record.get("title") or "Reunión",
-      "created_at": record.get("created_at", ""),
-      "duration_seconds": record.get("duration_seconds", 0.0),
-      "language": record.get("language", "es"),
-      "model_info": record.get("model_info", "Whisper"),
-      "folder_path": str(get_transcription_dir(tid)),
-      "has_summary": bool(record.get("summary")),
-    }
-    filtered = [i for i in items if i.get("id") != tid]
-    filtered.insert(0, entry)
-    _save_transcriptions_index(filtered)
-  except Exception as exc:
-    logger.debug(f"Error syncing transcription index: {exc}")
-
-
-def _remove_transcription_from_index(transcription_id: str) -> None:
-  try:
-    items = _load_transcriptions_index()
-    filtered = [i for i in items if i.get("id") != transcription_id]
-    _save_transcriptions_index(filtered)
-  except Exception as exc:
-    logger.debug(f"Error removing transcription from index: {exc}")
+# In-memory tracking for active transcription jobs
+_ACTIVE_JOBS_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def save_active_job_progress(progress_dict: dict[str, Any]) -> None:
-  ensure_transcription_dirs()
   job_id = progress_dict.get("id")
+  if not job_id:
+    return
   status = progress_dict.get("status")
   if status in ("complete", "cancelled"):
-    delete_active_job_progress(job_id)
+    _ACTIVE_JOBS_CACHE.pop(job_id, None)
     return
-  if job_id:
-    path = ACTIVE_JOBS_DIR / f"{job_id}.json"
-    path.write_text(json.dumps(progress_dict, indent=2, ensure_ascii=False), encoding="utf-8")
+  _ACTIVE_JOBS_CACHE[job_id] = progress_dict
 
 
 def load_active_job_progress(job_id: str) -> Optional[dict[str, Any]]:
-  ensure_transcription_dirs()
-  path = ACTIVE_JOBS_DIR / f"{job_id}.json"
-  if path.exists():
-    try:
-      return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-      return None
-  return None
+  return _ACTIVE_JOBS_CACHE.get(job_id)
 
 
 def delete_active_job_progress(job_id: Optional[str]) -> None:
-  if not job_id:
-    return
-  ensure_transcription_dirs()
-  path = ACTIVE_JOBS_DIR / f"{job_id}.json"
-  if path.exists():
-    try:
-      path.unlink()
-    except Exception as exc:
-      logger.warning(f"Could not delete active job file {path}: {exc}")
+  if job_id:
+    _ACTIVE_JOBS_CACHE.pop(job_id, None)
 
 
 def save_transcription_record(record: dict[str, Any]) -> dict[str, Any]:
-  ensure_transcription_dirs()
   transcription_id = record.get("id") or str(uuid.uuid4())
   record["id"] = transcription_id
 
-  folder = get_transcription_dir(transcription_id)
-  folder.mkdir(parents=True, exist_ok=True)
-
-  json_path = get_transcription_json_path(transcription_id)
-  json_path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
-
-  # Write plain-text sidecar files when content is available
-  if record.get("text"):
-    try:
-      (folder / "transcript.txt").write_text(record["text"], encoding="utf-8")
-    except Exception as exc:
-      logger.warning(f"Could not write transcript.txt for {transcription_id}: {exc}")
-
-  summary = record.get("summary")
-  if summary and isinstance(summary, dict):
-    summary_lines = []
-    if summary.get("participants"):
-      summary_lines.append("## Participantes\n" + "\n".join(f"- {p}" for p in summary["participants"]))
-    if summary.get("topics"):
-      summary_lines.append("## Temas\n" + "\n".join(f"- {t}" for t in summary["topics"]))
-    if summary.get("decisions"):
-      summary_lines.append("## Decisiones\n" + "\n".join(f"- {d}" for d in summary["decisions"]))
-    if summary.get("requirements"):
-      summary_lines.append("## Requerimientos\n" + "\n".join(f"- {r}" for r in summary["requirements"]))
-    if summary.get("action_items"):
-      summary_lines.append("## Acciones\n" + "\n".join(f"- {a}" for a in summary["action_items"]))
-    if summary_lines:
-      try:
-        (folder / "summary.txt").write_text("\n\n".join(summary_lines), encoding="utf-8")
-      except Exception as exc:
-        logger.warning(f"Could not write summary.txt for {transcription_id}: {exc}")
-
-  # Persist into PostgreSQL
-  try:
-    from app.db.repositories.transcription_repository import TranscriptionRepository
-    TranscriptionRepository().upsert_sync(record)
-  except Exception as exc:
-    logger.debug(f"DB save_transcription_record error: {exc}")
-
-  _sync_transcription_in_index(record)
-  return record
+  from app.db.repositories.transcription_repository import TranscriptionRepository
+  db_saved = TranscriptionRepository().upsert_sync(record)
+  return _enrich_record_metadata(db_saved)
 
 
 def _enrich_record_metadata(record: dict[str, Any]) -> dict[str, Any]:
@@ -618,87 +482,17 @@ def _enrich_record_metadata(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_transcription_record(transcription_id: str) -> Optional[dict[str, Any]]:
-  # Query PostgreSQL first
-  try:
-    from app.db.repositories.transcription_repository import TranscriptionRepository
-    db_record = TranscriptionRepository().get_sync(transcription_id)
-    if db_record:
-      return _enrich_record_metadata(db_record)
-  except Exception as exc:
-    logger.debug(f"DB get_transcription_record error: {exc}")
-
-  ensure_transcription_dirs()
-  json_path = get_transcription_json_path(transcription_id)
-  if json_path.exists():
-    try:
-      data = json.loads(json_path.read_text(encoding="utf-8"))
-      return _enrich_record_metadata(data)
-    except (json.JSONDecodeError, OSError):
-      return None
-
-  # Fallback for flat layout (prior to migration)
-  legacy_flat = TRANSCRIPTIONS_DIR / f"{transcription_id}.json"
-  if legacy_flat.exists() and not legacy_flat.is_dir():
-    try:
-      data = json.loads(legacy_flat.read_text(encoding="utf-8"))
-      return _enrich_record_metadata(data)
-    except (json.JSONDecodeError, OSError):
-      return None
-
+  from app.db.repositories.transcription_repository import TranscriptionRepository
+  db_record = TranscriptionRepository().get_sync(transcription_id)
+  if db_record:
+    return _enrich_record_metadata(db_record)
   return None
 
 
 def list_transcriptions() -> list[dict[str, Any]]:
-  try:
-    from app.db.repositories.transcription_repository import TranscriptionRepository
-    db_items = TranscriptionRepository().list_sync()
-    if db_items:
-      return [_enrich_record_metadata(item) for item in db_items]
-  except Exception as exc:
-    logger.debug(f"DB list_transcriptions fallback: {exc}")
-
-  ensure_transcription_dirs()
-  records: list[dict[str, Any]] = []
-
-  for subfolder in TRANSCRIPTIONS_DIR.iterdir():
-    if not subfolder.is_dir() or subfolder.name == "active_jobs":
-      # Check legacy flat file if not active_jobs
-      if subfolder.is_file() and subfolder.suffix == ".json" and subfolder.name != "transcriptions_index.json":
-        try:
-          data = json.loads(subfolder.read_text(encoding="utf-8"))
-          records.append(_enrich_record_metadata(data))
-        except Exception:
-          pass
-      continue
-
-    json_path = subfolder / "transcription.json"
-    if json_path.exists():
-      try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
-        records.append(_enrich_record_metadata(data))
-      except Exception:
-        continue
-
-  records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-
-  # Sync transcriptions_index.json
-  index_entries = []
-  for r in records:
-    tid = r.get("id")
-    meta = r.get("metadata", {})
-    index_entries.append({
-      "id": tid,
-      "title": meta.get("title") or r.get("title") or "Reunión",
-      "created_at": r.get("created_at", ""),
-      "duration_seconds": r.get("duration_seconds", 0.0),
-      "language": r.get("language", "es"),
-      "model_info": r.get("model_info", "Whisper"),
-      "folder_path": str(get_transcription_dir(tid)) if tid else "",
-      "has_summary": bool(r.get("summary")),
-    })
-  _save_transcriptions_index(index_entries)
-
-  return records
+  from app.db.repositories.transcription_repository import TranscriptionRepository
+  db_items = TranscriptionRepository().list_sync()
+  return [_enrich_record_metadata(item) for item in db_items]
 
 
 def update_transcription_summary(transcription_id: str, summary_data: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -729,7 +523,6 @@ def rename_transcription_speakers(transcription_id: str, speaker_map: dict[str, 
       new_participants.append(speaker_map.get(p, p))
     summary["participants"] = new_participants
 
-  # Rebuild full text if desired
   lines = []
   for seg in segments:
     lines.append(f"{seg.get('speaker', 'Speaker')}: {seg.get('text', '')}")
@@ -742,31 +535,11 @@ def rename_transcription_speakers(transcription_id: str, speaker_map: dict[str, 
 def delete_transcription_record(transcription_id: str) -> bool:
   ensure_transcription_dirs()
   folder = get_transcription_dir(transcription_id)
-  deleted = False
-
   if folder.exists() and folder.is_dir():
     shutil.rmtree(folder, ignore_errors=True)
-    deleted = True
 
-  legacy_flat = TRANSCRIPTIONS_DIR / f"{transcription_id}.json"
-  if legacy_flat.exists() and legacy_flat.is_file():
-    try:
-      legacy_flat.unlink()
-      deleted = True
-    except OSError:
-      pass
-
-  _remove_transcription_from_index(transcription_id)
-
-  try:
-    from app.db.repositories.transcription_repository import TranscriptionRepository
-    db_deleted = TranscriptionRepository().delete_sync(transcription_id)
-    if db_deleted:
-      deleted = True
-  except Exception as exc:
-    logger.debug(f"DB delete_transcription_record error: {exc}")
-
-  return deleted
+  from app.db.repositories.transcription_repository import TranscriptionRepository
+  return TranscriptionRepository().delete_sync(transcription_id)
 
 
 def cleanup_old_files(ttl_hours: int = 24) -> int:
@@ -776,19 +549,14 @@ def cleanup_old_files(ttl_hours: int = 24) -> int:
   ttl_seconds = ttl_hours * 3600
 
   for subfolder in TRANSCRIPTIONS_DIR.iterdir():
-    if not subfolder.is_dir() or subfolder.name == "active_jobs":
+    if not subfolder.is_dir():
       continue
-    json_path = subfolder / "transcription.json"
-    if json_path.exists():
-      try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
-        created_str = data.get("created_at")
-        if created_str:
-          created_dt = datetime.fromisoformat(created_str).timestamp()
-          if (now - created_dt) > ttl_seconds:
-            shutil.rmtree(subfolder, ignore_errors=True)
-            removed_count += 1
-      except Exception:
-        pass
+    try:
+      mtime = subfolder.stat().st_mtime
+      if (now - mtime) > ttl_seconds:
+        shutil.rmtree(subfolder, ignore_errors=True)
+        removed_count += 1
+    except Exception:
+      pass
 
   return removed_count
