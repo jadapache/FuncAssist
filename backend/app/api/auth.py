@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.deps import (
     get_current_admin_user,
@@ -29,6 +29,7 @@ def _sanitize_user(user: dict[str, Any]) -> dict[str, Any]:
 
 import re
 
+USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9]+$")
 PASSWORD_REGEX = re.compile(r"^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{10,}$")
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
@@ -39,6 +40,14 @@ class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=120)
     full_name: str = Field(min_length=1, max_length=80)
     role: str = "user"
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        v_stripped = v.strip()
+        if not USERNAME_REGEX.match(v_stripped):
+            raise ValueError("El nombre de usuario admite solo letras y números")
+        return v_stripped
 
 
 class LoginRequest(BaseModel):
@@ -66,6 +75,11 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El nombre de usuario debe tener entre 3 y 20 caracteres.",
+        )
+    if not USERNAME_REGEX.match(username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El nombre de usuario admite solo letras y números",
         )
     if not full_name:
         raise HTTPException(
