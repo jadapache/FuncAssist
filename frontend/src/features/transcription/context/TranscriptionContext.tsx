@@ -742,7 +742,7 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
         return
       }
 
-      // 2. Desktop Path (Zero-copy local path available via Tauri)
+      // 2. Local File Path (Zero-copy local path)
       if (!localPath || typeof localPath !== 'string' || localPath.trim().length === 0) {
         throw new Error('No se pudo resolver la ruta local del archivo multimedia.')
       }
