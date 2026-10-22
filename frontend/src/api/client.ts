@@ -54,10 +54,21 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
     }
     if (Array.isArray(detail)) {
       detail = detail
-        .map((item: any) => {
+        .map((item: unknown) => {
           if (typeof item === 'string') return item
-          const msg = item.msg ? item.msg.replace(/^Value error,\s*/i, '') : JSON.stringify(item)
-          return msg
+          if (typeof item === 'object' && item !== null) {
+            const errObj = item as { loc?: (string | number)[]; type?: string; msg?: string }
+            if (
+              errObj.loc?.includes('username') &&
+              (errObj.type === 'string_pattern_mismatch' || errObj.msg?.includes('pattern'))
+            ) {
+              return 'El nombre de usuario admite solo letras y números'
+            }
+            if (errObj.msg) {
+              return errObj.msg.replace(/^Value error,\s*/i, '')
+            }
+          }
+          return JSON.stringify(item)
         })
         .join('. ')
     }

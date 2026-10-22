@@ -25,7 +25,7 @@ def test_auth_full_lifecycle():
     resp1 = client.post(
         "/api/auth/register",
         json={
-            "username": "admin_user",
+            "username": "adminuser",
             "password": "AdminPassword123!",
             "email": "admin@example.com",
             "full_name": "Admin Principal",
@@ -36,7 +36,7 @@ def test_auth_full_lifecycle():
     assert data1["status"] == "approved"
     assert data1["token"] is not None
     assert data1["user"]["role"] == "admin"
-    assert data1["user"]["username"] == "admin_user"
+    assert data1["user"]["username"] == "adminuser"
     assert "password_hash" not in data1["user"]
 
     admin_token = data1["token"]
@@ -45,7 +45,7 @@ def test_auth_full_lifecycle():
     resp2 = client.post(
         "/api/auth/register",
         json={
-            "username": "tester_bob",
+            "username": "testerbob",
             "password": "TesterPassword123!",
             "email": "bob@example.com",
             "full_name": "Bob Tester",
@@ -61,7 +61,7 @@ def test_auth_full_lifecycle():
     # 3. Bob tries to login while pending -> 403 Forbidden
     login_fail = client.post(
         "/api/auth/login",
-        json={"username": "tester_bob", "password": "TesterPassword123!"},
+        json={"username": "testerbob", "password": "TesterPassword123!"},
     )
     assert login_fail.status_code == 403
     assert "pendiente" in login_fail.json()["detail"].lower()
@@ -74,7 +74,7 @@ def test_auth_full_lifecycle():
     assert reqs_resp.status_code == 200
     pending_list = reqs_resp.json()["requests"]
     assert len(pending_list) == 1
-    assert pending_list[0]["username"] == "tester_bob"
+    assert pending_list[0]["username"] == "testerbob"
 
     # 5. Admin approves Bob's request
     approve_resp = client.post(
@@ -87,7 +87,7 @@ def test_auth_full_lifecycle():
     # 6. Bob can now login successfully
     login_bob = client.post(
         "/api/auth/login",
-        json={"username": "tester_bob", "password": "TesterPassword123!"},
+        json={"username": "testerbob", "password": "TesterPassword123!"},
     )
     assert login_bob.status_code == 200
     bob_data = login_bob.json()
@@ -100,7 +100,7 @@ def test_auth_full_lifecycle():
         headers={"Authorization": f"Bearer {bob_token}"},
     )
     assert me_resp.status_code == 200
-    assert me_resp.json()["user"]["username"] == "tester_bob"
+    assert me_resp.json()["user"]["username"] == "testerbob"
 
     # 8. Bob cannot approve requests (not admin)
     forbidden_resp = client.get(
@@ -119,7 +119,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "usuario_demasiado_largo_que_supera_veinte",
+            "username": "usuariodemasiadolargoquesuperaveintecaracteres",
             "password": "ValidPassword123!",
             "email": "user@example.com",
             "full_name": "Nombre Valido",
@@ -131,7 +131,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "user_ok",
+            "username": "userok",
             "password": "ValidPassword123!",
             "email": "user@example.com",
             "full_name": "A" * 81,
@@ -143,7 +143,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "user_ok",
+            "username": "userok",
             "password": "ValidPassword123!",
             "email": "correo-invalido-sin-arroba",
             "full_name": "Nombre Valido",
@@ -155,7 +155,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "user_ok",
+            "username": "userok",
             "password": "Short1!",
             "email": "user@example.com",
             "full_name": "Nombre Valido",
@@ -167,7 +167,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "user_ok",
+            "username": "userok",
             "password": "lowercase123!",
             "email": "user@example.com",
             "full_name": "Nombre Valido",
@@ -179,7 +179,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "user_ok",
+            "username": "userok",
             "password": "NoDigitsPassword!",
             "email": "user@example.com",
             "full_name": "Nombre Valido",
@@ -191,7 +191,7 @@ def test_auth_validations():
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "user_ok",
+            "username": "userok",
             "password": "NoSpecialChar123",
             "email": "user@example.com",
             "full_name": "Nombre Valido",
@@ -199,11 +199,37 @@ def test_auth_validations():
     )
     assert resp.status_code in (400, 422)
 
-    # 8. Valid registration passes
+    # 8. Username with spaces should fail
     resp = client.post(
         "/api/auth/register",
         json={
-            "username": "valid_user_20",
+            "username": "Funcional Test",
+            "password": "ValidPassword123!",
+            "email": "user@example.com",
+            "full_name": "Nombre Valido",
+        },
+    )
+    assert resp.status_code in (400, 422)
+    assert "El nombre de usuario admite solo letras y números" in resp.text
+
+    # 9. Username with special characters should fail
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "user_test",
+            "password": "ValidPassword123!",
+            "email": "user@example.com",
+            "full_name": "Nombre Valido",
+        },
+    )
+    assert resp.status_code in (400, 422)
+    assert "El nombre de usuario admite solo letras y números" in resp.text
+
+    # 10. Valid registration passes
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "validuser20",
             "password": "StrongPassword123!",
             "email": "valid@example.com",
             "full_name": "Usuario Valido",
@@ -211,4 +237,3 @@ def test_auth_validations():
     )
     assert resp.status_code == 200
     assert resp.json()["status"] in ("approved", "pending")
-
