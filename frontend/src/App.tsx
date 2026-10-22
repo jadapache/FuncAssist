@@ -23,8 +23,7 @@ import { TranscripcionesPage } from './features/transcription'
 import { StandupPage, PmFeaturePage } from './features/pm'
 import { QaFeaturePage } from './features/qa'
 
-import { useAppUpdater } from './hooks/useAppUpdater'
-import { UpdateNotification } from './components/UpdateNotification'
+
 
 const GlobalFloatingJobs: React.FC = () => {
   const { jobs, cancelJob, removeJob } = useBackgroundJobs()
@@ -37,26 +36,10 @@ const GlobalFloatingJobs: React.FC = () => {
   )
 }
 
-const DesktopAppUpdater: React.FC = () => {
-  const { updateInfo, isUpdateAvailable, installUpdate, dismissUpdate, isInstalling } = useAppUpdater()
-
-  if (!isUpdateAvailable) return null
-
-  return (
-    <UpdateNotification
-      updateInfo={updateInfo}
-      onInstall={() => void installUpdate()}
-      onDismiss={dismissUpdate}
-      isInstalling={isInstalling}
-    />
-  )
-}
-
 export const App = () => {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <DesktopAppUpdater />
         <AuthProvider>
           <UserProvider>
             <BrowserRouter>
