@@ -77,15 +77,6 @@ export const WritingModelSection = ({
   pullingModelTag,
   pullStatusMsg,
   handlePullModel,
-  localBuiltinModels,
-  downloadingBuiltinId,
-  deletingBuiltinId,
-  fetchingBuiltinModels,
-  fetchLocalBuiltinModels,
-  handleDownloadBuiltinModel,
-  handleDeleteBuiltinModel,
-  downloadTasks,
-
   catalogModels,
   groqKey,
   setGroqKey,
@@ -102,28 +93,6 @@ export const WritingModelSection = ({
   handleAiSave,
   handleTestConnection,
 }: WritingModelSectionProps) => {
-  // Modelos built-in cargados dinámicamente desde local/ai/builtin_models_catalog.json
-  const builtinModelsList = (localBuiltinModels && localBuiltinModels.length > 0)
-    ? localBuiltinModels.map((lm) => ({
-      id: lm.id,
-      name: lm.name,
-      tag: lm.id,
-      description: lm.description || '',
-      size: lm.size || '~1.2 GiB',
-      tokens: lm.tokens || '32k tokens',
-    }))
-    : catalogModels
-      .filter((m) => m.provider === 'builtin' && m.task_type === 'chat_writing')
-      .map((cm) => ({
-        id: cm.id,
-        name: cm.name,
-        tag: cm.raw_id || cm.id,
-        description: cm.description,
-        size: cm.size || '~1.2 GiB',
-        tokens: cm.context_window || '32k tokens',
-      }))
-
-
   return (
     <form
       onSubmit={(e) => void handleAiSave(e)}
@@ -173,7 +142,7 @@ export const WritingModelSection = ({
                 const newProv = e.target.value
                 setProvider(newProv)
                 if (newProv === 'builtin') {
-                  setModel('qwen3.5:2b')
+                  setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
                 } else if (newProv === 'ollama') {
                   if (ollamaModels.length > 0) {
                     setModel(ollamaModels[0])
@@ -205,17 +174,8 @@ export const WritingModelSection = ({
           {/* CASO 1: IA INTEGRADA LOCAL */}
           {provider === 'builtin' && (
             <BuiltinModelsList
-              builtinModelsList={builtinModelsList}
               model={model}
               setModel={setModel}
-              localBuiltinModels={localBuiltinModels}
-              downloadingBuiltinId={downloadingBuiltinId}
-              deletingBuiltinId={deletingBuiltinId}
-              fetchingBuiltinModels={fetchingBuiltinModels}
-              fetchLocalBuiltinModels={fetchLocalBuiltinModels}
-              handleDownloadBuiltinModel={handleDownloadBuiltinModel}
-              handleDeleteBuiltinModel={handleDeleteBuiltinModel}
-              downloadTasks={downloadTasks}
             />
           )}
 
