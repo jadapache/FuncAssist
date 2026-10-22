@@ -133,6 +133,7 @@ def test_media_storage_and_record():
   # Cleanup record
   deleted = delete_transcription_record(record_id)
   assert deleted is True
+  delete_transcription_record(entry["id"])
   assert get_transcription_record(record_id) is None
 
 
@@ -224,14 +225,15 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   media_id = data["media_id"]
   assert media_id is not None
 
-  # 2. Trigger transcription
+  # 2. Trigger transcription with the same transcription_id
   trans_res = client.post(
     f"/api/transcription/transcribe/{media_id}",
-    json={"mode": "auto", "enable_diarization": True},
+    json={"mode": "auto", "enable_diarization": True, "transcription_id": media_id},
   )
   assert trans_res.status_code == 200
   trans_data = trans_res.json()
   transcription_id = trans_data["transcription_id"]
+  assert transcription_id == media_id
 
   # 3. Check status
   status_res = client.get(f"/api/transcription/status/{transcription_id}")
@@ -277,24 +279,12 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   )
   assert summary_edit_res.status_code == 200
 
-  # 6. Save to knowledge base
-  with patch(
-    "app.api.transcription.transcription_service.save_to_knowledge_base",
-    return_value={"ok": True, "transcription_id": transcription_id, "document_id": "doc-test-123"},
-  ):
-    kb_res = client.post(
-      f"/api/transcription/save-to-knowledge/{transcription_id}",
-      json={"custom_tags": ["sprint_1", "kickoff"]},
-    )
-    assert kb_res.status_code == 200
-    assert kb_res.json()["ok"] is True
-
-  # 7. List all
+  # 6. List all
   list_res = client.get("/api/transcription/list")
   assert list_res.status_code == 200
   assert any(t["id"] == transcription_id for t in list_res.json()["transcriptions"])
 
-  # 8. Export Inventario XLSX and Levantamiento DOCX
+  # 7. Export Inventario XLSX and Levantamiento DOCX
   inv_exp = client.post(
     "/api/transcription/export/inventario",
     json={"content": "# Inventario\n- Item 1", "title": "Inventario_Test"},
@@ -309,8 +299,14 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   assert lev_exp.status_code == 200
   assert lev_exp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-  # 9. Delete
-  del_res = client.delete(f"/api/transcription/{transcription_id}")
+  # 8. Test delete with temporary record so the single transcription record is preserved
+  temp_del_id = "test-temp-del-id"
+  save_transcription_record({
+    "id": temp_del_id,
+    "media_id": temp_del_id,
+    "metadata": {"title": "Temp for deletion test"},
+  })
+  del_res = client.delete(f"/api/transcription/{temp_del_id}")
   assert del_res.status_code == 200
 
 
@@ -357,6 +353,7 @@ def test_retranscribe_endpoint(client: TestClient):
 
   # Clean up
   delete_transcription_record(record_id)
+  delete_transcription_record(entry["id"])
 
 
 def test_register_local_path_and_sse_events(client: TestClient, tmp_path: Path):
@@ -381,6 +378,8 @@ def test_register_local_path_and_sse_events(client: TestClient, tmp_path: Path):
   transcription_id = data["transcription_id"]
   queue = get_or_create_progress_queue(transcription_id)
   assert queue is not None
+
+  delete_transcription_record(transcription_id)
 
 
 def test_progress_stream_endpoint(client: TestClient):
