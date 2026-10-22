@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserBase(BaseModel):
@@ -10,6 +11,13 @@ class UserBase(BaseModel):
     full_name: Optional[str] = Field(default="", max_length=80)
     role: str = "user"
     status: str = "pending"
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9]+$", v.strip()):
+            raise ValueError("El nombre de usuario admite solo letras y números")
+        return v.strip()
 
 
 class UserCreate(UserBase):

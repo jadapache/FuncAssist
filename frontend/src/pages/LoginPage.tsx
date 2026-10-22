@@ -18,6 +18,7 @@ import { useToast } from '../context/ToastContext'
 import {
   EMAIL_REGEX,
   PASSWORD_REGEX,
+  USERNAME_REGEX,
   roleOptions,
   type SelectableRole,
 } from '../constants/auth'
@@ -40,15 +41,19 @@ export const LoginPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
   const isPasswordRobust = PASSWORD_REGEX.test(password)
+  const isUsernameValid = USERNAME_REGEX.test(username.trim())
 
   // Enable/disable conditions based on completion of fields
   const isLoginFormComplete = Boolean(username.trim() && password)
   const isRegisterFormComplete = Boolean(
     username.trim() &&
+    isUsernameValid &&
     fullName.trim() &&
     email.trim() &&
+    EMAIL_REGEX.test(email.trim()) &&
     role &&
-    password
+    password &&
+    isPasswordRobust
   )
   const isSubmitDisabled =
     isLoading || (mode === 'login' ? !isLoginFormComplete : !isRegisterFormComplete)
@@ -90,6 +95,11 @@ export const LoginPage: React.FC = () => {
       // Register validation
       if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
         setErrorMsg('El nombre de usuario debe tener entre 3 y 20 caracteres.')
+        return
+      }
+
+      if (!USERNAME_REGEX.test(trimmedUsername)) {
+        setErrorMsg('El nombre de usuario admite solo letras y números.')
         return
       }
 
@@ -233,9 +243,14 @@ export const LoginPage: React.FC = () => {
               <label className="text-xs font-semibold text-slate-800">
                 Nombre de Usuario <span className="text-red-500">*</span>
               </label>
-              <span className="text-[10px] text-slate-400 font-mono">
-                {username.length}/20
-              </span>
+              <div className="flex items-center gap-2">
+                {mode === 'register' && username.length > 0 && !isUsernameValid && (
+                  <span className="text-[10px] text-amber-600 font-medium">Solo letras y números</span>
+                )}
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {username.length}/20
+                </span>
+              </div>
             </div>
             <div className="relative">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
@@ -246,6 +261,11 @@ export const LoginPage: React.FC = () => {
                 required
                 maxLength={20}
                 value={username}
+                onKeyDown={(e) => {
+                  if (mode === 'register' && e.key === ' ') {
+                    e.preventDefault()
+                  }
+                }}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="ej. pepitoperez"
                 className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-[#002777] focus:outline-none focus:ring-2 focus:ring-[#002777]/20 transition-all shadow-sm"
