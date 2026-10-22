@@ -9,6 +9,7 @@ import {
   type TranscriptionResult,
   type TranscriptionProgress,
 } from '../api/transcriptionApi'
+import { inferenceService } from '../../ai/services/InferenceService'
 import { useToast } from '../../../context/ToastContext'
 
 export function formatDuration(seconds: number): string {
@@ -217,18 +218,35 @@ export function useTranscriptionActions(
   const handleGenerateSummary = useCallback(async () => {
     try {
       setIsGeneratingSummary(true)
+      const settings = await inferenceService.getAiSettings()
+
+      if (settings?.provider === 'builtin' && displayResult?.text) {
+        const sumRes = await inferenceService.summarize({
+          text: displayResult.text,
+          instructions: 'Genera un resumen ejecutivo claro de la reunión con temas principales, acuerdos y próximos pasos.',
+        })
+        const updated = await transcriptionApi.updateTranscriptionSummary(transcriptionId, {
+          summary_text: sumRes.summary,
+        })
+        setTranscriptionResult(updated.transcription)
+        toast.success('Resumen generado con éxito con WebLLM.')
+        onRefreshData?.()
+        return
+      }
+
       const res = await transcriptionApi.generateSummary(transcriptionId)
       if (res.transcription) {
         setTranscriptionResult(res.transcription)
-        toast.success('¡Resumen generado con éxito!')
+        toast.success('Resumen generado con éxito.')
         onRefreshData?.()
       }
-    } catch (err: any) {
-      toast.error(`Error al generar resumen: ${err.message}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al generar resumen'
+      toast.error(`Error al generar resumen: ${msg}`)
     } finally {
       setIsGeneratingSummary(false)
     }
-  }, [transcriptionId, toast, onRefreshData])
+  }, [transcriptionId, displayResult, toast, onRefreshData])
 
   // Save to Knowledge Base
   const handleSaveToKB = useCallback(async () => {
@@ -239,8 +257,9 @@ export function useTranscriptionActions(
       if (transcriptionResult) {
         setTranscriptionResult({ ...transcriptionResult, saved_to_knowledge: true })
       }
-    } catch (err: any) {
-      toast.error(`Error al guardar en Base de Conocimiento: ${err.message}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar'
+      toast.error(`Error al guardar en Base de Conocimiento: ${msg}`)
     } finally {
       setIsSavingKB(false)
     }
@@ -253,8 +272,9 @@ export function useTranscriptionActions(
       setTranscriptionResult(res.transcription)
       setShowRenameModal(false)
       toast.success('Interlocutores actualizados.')
-    } catch (err: any) {
-      toast.error(`Error al renombrar: ${err.message}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al renombrar'
+      toast.error(`Error al renombrar: ${msg}`)
     }
   }, [transcriptionId, speakerMap, toast])
 
