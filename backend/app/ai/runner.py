@@ -285,3 +285,134 @@ async def run_grounded_request(request: GroundedFeatureRequest) -> dict[str, Any
     )
 
 
+@dataclass
+class AgenticChatConfig:
+    query: str
+    intent: str = "chat"
+    feature: str = "mejoras_doc"
+    sources: list[str] | None = None
+    document_ids: list[str] | None = None
+    chat_context: str | None = None
+    template_content: str | None = None
+    images: list[dict[str, str]] | None = None
+    attached_docs: list[dict[str, Any]] | None = None
+
+
+def _build_chat_system_prompt(intent: str) -> str:
+    if intent == "generic_plan":
+        return (
+            "Eres un arquitecto de software y líder de aseguramiento de calidad (QA Lead). "
+            "Elabora un plan técnico exhaustivo, riguroso y bien estructurado (alcance, estrategia de pruebas, "
+            "casos de prueba, riesgos, mitigación, cronograma y recursos) basado en la consulta, contexto, "
+            "documentos e imágenes adjuntas.\n"
+            "FORMATO DE SALIDA OBLIGATORIO:\n"
+            "Escribe primero un breve saludo y resumen de 2 a 3 oraciones para el chat.\n"
+            "Luego entrega el plan completo delimitado exactamente con:\n"
+            '<artifact title="Plan de [Título Descriptivo]" extension="docx">\n'
+            "[Contenido completo del plan en Markdown profesional con tablas y listas]\n"
+            "</artifact>"
+        )
+    if intent == "generic_report":
+        return (
+            "Eres un analista de aseguramiento de calidad y redactor técnico senior. "
+            "Elabora un informe técnico o ejecutivo formal, detallado y riguroso basado en la consulta, "
+            "contexto, documentos e imágenes adjuntas (análisis de defectos, diagnóstico de situación, "
+            "evidencias visuales, conclusiones y recomendaciones).\n"
+            "FORMATO DE SALIDA OBLIGATORIO:\n"
+            "Escribe primero un breve mensaje introductorio de 2 a 3 oraciones para el chat.\n"
+            "Luego entrega el informe completo delimitado exactamente con:\n"
+            '<artifact title="Informe de [Título Descriptivo]" extension="docx">\n'
+            "[Contenido completo del informe en Markdown profesional con tablas de hallazgos y evidencias]\n"
+            "</artifact>"
+        )
+    return (
+        "Eres un asistente experto en Aseguramiento de Calidad (QA), Gestión de Requerimientos y Arquitectura de Software. "
+        "Responde a la consulta del usuario de forma conversacional, clara, didáctica y técnicamente precisa utilizando formato Markdown enriquecido. "
+        "Utiliza el contexto de los documentos cargados, historial de chat y las imágenes adjuntas cuando estén presentes. "
+        "No uses etiquetas <artifact> a menos que se te solicite explícitamente generar un documento descargable."
+    )
+
+
+def _assemble_multimodal_message(text_prompt: str, images: list[dict[str, str]] | None) -> AIMessage:
+    if not images:
+        return AIMessage(role="user", content=text_prompt)
+
+    parts: list[dict[str, Any]] = [{"type": "text", "text": text_prompt}]
+    for img in images:
+        data_url = img.get("data") or img.get("dataUrl") or ""
+        if not data_url.startswith("data:"):
+            mime = img.get("mime_type") or img.get("type") or "image/png"
+            data_url = f"data:{mime};base64,{data_url}"
+        parts.append({"type": "image_url", "image_url": {"url": data_url}})
+
+    return AIMessage(role="user", content=parts)
+
+
+async def run_agentic_chat_stream(cfg: AgenticChatConfig):
+    """Streaming runner for dynamic multimodal chat, generic artifacts, or direct Q&A."""
+    allowed = list(cfg.sources or [])
+    bundle_text = ""
+    used_sources: list[str] = []
+
+    if allowed:
+        bundle = await assemble_context(query=cfg.query, sources=allowed)
+        if not bundle.is_empty:
+            bundle_text = bundle.to_prompt_block()
+            used_sources = bundle.used_sources
+
+    if cfg.document_ids:
+        upload_chunks = chunks_from_documents(cfg.document_ids)
+        if upload_chunks:
+            parts = [f"[{i+1}] (upload · {c.source_label}) {c.title}\n{c.text}" for i, c in enumerate(upload_chunks)]
+            upload_block = "\n\n".join(parts)
+            bundle_text = f"{bundle_text}\n\n{upload_block}".strip()
+            if "uploads" not in used_sources:
+                used_sources.append("uploads")
+
+    if cfg.attached_docs:
+        doc_parts = [
+            f"[Documento adjunto en chat: {d.get('filename', 'documento')}]\n{d.get('content', '')}"
+            for d in cfg.attached_docs
+            if d.get("content")
+        ]
+        if doc_parts:
+            attached_block = "\n\n".join(doc_parts)
+            bundle_text = f"{bundle_text}\n\n{attached_block}".strip()
+            if "chat_attachments" not in used_sources:
+                used_sources.append("chat_attachments")
+
+    sys_prompt = _build_chat_system_prompt(cfg.intent)
+
+    user_prompt_sections = []
+    if cfg.chat_context:
+        user_prompt_sections.append(f"HISTORIAL PREVIO DEL CHAT:\n{cfg.chat_context}")
+    if bundle_text:
+        user_prompt_sections.append(f"DOCUMENTOS Y CONTEXTO DISPONIBLE:\n{bundle_text}")
+    if cfg.template_content and cfg.intent == "template_mutation":
+        user_prompt_sections.append(f"PLANTILLA CORPORATIVA:\n{cfg.template_content}")
+    user_prompt_sections.append(f"SOLICITUD DEL USUARIO:\n{cfg.query}")
+
+    full_user_text = "\n\n".join(user_prompt_sections)
+    user_message = _assemble_multimodal_message(full_user_text, cfg.images)
+    messages = [AIMessage(role="system", content=sys_prompt), user_message]
+
+    provider = resolve_provider()
+    accumulated_text: list[str] = []
+
+    async for chunk in provider.complete_stream(messages, max_tokens=8192):
+        accumulated_text.append(chunk)
+        yield chunk
+
+    full_output = "".join(accumulated_text)
+    log_ai_call({
+        "feature": cfg.feature,
+        "refused": False,
+        "intent": cfg.intent,
+        "sources_used": used_sources,
+        "provider": getattr(provider, "id", getattr(provider, "name", "unknown")),
+        "model": getattr(provider, "default_model", "unknown"),
+        "output": full_output,
+        "streamed": True,
+    })
+
+
