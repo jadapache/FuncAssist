@@ -199,6 +199,8 @@ def ensure_knowledge_dirs() -> None:
 
 def extract_text(filename: str, raw: bytes) -> str:
   lower = filename.lower()
+  if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")):
+    return f"[Asset Imagen: {filename} ({len(raw)} bytes)]"
   if lower.endswith(".pdf"):
     return _extract_pdf(raw)
   if lower.endswith(".docx"):
@@ -230,7 +232,27 @@ def _extract_docx(raw: bytes) -> str:
     from docx import Document
 
     document = Document(BytesIO(raw))
-    return "\n".join(p.text for p in document.paragraphs if p.text)
+    sections: list[str] = []
+
+    for p in document.paragraphs:
+      cleaned = p.text.strip()
+      if cleaned:
+        sections.append(cleaned)
+
+    for table in document.tables:
+      table_rows: list[str] = []
+      for row in table.rows:
+        cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+        if any(cells):
+          table_rows.append("| " + " | ".join(cells) + " |")
+      if table_rows:
+        if len(table_rows) > 1 and "---" not in table_rows[1]:
+          header_cols = len(table.rows[0].cells)
+          separator = "| " + " | ".join(["---"] * header_cols) + " |"
+          table_rows.insert(1, separator)
+        sections.append("\n".join(table_rows))
+
+    return "\n\n".join(sections)
   except Exception as exc:
     raise ValueError(f"Failed to read DOCX: {exc}") from exc
 

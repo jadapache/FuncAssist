@@ -16,6 +16,14 @@ export interface ChatConversation {
   activeArtifactId?: string
 }
 
+export interface ChatAttachment {
+  id: string
+  name: string
+  type: 'image' | 'file'
+  dataUrl?: string
+  size?: number
+}
+
 export interface ChatPersistMessage {
   id: string
   role: 'user' | 'assistant'
@@ -23,6 +31,7 @@ export interface ChatPersistMessage {
   timestamp: string
   /** Collapsed thinking trace steps attached to assistant messages */
   thinkingSteps?: ThinkingStep[]
+  attachments?: ChatAttachment[]
 }
 
 export interface ThinkingStep {
