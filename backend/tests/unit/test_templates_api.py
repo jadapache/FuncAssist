@@ -200,10 +200,26 @@ async def test_prompt_and_rubric_history():
 
 
     # 2. Check rubric history
-
     r_hist = await rubric_history("standup", limit=10)
-
     assert "history" in r_hist
-
     assert len(r_hist["history"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_create_custom_prompt():
+    from app.api.routers.ai_templates import TemplateCreate, create_prompt
+    from app.ai.templates import get_prompt
+
+    created = await create_prompt(TemplateCreate(
+        feature="qa_security_audit",
+        title="Auditoría de Seguridad QA",
+        system="Eres un auditor de seguridad QA especializado en OWASP.",
+        user_template="Analiza: {query}\n\nContexto: {context}",
+        allowed_sources=["knowledge"],
+    ))
+    assert created["feature"] == "qa_security_audit"
+    assert created["system"] == "Eres un auditor de seguridad QA especializado en OWASP."
+
+    fetched = await get_prompt("qa_security_audit")
+    assert fetched["system"] == "Eres un auditor de seguridad QA especializado en OWASP."
 
