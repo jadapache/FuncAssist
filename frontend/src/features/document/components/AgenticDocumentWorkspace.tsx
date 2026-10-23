@@ -16,7 +16,6 @@ import {
 } from 'lucide-react'
 import { UniverAdapter } from '../../../features/document/agent/adapters/UniverAdapter'
 import { DocumentAgent } from '../../../features/document/agent/core/DocumentAgent'
-import { api, type KnowledgeDocument } from '../../../api/client'
 import type { FuncionalFeatureConfig } from '../../../features/funcional'
 import { FUNCIONAL_SOURCE_OPTIONS } from '../../../features/funcional'
 import { useDocumentHistory } from '../hooks/useDocumentHistory'
@@ -33,6 +32,8 @@ import { useArtifacts } from '../hooks/useArtifacts'
 import { useAgenticGeneration } from '../hooks/useAgenticGeneration'
 import { useToast } from '../../../context/ToastContext'
 import { PageHeader } from '../../../components/common'
+import { MarkdownMessage } from './MarkdownMessage'
+import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
 
 
 interface AgenticDocumentWorkspaceProps {
@@ -87,9 +88,12 @@ export const AgenticDocumentWorkspace = ({
   const [integrationsFlyoutOpen, setIntegrationsFlyoutOpen] = useState(false)
 
 
-  // Context files
-  const [uploaded, setUploaded] = useState<KnowledgeDocument[]>([])
+  // Ephemeral chat attachments (never stored in knowledge base)
+  const [uploadedDocs, setUploadedDocs] = useState<EphemeralAttachmentDoc[]>([])
   const [uploading, setUploading] = useState(false)
+  const [attachedImages, setAttachedImages] = useState<
+    Array<{ id: string; name: string; dataUrl: string; size: number }>
+  >([])
 
   // Dynamic prompt textarea height & expansion (capped at 40% max of chat container height)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -215,28 +219,56 @@ export const AgenticDocumentWorkspace = ({
     setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }, [])
 
-  // Upload context document
-  const handlePickFiles = async (picked: FileList | null) => {
-    if (!picked?.length) return
-    setUploading(true)
-    try {
-      const res = await api.uploadDocumentsBatch(Array.from(picked), config.uploadTags)
-      setUploaded((prev) => [...prev, ...res.documents])
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al cargar los documentos')
-    } finally {
-      setUploading(false)
+  // Upload context document or attach image
+  const handlePickFiles = async (picked: FileList | File[] | null) => {
+    if (!picked || !picked.length) return
+    const files = Array.from(picked)
+    const imageFiles = files.filter(
+      (f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name),
+    )
+    const docFiles = files.filter(
+      (f) => !f.type.startsWith('image/') && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name),
+    )
+
+    if (imageFiles.length > 0) {
+      for (const img of imageFiles) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            setAttachedImages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                name: img.name,
+                dataUrl: reader.result as string,
+                size: img.size,
+              },
+            ])
+          }
+        }
+        reader.readAsDataURL(img)
+      }
     }
+
+    if (docFiles.length > 0) {
+      setUploading(true)
+      try {
+        const parsed = await Promise.all(
+          docFiles.map((file) => docAgentApi.parseAttachment(file)),
+        )
+        setUploadedDocs((prev) => [...prev, ...parsed])
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Error al procesar los documentos adjuntos')
+      } finally {
+        setUploading(false)
+      }
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const handleRemoveUploaded = async (id: string) => {
-    try {
-      await api.deleteDocument(id)
-      setUploaded((prev) => prev.filter((d) => d.id !== id))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al eliminar documento')
-    }
+  const handleRemoveUploaded = (id: string) => {
+    // Simply detach from prompt input without calling destructive backend delete
+    setUploadedDocs((prev) => prev.filter((d) => d.id !== id))
   }
 
   const toggleSource = (srcId: string) => {
@@ -259,11 +291,10 @@ export const AgenticDocumentWorkspace = ({
   }
 
   // Agentic generation cycle hook
-  const { isGenerating, liveThinkingSteps, handleSendMessage } = useAgenticGeneration({
+  const { isGenerating, streamingText, generationStatus, handleSendMessage } = useAgenticGeneration({
     config,
     templateContent,
     sources,
-    uploaded,
     activeConversation,
     activeArtifact,
     activeArtifactId,
@@ -300,8 +331,12 @@ export const AgenticDocumentWorkspace = ({
 
   const handleSubmitForm = (e: FormEvent) => {
     e.preventDefault()
-    if (!draft.trim() || isGenerating) return
-    void handleSendMessage(draft)
+    if ((!draft.trim() && attachedImages.length === 0 && uploadedDocs.length === 0) || isGenerating) return
+    const imagesToSend = [...attachedImages]
+    const docsToSend = [...uploadedDocs]
+    setAttachedImages([])
+    setUploadedDocs([])
+    void handleSendMessage(draft, imagesToSend, docsToSend)
   }
 
   return (
@@ -310,6 +345,7 @@ export const AgenticDocumentWorkspace = ({
       <input
         ref={fileInputRef}
         type="file"
+        accept="image/*,.pdf,.docx,.doc,.txt,.xlsx"
         multiple
         className="hidden"
         onChange={(e) => handlePickFiles(e.target.files)}
@@ -372,30 +408,60 @@ export const AgenticDocumentWorkspace = ({
                         <span>{m.role === 'user' ? 'Tú' : 'Asistente IA'}</span>
                         <span>{m.timestamp}</span>
                       </div>
-                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      {m.role === 'user' ? (
+                        <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      ) : (
+                        <MarkdownMessage content={m.content} />
+                      )}
 
-                      {/* Collapsed thinking steps for past assistant messages */}
-                      {m.role === 'assistant' && m.thinkingSteps && m.thinkingSteps.length > 0 && (
-                        <AgenticThinkingBubble
-                          steps={m.thinkingSteps}
-                          isProcessing={false}
-                        />
+                      {/* Attached images and documents inside message bubble */}
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {m.attachments.map((att) =>
+                            att.type === 'image' && att.dataUrl ? (
+                              <a
+                                key={att.id}
+                                href={att.dataUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block"
+                              >
+                                <img
+                                  src={att.dataUrl}
+                                  alt={att.name}
+                                  className="h-14 w-14 object-cover rounded-xl border border-white/20 shadow-2xs hover:opacity-90 transition"
+                                />
+                              </a>
+                            ) : (
+                              <span
+                                key={att.id}
+                                className="inline-flex items-center gap-1.5 text-[11px] bg-white/15 px-2.5 py-1 rounded-xl border border-white/20 text-white shadow-2xs font-medium"
+                              >
+                                <FileText className="h-3.5 w-3.5 text-blue-200" />
+                                <span className="truncate max-w-[200px]">{att.name}</span>
+                              </span>
+                            ),
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
                 ))}
 
-                {/* Live thinking bubble while processing */}
-                {isGenerating && liveThinkingSteps.length > 0 && (
-                  <div className="flex gap-3 justify-start">
-                    <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none">
+                {/* Live streaming assistant bubble while processing */}
+                {isGenerating && (
+                  <div className="flex gap-3 justify-start animate-in fade-in duration-150">
+                    <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
                       <div className="flex items-center gap-4 text-[10px] opacity-70 font-medium">
                         <span>Asistente IA</span>
                       </div>
                       <AgenticThinkingBubble
-                        steps={liveThinkingSteps}
-                        isProcessing={true}
+                        status={generationStatus}
+                        isProcessing={!streamingText}
                       />
+                      {streamingText && (
+                        <MarkdownMessage content={streamingText} />
+                      )}
                     </div>
                   </div>
                 )}
@@ -405,7 +471,44 @@ export const AgenticDocumentWorkspace = ({
           </div>
 
           {/* Chat Input Bar */}
-          <div className="p-4 border-t border-slate-200/80 bg-white shrink-0 space-y-3">
+          <div className="p-4 border-t border-slate-200/80 bg-white shrink-0 space-y-2">
+            {/* Quick Slash Commands bar */}
+            <div className="flex items-center gap-1.5 px-1">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Atajos:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft((d) => (d.startsWith('/plan') ? d : `/plan ${d}`.trim()))
+                  textareaRef.current?.focus()
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer"
+              >
+                <Sparkles className="h-2.5 w-2.5" />
+                /plan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft((d) => (d.startsWith('/informe') ? d : `/informe ${d}`.trim()))
+                  textareaRef.current?.focus()
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer"
+              >
+                <FileText className="h-2.5 w-2.5" />
+                /informe
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft((d) => (d.startsWith('/plantilla') ? d : `/plantilla ${d}`.trim()))
+                  textareaRef.current?.focus()
+                }}
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer"
+              >
+                /plantilla
+              </button>
+            </div>
+
             <form onSubmit={handleSubmitForm} className="relative">
               {/* Input Box Card */}
               <div className="relative rounded-2xl border border-slate-200 bg-slate-50/50 p-3 shadow-2xs focus-within:bg-white focus-within:border-slate-300 focus-within:ring-2 focus-within:ring-blue-100/80 transition space-y-2.5">
@@ -429,22 +532,58 @@ export const AgenticDocumentWorkspace = ({
                   ref={textareaRef}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
+                  onPaste={(e) => {
+                    const items = e.clipboardData?.items
+                    if (items) {
+                      const pastedFiles: File[] = []
+                      for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.startsWith('image/')) {
+                          const file = items[i].getAsFile()
+                          if (file) pastedFiles.push(file)
+                        }
+                      }
+                      if (pastedFiles.length > 0) {
+                        void handlePickFiles(pastedFiles)
+                      }
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
                       handleSubmitForm(e)
                     }
                   }}
-                  placeholder={config.placeholder || 'Escribe tu petición o consulta...'}
+                  placeholder={config.placeholder || 'Escribe tu petición, consulta o usa /plan...'}
                   disabled={isGenerating}
                   style={{ height: `${textareaHeight}px` }}
                   className="w-full bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none resize-none placeholder:text-slate-400 disabled:opacity-60 font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal"
                 />
 
+                {/* Attached Images Thumbnail Row */}
+                {attachedImages.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 px-1 py-1 border-t border-slate-200/40">
+                    {attachedImages.map((img) => (
+                      <div
+                        key={img.id}
+                        className="relative group h-12 w-12 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
+                      >
+                        <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setAttachedImages((prev) => prev.filter((i) => i.id !== img.id))}
+                          className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition cursor-pointer"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Attached Files Inline Badge Row (Inside prompt card) */}
-                {uploaded.length > 0 && (
+                {uploadedDocs.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 px-1 py-1 border-t border-slate-200/40">
-                    {uploaded.map((doc) => (
+                    {uploadedDocs.map((doc) => (
                       <span
                         key={doc.id}
                         className="inline-flex items-center gap-1.5 bg-blue-50 text-[#002777] border border-blue-200/80 text-xs font-medium px-2.5 py-1 rounded-xl shrink-0 shadow-2xs"
