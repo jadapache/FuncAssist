@@ -34,6 +34,7 @@ import { useToast } from '../../../context/ToastContext'
 import { PageHeader } from '../../../components/common'
 import { MarkdownMessage } from './MarkdownMessage'
 import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
+import { featuresApi } from '../../../api/modules/features'
 
 
 interface AgenticDocumentWorkspaceProps {
@@ -94,6 +95,36 @@ export const AgenticDocumentWorkspace = ({
   const [attachedImages, setAttachedImages] = useState<
     Array<{ id: string; name: string; dataUrl: string; size: number }>
   >([])
+  const [customShortcuts, setCustomShortcuts] = useState<string[]>([])
+
+  useEffect(() => {
+    let isMounted = true
+    featuresApi.getAiPrompts()
+      .then((res) => {
+        if (!isMounted) return
+        const coreFeatures = new Set([
+          'generic_plan',
+          'generic_report',
+          'mejoras_doc',
+          'inventario_doc',
+          'levantamiento_doc',
+          'standup',
+          'ask_product',
+          'prd_checker',
+          'change_impact',
+        ])
+        const custom = (res.prompts || [])
+          .map((p) => p.feature)
+          .filter((f) => !coreFeatures.has(f))
+        setCustomShortcuts(custom)
+      })
+      .catch(() => {
+        // Fall back to default shortcuts
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   // Dynamic prompt textarea height & expansion (capped at 40% max of chat container height)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -473,15 +504,15 @@ export const AgenticDocumentWorkspace = ({
           {/* Chat Input Bar */}
           <div className="p-4 border-t border-slate-200/80 bg-white shrink-0 space-y-2">
             {/* Quick Slash Commands bar */}
-            <div className="flex items-center gap-1.5 px-1">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Atajos:</span>
+            <div className="flex items-center gap-1.5 px-1 overflow-x-auto scrollbar-none py-0.5">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0">Atajos:</span>
               <button
                 type="button"
                 onClick={() => {
                   setDraft((d) => (d.startsWith('/plan') ? d : `/plan ${d}`.trim()))
                   textareaRef.current?.focus()
                 }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer"
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer shrink-0"
               >
                 <Sparkles className="h-2.5 w-2.5" />
                 /plan
@@ -492,7 +523,7 @@ export const AgenticDocumentWorkspace = ({
                   setDraft((d) => (d.startsWith('/informe') ? d : `/informe ${d}`.trim()))
                   textareaRef.current?.focus()
                 }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer"
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer shrink-0"
               >
                 <FileText className="h-2.5 w-2.5" />
                 /informe
@@ -503,10 +534,23 @@ export const AgenticDocumentWorkspace = ({
                   setDraft((d) => (d.startsWith('/plantilla') ? d : `/plantilla ${d}`.trim()))
                   textareaRef.current?.focus()
                 }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer"
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer shrink-0"
               >
                 /plantilla
               </button>
+              {customShortcuts.map((slug) => (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => {
+                    setDraft((d) => (d.startsWith(`/${slug}`) ? d : `/${slug} ${d}`.trim()))
+                    textareaRef.current?.focus()
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#002777] border border-indigo-200/80 transition cursor-pointer shrink-0"
+                >
+                  /{slug}
+                </button>
+              ))}
             </div>
 
             <form onSubmit={handleSubmitForm} className="relative">
