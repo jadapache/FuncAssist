@@ -20,6 +20,8 @@ import type {
   WebLLMInitProgress,
   WebLLMModelDefinition,
 } from '../../../ai/types/webLlm'
+import { formatProgressStage } from '../../../../utils/formatProgressStage'
+
 
 export interface BuiltinModelsListProps {
   model: string
@@ -212,7 +214,7 @@ export const BuiltinModelsList = ({
                 {isDownloading && progressInfo && (
                   <div className="pt-2 space-y-1.5">
                     <div className="flex justify-between text-xs font-semibold text-slate-700">
-                      <span>{progressInfo.text || 'Descargando y compilando pesos...'}</span>
+                      <span>{formatProgressStage(progressInfo.text, progressInfo.progress)}</span>
                       <span>{progressInfo.progress}%</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
@@ -266,7 +268,7 @@ export const BuiltinModelsList = ({
                     {isDownloading ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Descargando...</span>
+                        <span>Descargando {progressInfo ? `(${progressInfo.progress}%)` : '...'}</span>
                       </>
                     ) : (
                       <>
