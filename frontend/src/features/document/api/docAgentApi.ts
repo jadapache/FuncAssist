@@ -4,21 +4,54 @@ import {
   type AgenticPromptResponse,
 } from '../../../api/client'
 
+export interface EphemeralAttachmentDoc {
+  id: string
+  filename: string
+  content: string
+  char_count?: number
+}
+
+export interface AgenticPromptPayload {
+  query: string
+  feature?: string
+  mode?: string
+  images?: Array<{ name: string, data: string, mime_type?: string }>
+  attached_docs?: Array<{ filename: string, content: string }>
+  current_document?: string
+  chat_context?: string[]
+  sources?: string[]
+  document_ids?: string[]
+  template_id?: string
+}
+
 export const docAgentApi = {
-  agenticPrompt: (payload: {
-    query: string
-    current_document?: string
-    chat_context?: string[]
-    sources?: string[]
-    document_ids?: string[]
-    template_id?: string
-  }): Promise<AgenticPromptResponse> =>
+  parseAttachment: async (file: File): Promise<EphemeralAttachmentDoc> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/api/doc-agent/parse-attachment`, {
+      method: 'POST',
+      body: form,
+    })
+    const data = await handleResponse<{ filename: string; content: string; char_count: number }>(res)
+    return {
+      id: crypto.randomUUID(),
+      filename: data.filename,
+      content: data.content,
+      char_count: data.char_count,
+    }
+  },
+
+  agenticPrompt: (payload: AgenticPromptPayload): Promise<AgenticPromptResponse> =>
     fetch(`${API_BASE}/api/doc-agent/agentic-prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,
+        feature: payload.feature,
+        mode: payload.mode,
+        images: payload.images,
+        attachedDocs: payload.attached_docs,
         current_document: payload.current_document,
         chat_context: payload.chat_context,
         sources: payload.sources,
@@ -42,15 +75,9 @@ export const docAgentApi = {
     ),
 
   agenticPromptStream: async (
-    payload: {
-      query: string
-      current_document?: string
-      chat_context?: string[]
-      sources?: string[]
-      document_ids?: string[]
-      template_id?: string
-    },
+    payload: AgenticPromptPayload,
     onChunk: (accumulatedText: string, chunk: string) => void,
+    onIntent?: (intent: string) => void,
   ): Promise<AgenticPromptResponse> => {
     const res = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt-stream`, {
       method: 'POST',
@@ -58,6 +85,10 @@ export const docAgentApi = {
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,
+        feature: payload.feature,
+        mode: payload.mode,
+        images: payload.images,
+        attachedDocs: payload.attached_docs,
         current_document: payload.current_document,
         chat_context: payload.chat_context,
         sources: payload.sources,
@@ -83,7 +114,7 @@ export const docAgentApi = {
     const decoder = new TextDecoder('utf-8')
     let accumulatedText = ''
     let buffer = ''
-    let fullResponseData: any = null
+    let fullResponseData: AgenticPromptResponse | null = null
 
     while (true) {
       const { done, value } = await reader.read()
@@ -96,22 +127,31 @@ export const docAgentApi = {
       for (const line of lines) {
         const trimmed = line.trim()
         if (trimmed.startsWith('data: ')) {
-          let parsed: any = null
+          let parsed: {
+            type?: string
+            intent?: string
+            text?: string
+            data?: AgenticPromptResponse
+            message?: string
+          } | null = null
           try {
             parsed = JSON.parse(trimmed.slice(6))
           } catch {
-            // ignore JSON parse errors for incomplete data lines
             continue
           }
 
-          if (parsed.type === 'token') {
+          if (!parsed) continue
+
+          if (parsed.type === 'intent' && parsed.intent) {
+            onIntent?.(parsed.intent)
+          } else if (parsed.type === 'token') {
             const chunk = parsed.text || ''
             accumulatedText += chunk
             onChunk(accumulatedText, chunk)
           } else if (parsed.type === 'full') {
-            fullResponseData = parsed.data
+            fullResponseData = parsed.data ?? null
             if (parsed.data?.document_updates || parsed.data?.answer) {
-              accumulatedText = parsed.data.document_updates || parsed.data.answer
+              accumulatedText = parsed.data.document_updates || parsed.data.answer || ''
               onChunk(accumulatedText, '')
             }
           } else if (parsed.type === 'error') {

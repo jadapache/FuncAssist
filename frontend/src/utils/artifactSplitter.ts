@@ -109,6 +109,7 @@ export function parseMultipleArtifacts(
   defaultTitle: string,
   defaultExtension: 'docx' | 'xlsx' | 'txt' = 'docx',
   templateContent?: string,
+  allowPlainTextFallback = true,
 ): ExtractedArtifact[] {
   if (!rawText || !rawText.trim()) return []
 
@@ -231,8 +232,12 @@ export function parseMultipleArtifacts(
   }
 
   // =========================================================================
-  // Fallback: Single artifact return
+  // Fallback: Single artifact return (only if allowPlainTextFallback is true)
   // =========================================================================
+  if (!allowPlainTextFallback) {
+    return []
+  }
+
   return [
     {
       title: defaultTitle,
@@ -240,6 +245,43 @@ export function parseMultipleArtifacts(
       content: rawText,
     },
   ]
+}
+
+export interface ParsedAgenticStream {
+  chatText: string
+  artifacts: ExtractedArtifact[]
+  isConversational: boolean
+}
+
+export function parseStreamForChatAndArtifacts(
+  rawText: string,
+  defaultTitle: string,
+  defaultExtension: 'docx' | 'xlsx' | 'txt' = 'docx',
+  templateContent?: string,
+): ParsedAgenticStream {
+  if (!rawText || !rawText.trim()) {
+    return { chatText: '', artifacts: [], isConversational: true }
+  }
+
+  const hasXmlArtifact = /<artifact[\s>]/i.test(rawText)
+
+  if (hasXmlArtifact) {
+    const artifacts = parseMultipleArtifacts(rawText, defaultTitle, defaultExtension, templateContent, false)
+    const chatText = rawText
+      .replace(/<artifact\s+title=["'][^"']+["'](?:\s+extension=["'][^"']+["'])?\s*>[\s\S]*?(?:<\/artifact>|$)/gi, '')
+      .trim()
+    return {
+      chatText,
+      artifacts,
+      isConversational: false,
+    }
+  }
+
+  return {
+    chatText: rawText,
+    artifacts: [],
+    isConversational: true,
+  }
 }
 
 /**

@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import re
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
 import json
 from pydantic import BaseModel, Field
+
+from app.context.knowledge import extract_text
 
 from app.core.document_agent.schema import (
     CanonicalDocumentState,
@@ -23,7 +25,13 @@ from app.core.document_agent.schema import (
     AssetLocator,
     VerificationReport,
 )
-from app.ai.runner import run_grounded_feature, run_grounded_feature_stream
+from app.ai.artifacts import extract_artifacts, artifacts_to_dict
+from app.ai.runner import (
+    AgenticChatConfig,
+    run_agentic_chat_stream,
+    run_grounded_feature,
+    run_grounded_feature_stream,
+)
 from app.core.document_agent.validator import DocumentOperationValidator
 from app.core.template_storage import list_templates
 from app.features.mejoras.docx_builder import create_mejoras_docx
@@ -34,16 +42,65 @@ from app.features.mejoras.xlsx_builder import create_qa_matrix_xlsx
 router = APIRouter(prefix="/doc-agent", tags=["document-agent"])
 
 
+def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
+    """Classifies user prompt intent into: generic_plan, generic_report, template_mutation, or chat."""
+    if mode and mode in {"plan", "generic_plan"}:
+        return "generic_plan"
+    if mode and mode in {"report", "generic_report"}:
+        return "generic_report"
+    if mode and mode in {"chat", "qa"}:
+        return "chat"
+    if mode and mode in {"template", "template_mutation"}:
+        return "template_mutation"
+
+    p_lower = prompt.strip().lower()
+
+    # Conversational inquiries and questions should always route to conversational chat
+    is_question = (
+        p_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
+        or "?" in p_lower
+    )
+    if is_question:
+        return "chat"
+
+    if (
+        p_lower.startswith("/plan")
+        or "plan de prueba" in p_lower
+        or "plan de implementaci" in p_lower
+        or "plan de trabajo" in p_lower
+        or "genera un plan" in p_lower
+        or "crea un plan" in p_lower
+        or "elabora un plan" in p_lower
+    ):
+        return "generic_plan"
+
+    if (
+        p_lower.startswith("/informe")
+        or p_lower.startswith("/report")
+        or "informe" in p_lower
+        or "reporte" in p_lower
+        or "resumen ejecutivo" in p_lower
+    ):
+        return "generic_report"
+
+    template_keywords = [
+        "completa la plantilla",
+        "llena la plantilla",
+        "genera el documento de mejora",
+        "genera el documento funcional",
+        "genera el levantamiento",
+        "genera el inventario",
+        "redacta el documento corporativo",
+        "actualiza la plantilla",
+    ]
+    if any(kw in p_lower for kw in template_keywords):
+        return "template_mutation"
+
+    return "chat"
+
 
 async def _load_active_template_content(template_id: str | None = None) -> str:
-    """Load the active mejoras template content to inject into the AI prompt.
-
-    Tries in order:
-    1. The explicitly requested template_id
-    2. The first template with module 'mejoras' or 'funcional'
-    3. The first available template
-    4. Fallback empty string (AI uses its own default structure)
-    """
+    """Load the active mejoras template content to inject into the AI prompt."""
     try:
         from app.core.template_storage import list_templates, get_template_detail
 
@@ -53,7 +110,6 @@ async def _load_active_template_content(template_id: str | None = None) -> str:
                 return detail["content"].strip()
 
         templates = await list_templates()
-        # Prefer mejoras/funcional templates
         candidates = [
             t for t in templates
             if any(kw in (t.get("module") or "").lower() for kw in ("mejora", "funcional", "requerimiento"))
@@ -73,6 +129,9 @@ async def _load_active_template_content(template_id: str | None = None) -> str:
 class AgenticPromptRequest(CamelModel):
     prompt: Optional[str] = Field(None, alias="query")
     query: Optional[str] = None
+    feature: Optional[str] = "mejoras_doc"
+    mode: Optional[str] = "auto"
+    images: Optional[List[Dict[str, str]]] = Field(default_factory=list)
     document_state: Optional[CanonicalDocumentState] = Field(None, alias="documentState")
     current_document: Optional[str] = None
     attached_asset_ids: Optional[List[str]] = Field(default_factory=list, alias="attachedAssetIds")
@@ -80,6 +139,7 @@ class AgenticPromptRequest(CamelModel):
     chat_context: Optional[Union[List[str], str]] = None
     sources: Optional[List[str]] = Field(default_factory=list)
     document_ids: Optional[List[str]] = Field(default_factory=list, alias="documentIds")
+    attached_docs: Optional[List[Dict[str, Any]]] = Field(default_factory=list, alias="attachedDocs")
     template_id: Optional[str] = Field(None, alias="templateId")
 
     @property
@@ -147,6 +207,27 @@ async def get_document_fixtures():
     return {"fixtures": fixtures}
 
 
+@router.post("/parse-attachment")
+async def parse_chat_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Parses a document (DOCX, PDF, TXT, MD, XLSX) attached in chat into plain Markdown text.
+    Does NOT store or ingest into the permanent knowledge base.
+    """
+    filename = file.filename or "archivo.txt"
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="El archivo adjunto está vacío.")
+    try:
+        extracted = extract_text(filename=filename, raw=raw)
+        return {
+            "filename": filename,
+            "content": extracted,
+            "char_count": len(extracted),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"No se pudo extraer texto de {filename}: {exc}")
+
+
 @router.post("/validate")
 def validate_operation(payload: Dict[str, Any]):
     """Validates a proposed canonical operation against current document state."""
@@ -182,8 +263,13 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
     prompt_lower = prompt_str.strip().lower()
     active_doc_state = req.doc_state
 
+    is_question = (
+        prompt_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
+        or "?" in prompt_lower
+    )
+
     # Case 1: Image attachment intent ("Me gustó la propuesta, incluye en las observaciones estas imágenes")
-    is_image_intent = any(w in prompt_lower for w in ["imágenes", "imagen", "imagenes", "image", "captura", "screenshot"])
+    is_image_intent = not is_question and any(w in prompt_lower for w in ["imágenes", "imagen", "imagenes", "image", "captura", "screenshot"])
     has_observaciones = any(w in prompt_lower for w in ["observación", "observaciones", "observacion"])
 
     if is_image_intent and has_observaciones:
@@ -230,7 +316,7 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
         )
 
     # Case 2: Correction / Modification Intent ("Corregir, Pepito Pérez no es líder funcional es usuario funcional")
-    is_correction_intent = any(w in prompt_lower for w in [
+    is_correction_intent = not is_question and any(w in prompt_lower for w in [
         "corregir", "corrección", "correccion", "corrijas", "corregí", "corregi",
         "cambia", "cambiar", "modifica", "modificar", "actualiza", "actualizar",
         "no es", "erróneo", "erroneo", "incorrecto", "reemplaza", "sustituye"
@@ -274,7 +360,7 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
         )
 
     # Case 3: Responsables / Firmas Addition ("Agrega en los responsables al doctor Pepito Perez usuario funcional")
-    is_responsables_intent = any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
+    is_responsables_intent = not is_question and any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
     if is_responsables_intent:
         role = "Usuario Funcional" if "usuario" in prompt_lower or "funcional" in prompt_lower else "Líder Funcional"
         name = "Dr. Pepito Pérez" if "pepito" in prompt_lower or "perez" in prompt_lower or "pérez" in prompt_lower else "Participante Asignado"
@@ -303,7 +389,7 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
             answer=msg_text,
         )
 
-    # Case 4: Real RAG Grounded Feature Execution for complex queries & prompts
+    # Case 4: Intelligent Agentic Chat, Plan/Report Artifacts, or Template Generation
     chat_ctx_str = None
     if req.chat_context:
         if isinstance(req.chat_context, list):
@@ -312,39 +398,55 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
             chat_ctx_str = str(req.chat_context)
 
     sources_to_use = req.sources or ["knowledge"]
+    intent = classify_prompt_intent(prompt_str, req.mode)
+
+    query_text = prompt_str
+    if prompt_str.startswith("/plan"):
+        query_text = prompt_str[5:].strip() or "Generar plan de pruebas e implementación detallado"
+    elif prompt_str.startswith("/informe"):
+        query_text = prompt_str[8:].strip() or "Generar informe técnico y ejecutivo detallado"
+    elif prompt_str.startswith("/pregunta"):
+        query_text = prompt_str[9:].strip()
+    elif prompt_str.startswith("/plantilla"):
+        query_text = prompt_str[10:].strip()
+
+    cfg = AgenticChatConfig(
+        query=query_text,
+        intent=intent,
+        feature=req.feature or "mejoras_doc",
+        sources=sources_to_use,
+        document_ids=req.document_ids or [],
+        chat_context=chat_ctx_str,
+        template_content=_load_active_template_content(req.template_id),
+        images=req.images,
+        attached_docs=req.attached_docs,
+    )
 
     try:
-        rag_res = await run_grounded_feature(
+        accumulated: list[str] = []
+        async for chunk in run_agentic_chat_stream(cfg):
+            accumulated.append(chunk)
 
-            feature="mejoras_doc",
-            query=prompt_str,
-            sources=sources_to_use,
-            document_ids=req.document_ids or [],
-            chat_context=chat_ctx_str,
-            template_content=_load_active_template_content(req.template_id),
+        full_content = "".join(accumulated)
+        parsed_arts, clean_ans = extract_artifacts(full_content)
+        art_dicts = artifacts_to_dict(parsed_arts)
+        is_template = (intent == "template_mutation")
+
+        asst_msg = clean_ans if art_dicts else (
+            "He generado y estructurado el documento corporativo en el visor de artefactos."
+            if is_template else full_content
         )
-
-        answer_text = (
-            rag_res.get("answer")
-            or rag_res.get("markdown")
-            or rag_res.get("reason")
-            or "Documento de mejoras generado exitosamente."
-        )
-
-        sources_used = rag_res.get("context", {}).get("used_sources", sources_to_use)
-
-        brief_msg = "He generado y estructurado el documento de mejoras con base en las especificaciones y el contexto recuperado. Puedes previsualizarlo, editarlo en directo o descargarlo desde el panel de Artefactos a la derecha."
 
         return AgenticPromptResponse(
-            intent_detected="agentic_rag_generation",
-            requires_document_mutation=True,
-            rag_knowledge_used=sources_used if isinstance(sources_used, list) else [str(sources_used)],
+            intent_detected=intent,
+            requires_document_mutation=is_template,
+            rag_knowledge_used=sources_to_use,
             planned_operations=[],
             operations=[],
-            validation_status={"valid": True, "details": ["Grounded RAG generation successful."]},
-            assistant_message=brief_msg,
-            answer=answer_text,
-            document_updates=answer_text,
+            validation_status={"valid": True, "details": ["Agentic generation successful."]},
+            assistant_message=asst_msg,
+            answer=full_content,
+            document_updates=full_content if is_template else None,
         )
     except Exception as err:
         err_msg = str(err)
@@ -357,16 +459,22 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
 @router.post("/agentic-prompt-stream")
 async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
     """
-    Streaming SSE endpoint for Agentic RAG multi-artifact document generation.
+    Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
     Streams token events live as text is produced by the LLM.
     """
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
 
-    # Check for fast non-LLM structured operations (image insertion, corrections, responsibles)
-    is_image_intent = any(w in prompt_lower for w in ["imágenes", "imagen", "imagenes", "image", "captura", "screenshot"]) and any(w in prompt_lower for w in ["observación", "observaciones", "observacion"])
-    is_correction_intent = any(w in prompt_lower for w in ["corregir", "corrección", "correccion", "corrijas", "corregí", "corregi", "cambia", "cambiar", "modifica", "modificar", "actualiza", "actualizar", "no es", "erróneo", "erroneo", "incorrecto", "reemplaza", "sustituye"])
-    is_responsables_intent = any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
+    # Conversational inquiries must always go to LLM runner, never mock fast-handlers
+    is_question = (
+        prompt_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
+        or "?" in prompt_lower
+    )
+
+    # Fast non-LLM structured operations (image insertion, corrections, responsibles)
+    is_image_intent = not is_question and any(w in prompt_lower for w in ["imágenes", "imagen", "imagenes", "image", "captura", "screenshot"]) and any(w in prompt_lower for w in ["observación", "observaciones", "observacion"])
+    is_correction_intent = not is_question and any(w in prompt_lower for w in ["corregir", "corrección", "correccion", "corrijas", "corregí", "corregi", "cambia", "cambiar", "modifica", "modificar", "actualiza", "actualizar", "no es", "erróneo", "erroneo", "incorrecto", "reemplaza", "sustituye"])
+    is_responsables_intent = not is_question and any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
 
     if is_image_intent or is_correction_intent or is_responsables_intent:
         res = await handle_agentic_prompt(req)
@@ -374,7 +482,7 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
             yield f"data: {json.dumps({'type': 'full', 'data': res.model_dump(by_alias=True)})}\n\n"
         return StreamingResponse(fast_gen(), media_type="text/event-stream")
 
-    # Full LLM Grounded Generation with live token streaming
+    # Dynamic Agentic Chat / Plan / Report / Template Streaming
     chat_ctx_str = None
     if req.chat_context:
         if isinstance(req.chat_context, list):
@@ -383,32 +491,61 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
             chat_ctx_str = str(req.chat_context)
 
     sources_to_use = req.sources or ["knowledge"]
+    intent = classify_prompt_intent(prompt_str, req.mode)
+
+    query_text = prompt_str
+    if prompt_str.startswith("/plan"):
+        query_text = prompt_str[5:].strip() or "Generar plan de pruebas e implementación detallado"
+    elif prompt_str.startswith("/informe"):
+        query_text = prompt_str[8:].strip() or "Generar informe técnico y ejecutivo detallado"
+    elif prompt_str.startswith("/pregunta"):
+        query_text = prompt_str[9:].strip()
+    elif prompt_str.startswith("/plantilla"):
+        query_text = prompt_str[10:].strip()
+
+    cfg = AgenticChatConfig(
+        query=query_text,
+        intent=intent,
+        feature=req.feature or "mejoras_doc",
+        sources=sources_to_use,
+        document_ids=req.document_ids or [],
+        chat_context=chat_ctx_str,
+        template_content=_load_active_template_content(req.template_id),
+        images=req.images,
+        attached_docs=req.attached_docs,
+    )
 
     async def stream_generator():
         accumulated_chunks = []
         try:
-            async for chunk in run_grounded_feature_stream(
-                feature="mejoras_doc",
-                query=prompt_str,
-                sources=sources_to_use,
-                document_ids=req.document_ids or [],
-                chat_context=chat_ctx_str,
-                template_content=_load_active_template_content(req.template_id),
-            ):
+            yield f"data: {json.dumps({'type': 'intent', 'intent': intent})}\n\n"
+
+            async for chunk in run_agentic_chat_stream(cfg):
                 accumulated_chunks.append(chunk)
                 yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
 
-            # Al finalizar el stream, verificar que se haya recibido contenido válido
             full_content = "".join(accumulated_chunks)
             if not full_content.strip():
                 yield f"data: {json.dumps({'type': 'error', 'message': 'El modelo LLM no generó contenido. Verifica tu conexión o clave de API en Configuración.'})}\n\n"
                 return
 
+            parsed_arts, clean_ans = extract_artifacts(full_content)
+            art_dicts = artifacts_to_dict(parsed_arts)
+            is_template = (intent == "template_mutation")
+
+            asst_msg = clean_ans if art_dicts else (
+                "He generado y estructurado el documento corporativo en el panel de artefactos."
+                if is_template else full_content
+            )
+
             final_response = {
                 "answer": full_content,
-                "document_updates": full_content,
-                "answer_clean": full_content,
-                "artifacts": [],
+                "intent_detected": intent,
+                "requires_document_mutation": is_template,
+                "document_updates": full_content if is_template else None,
+                "answer_clean": clean_ans or full_content,
+                "assistant_message": asst_msg,
+                "artifacts": art_dicts,
             }
             yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -416,20 +553,13 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
             err_msg = str(err)
             lower_err = err_msg.lower()
             if any(term in lower_err for term in ["api key", "unauthorized", "authentication", "auth", "401", "forbidden", "403", "invalid_api_key"]):
-                err_msg = f"Hubo un error de autenticación con el modelo, revisa la API key."
+                err_msg = "Hubo un error de autenticación con el modelo, revisa la API key."
             elif "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
                 limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
                 req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
                 req_tokens = req_match.group(1) if req_match else "solicitada"
                 limit_tokens = limit_match.group(1) if limit_match else "establecido"
                 err_msg = f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo."
-            elif "not found in connected sources" in lower_err or "no matching chunks" in lower_err:
-                if "no matching chunks" in lower_err:
-                    err_msg = "No se tiene información suficiente para responder a esta solicitud."
-                elif "no documents uploaded" in lower_err:
-                    err_msg = "La base de conocimiento no tiene documentos para consultar."
-                else:
-                    err_msg = "No se encontró contexto suficiente para procesar la consulta."
             yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
