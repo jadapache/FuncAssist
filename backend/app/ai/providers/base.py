@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Union
 
 from pydantic import BaseModel, Field
 
 
 class AIMessage(BaseModel):
   role: str
-  content: str
+  content: Union[str, list[dict[str, Any]]]
 
 
 class AICompletion(BaseModel):
