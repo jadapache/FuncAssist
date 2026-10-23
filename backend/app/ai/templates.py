@@ -278,23 +278,27 @@ async def get_template_history(template_type: str, feature: str, limit: int = 50
 
 
 async def save_prompt(
-
   feature: str,
-
   payload: dict[str, Any],
-
   updated_by: str | None = None,
-
   change_summary: str | None = None,
-
 ) -> dict[str, Any]:
   ensure_ai_templates_seeded()
 
-  current = await get_prompt(feature)
-
-  next_version = int(current.get("version") or 1) + 1
-
-  merged = {**current, **payload, "feature": feature, "version": next_version}
+  try:
+    current = await get_prompt(feature)
+    next_version = int(current.get("version") or 1) + 1
+    merged = {**current, **payload, "feature": feature, "version": next_version}
+  except KeyError:
+    next_version = int(payload.get("version") or 1)
+    merged = {
+      "version": next_version,
+      "feature": feature,
+      "allowed_sources": payload.get("allowed_sources") or ["knowledge"],
+      "system": payload.get("system", ""),
+      "user_template": payload.get("user_template", "{query}\n\n{context}"),
+      **payload,
+    }
 
 
   try:
