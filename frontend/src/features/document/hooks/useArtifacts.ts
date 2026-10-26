@@ -10,10 +10,14 @@ import type { DocumentArtifact } from './useChatPersistence'
 
 interface UseArtifactsOptions {
   conversationArtifacts: DocumentArtifact[]
-  onUpdateConversation: (updates: { artifacts: DocumentArtifact[]; documentContent?: string }) => void
+  onUpdateConversation: (
+    updates: { artifacts: DocumentArtifact[]; documentContent?: string; activeArtifactId?: string },
+    targetId?: string,
+  ) => void
+  currentConversationId?: string | null
 }
 
-export function useArtifacts({ conversationArtifacts, onUpdateConversation }: UseArtifactsOptions) {
+export function useArtifacts({ conversationArtifacts, onUpdateConversation, currentConversationId }: UseArtifactsOptions) {
   const { toast } = useToast()
 
   const artifacts: Artifact[] = useMemo(() => (conversationArtifacts || []) as Artifact[], [conversationArtifacts])
@@ -52,12 +56,15 @@ export function useArtifacts({ conversationArtifacts, onUpdateConversation }: Us
         updatedAt: 'Hace un momento',
       }
       const updated = [newArt, ...artifacts]
-      onUpdateConversation({ artifacts: updated as DocumentArtifact[] })
+      onUpdateConversation(
+        { artifacts: updated as DocumentArtifact[], activeArtifactId: newId },
+        currentConversationId ?? undefined,
+      )
       setActiveArtifactId(newId)
       toast.success('Nuevo documento creado en Artefactos')
       return newId
     },
-    [artifacts, onUpdateConversation, toast],
+    [artifacts, onUpdateConversation, currentConversationId, toast],
   )
 
   const deleteArtifact = useCallback(
@@ -67,21 +74,28 @@ export function useArtifacts({ conversationArtifacts, onUpdateConversation }: Us
         return
       }
       const updated = artifacts.filter((a) => a.id !== id)
-      onUpdateConversation({ artifacts: updated as DocumentArtifact[] })
+      const nextActiveId = activeArtifactId === id ? updated[0].id : activeArtifactId
+      onUpdateConversation(
+        { artifacts: updated as DocumentArtifact[], activeArtifactId: nextActiveId || undefined },
+        currentConversationId ?? undefined,
+      )
       if (activeArtifactId === id) {
         setActiveArtifactId(updated[0].id)
       }
       toast.success('Artefacto eliminado')
     },
-    [artifacts, activeArtifactId, onUpdateConversation, toast],
+    [artifacts, activeArtifactId, onUpdateConversation, currentConversationId, toast],
   )
 
   const renameArtifact = useCallback(
     (id: string, newTitle: string) => {
       const updated = artifacts.map((a) => (a.id === id ? { ...a, title: newTitle } : a))
-      onUpdateConversation({ artifacts: updated as DocumentArtifact[] })
+      onUpdateConversation(
+        { artifacts: updated as DocumentArtifact[] },
+        currentConversationId ?? undefined,
+      )
     },
-    [artifacts, onUpdateConversation],
+    [artifacts, onUpdateConversation, currentConversationId],
   )
 
   const updateArtifactContent = useCallback(
@@ -89,20 +103,27 @@ export function useArtifacts({ conversationArtifacts, onUpdateConversation }: Us
       const updated = artifacts.map((a) =>
         a.id === id ? { ...a, content, updatedAt: 'Hace un momento' } : a,
       )
-      onUpdateConversation({ artifacts: updated as DocumentArtifact[], documentContent: content })
+      onUpdateConversation(
+        { artifacts: updated as DocumentArtifact[], documentContent: content },
+        currentConversationId ?? undefined,
+      )
     },
-    [artifacts, onUpdateConversation],
+    [artifacts, onUpdateConversation, currentConversationId],
   )
 
   const setArtifactsFromGeneration = useCallback(
     (newArtifacts: Artifact[]) => {
-      onUpdateConversation({
-        artifacts: newArtifacts as DocumentArtifact[],
-        documentContent: newArtifacts[0]?.content ?? '',
-      })
+      onUpdateConversation(
+        {
+          artifacts: newArtifacts as DocumentArtifact[],
+          documentContent: newArtifacts[0]?.content ?? '',
+          activeArtifactId: newArtifacts[0]?.id,
+        },
+        currentConversationId ?? undefined,
+      )
       if (newArtifacts[0]) setActiveArtifactId(newArtifacts[0].id)
     },
-    [onUpdateConversation],
+    [onUpdateConversation, currentConversationId],
   )
 
   return {

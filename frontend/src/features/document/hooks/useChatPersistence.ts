@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Artifact } from '../../../types/artifacts'
 import { loadChatConversations, saveChatConversations } from '../../../utils/chatStorage'
 import { draftsApi } from '../../../features/document/api/draftsApi'
+import { chatSessionsApi } from '../../../features/document/api/chatSessionsApi'
 
 export type DocumentArtifact = Artifact
 
@@ -42,25 +43,65 @@ export interface ThinkingStep {
 }
 
 /**
- * Hook for persisting and managing chat conversation history in localStorage and Documents/QA MGMT/Borradores.
+ * Hook for persisting and managing chat conversation history in localStorage and PostgreSQL / Borradores.
  */
-export function useChatPersistence(featureSlug: string) {
+export function useChatPersistence(featureSlug: string, userId?: string | null) {
   const [conversations, setConversations] = useState<ChatConversation[]>(() =>
-    loadChatConversations(featureSlug),
+    loadChatConversations(featureSlug, userId),
   )
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
-    const loaded = loadChatConversations(featureSlug)
+    const loaded = loadChatConversations(featureSlug, userId)
     return loaded.length > 0 ? loaded[0].id : null
   })
 
-  // Persist to localStorage and sync to backend Borradores whenever conversations change (only non-empty conversations)
+  // Load from local storage and sync with remote PostgreSQL sessions
+  useEffect(() => {
+    const local = loadChatConversations(featureSlug, userId)
+    setConversations(local)
+    setActiveConversationId((prev) => {
+      if (prev && local.some((c) => c.id === prev)) return prev
+      return local.length > 0 ? local[0].id : null
+    })
+
+    let isCancelled = false
+    chatSessionsApi.getSessions(featureSlug).then((remoteSessions) => {
+      if (isCancelled || !remoteSessions || remoteSessions.length === 0) return
+      setConversations((prev) => {
+        const merged = [...prev]
+        for (const remote of remoteSessions) {
+          const idx = merged.findIndex((m) => m.id === remote.id)
+          if (idx === -1) {
+            merged.push(remote)
+          } else {
+            if (!merged[idx].artifacts?.length && remote.artifacts?.length) {
+              merged[idx] = {
+                ...merged[idx],
+                artifacts: remote.artifacts,
+                documentContent: remote.documentContent || merged[idx].documentContent,
+                activeArtifactId: remote.activeArtifactId || merged[idx].activeArtifactId,
+              }
+            }
+          }
+        }
+        return merged
+      })
+    }).catch((err) => {
+      console.debug('[useChatPersistence] Failed to fetch remote sessions:', err)
+    })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [featureSlug, userId])
+
+  // Persist to localStorage and sync to backend whenever conversations change (only non-empty conversations)
   useEffect(() => {
     const nonEmpties = conversations.filter(
       (c) => c.messages.length > 0 || (c.artifacts && c.artifacts.length > 0),
     )
-    saveChatConversations(featureSlug, nonEmpties)
+    saveChatConversations(featureSlug, nonEmpties, userId)
 
-    // Debounced background sync to backend Documents/QA MGMT/Borradores
+    // Debounced background sync to backend
     const timer = setTimeout(() => {
       nonEmpties.forEach((conv) => {
         draftsApi
@@ -82,8 +123,7 @@ export function useChatPersistence(featureSlug: string) {
     }, 600)
 
     return () => clearTimeout(timer)
-  }, [conversations, featureSlug])
-
+  }, [conversations, featureSlug, userId])
 
   const activeConversation = conversations.find((c) => c.id === activeConversationId) ?? null
 
@@ -109,14 +149,18 @@ export function useChatPersistence(featureSlug: string) {
   )
 
   /**
-   * Update the active conversation's messages and/or document content.
+   * Update the active (or explicitly specified) conversation's messages and/or document content.
    */
   const updateConversation = useCallback(
-    (updates: Partial<Pick<ChatConversation, 'messages' | 'documentContent' | 'name' | 'artifacts' | 'activeArtifactId'>>) => {
-      if (!activeConversationId) return
+    (
+      updates: Partial<Pick<ChatConversation, 'messages' | 'documentContent' | 'name' | 'artifacts' | 'activeArtifactId'>>,
+      targetId?: string,
+    ) => {
+      const idToUpdate = targetId ?? activeConversationId
+      if (!idToUpdate) return
       setConversations((prev) =>
         prev.map((c) =>
-          c.id === activeConversationId
+          c.id === idToUpdate
             ? {
                 ...c,
                 ...updates,
@@ -152,6 +196,9 @@ export function useChatPersistence(featureSlug: string) {
       })
       draftsApi.deleteDraft(id).catch((err) => {
         console.debug('[useChatPersistence] Delete draft error:', err)
+      })
+      chatSessionsApi.deleteSession(id).catch((err) => {
+        console.debug('[useChatPersistence] Delete chat session error:', err)
       })
     },
     [activeConversationId],

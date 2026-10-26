@@ -26,7 +26,7 @@ interface UseAgenticGenerationOptions {
   docHistoryContent: string
   adapter: UniverAdapter
   agent: DocumentAgent
-  onUpdateConversation: (updates: Partial<ChatConversation>) => void
+  onUpdateConversation: (updates: Partial<ChatConversation>, targetId?: string) => void
   onSetActiveArtifactId: (id: string) => void
   onDocHistoryPush: (content: string) => void
   onDocHistoryReset: (content: string) => void
@@ -292,9 +292,10 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         renameConversation(targetConv.id, convTitle)
       }
 
+      const targetConvId = targetConv.id
       const currentMsgs = targetConv?.messages ?? []
       const updatedMsgs = [...currentMsgs, userMessage]
-      onUpdateConversation({ messages: updatedMsgs })
+      onUpdateConversation({ messages: updatedMsgs }, targetConvId)
       onScrollToBottom()
 
       const defaultFeature = config.uploadTags || config.slug
@@ -322,6 +323,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             current_document: currentDocContent,
             chat_context: currentMsgs.slice(-4).map((m) => `${m.role}: ${m.content}`),
             sources,
+            conversation_id: targetConvId,
           },
           (accumulatedText) => {
             latestAccumulatedText = accumulatedText
@@ -338,7 +340,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
               onSetDocPanelCollapsed(false)
 
               const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              const baseList = [...artifacts]
+              const baseList = [...((targetConv?.artifacts || []) as Artifact[])]
               const mergedList: Artifact[] = parsedStream.artifacts.map((item, idx) => {
                 const existing = baseList.find((a) => a.title.toLowerCase() === item.title.toLowerCase())
                 return {
@@ -352,10 +354,13 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
                 }
               })
 
-              onUpdateConversation({
-                artifacts: mergedList as DocumentArtifact[],
-                documentContent: parsedStream.artifacts[0]?.content || accumulatedText,
-              })
+              onUpdateConversation(
+                {
+                  artifacts: mergedList as DocumentArtifact[],
+                  documentContent: parsedStream.artifacts[0]?.content || accumulatedText,
+                },
+                targetConvId,
+              )
 
               if (parsedStream.artifacts[0]?.content) {
                 onDocHistoryPush(parsedStream.artifacts[0].content)
@@ -394,9 +399,12 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           }
 
-          onUpdateConversation({
-            messages: [...updatedMsgs, assistantMessage],
-          })
+          onUpdateConversation(
+            {
+              messages: [...updatedMsgs, assistantMessage],
+            },
+            targetConvId,
+          )
           setStreamingText('')
           setIsGenerating(false)
           return
@@ -437,7 +445,8 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
               false,
             )
 
-        let updatedArtifacts: Artifact[] = [...artifacts]
+        const convArtifacts = (targetConv?.artifacts || []) as Artifact[]
+        let updatedArtifacts: Artifact[] = [...convArtifacts]
         let targetArtifactId: string | null = activeArtifactId
 
         if (extractedArtifacts.length > 1) {
@@ -452,11 +461,11 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             updatedAt: 'Hace un momento',
           }))
 
-          updatedArtifacts = [...updatedArtifacts, ...newCreatedItems]
+          updatedArtifacts = [...convArtifacts, ...newCreatedItems]
           targetArtifactId = newCreatedItems[0].id
           onSetActiveArtifactId(newCreatedItems[0].id)
           onDocHistoryReset(newCreatedItems[0].content)
-        } else if (extractedArtifacts.length === 1 || resolution.targetMode === 'plan' || resolution.targetMode === 'report' || artifacts.length === 0) {
+        } else if (extractedArtifacts.length === 1 || resolution.targetMode === 'plan' || resolution.targetMode === 'report' || convArtifacts.length === 0) {
           const newArtId = crypto.randomUUID()
           const artifactTitle =
             extractedArtifacts[0]?.title ||
@@ -473,13 +482,13 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             updatedAt: 'Hace un momento',
           }
-          updatedArtifacts = [...artifacts, newArtifact]
+          updatedArtifacts = [...convArtifacts, newArtifact]
           targetArtifactId = newArtId
           onSetActiveArtifactId(newArtId)
           onDocHistoryReset(newArtifact.content)
         } else {
-          const targetId = activeArtifact?.id || artifacts[0].id
-          updatedArtifacts = artifacts.map((a) =>
+          const targetId = activeArtifact?.id || convArtifacts[0]?.id
+          updatedArtifacts = convArtifacts.map((a) =>
             a.id === targetId ? { ...a, content: finalContent, updatedAt: 'Hace un momento' } : a,
           )
           onDocHistoryPush(finalContent)
@@ -500,12 +509,15 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }
 
-        onUpdateConversation({
-          messages: [...updatedMsgs, assistantMessage],
-          artifacts: updatedArtifacts as DocumentArtifact[],
-          documentContent: finalContent,
-          activeArtifactId: targetArtifactId || undefined,
-        })
+        onUpdateConversation(
+          {
+            messages: [...updatedMsgs, assistantMessage],
+            artifacts: updatedArtifacts as DocumentArtifact[],
+            documentContent: finalContent,
+            activeArtifactId: targetArtifactId || undefined,
+          },
+          targetConvId,
+        )
 
         onSetDocPanelCollapsed(false)
       } catch (err) {
@@ -542,9 +554,12 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }
 
-        onUpdateConversation({
-          messages: [...updatedMsgs, failureMessage],
-        })
+        onUpdateConversation(
+          {
+            messages: [...updatedMsgs, failureMessage],
+          },
+          targetConvId,
+        )
 
         onError?.(displayMsg, isAuthError, errorCategory)
       } finally {
