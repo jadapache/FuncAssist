@@ -91,9 +91,9 @@ class WhisperCloudService:
     # If file size is large (>20MB) or uncompressed WAV, compress with ffmpeg to compact 48k mono MP3
     file_size = audio_path.stat().st_size
     if file_size > 20 * 1024 * 1024 or audio_path.suffix.lower() in {".wav", ".mkv", ".mp4", ".avi", ".webm", ".mov", ".flac"}:
-      import shutil
       import subprocess
-      ffmpeg_cmd = shutil.which("ffmpeg")
+      from app.features.transcription.ffmpeg_utils import get_ffmpeg_binary
+      ffmpeg_cmd = get_ffmpeg_binary()
       if ffmpeg_cmd:
         comp_candidate = audio_path.parent / f"compressed_{audio_path.stem}.mp3"
         try:

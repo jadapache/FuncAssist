@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.core.settings import LOCAL_DIR
+from app.core.settings import USER_DATA_DIR
 
 client = TestClient(app)
 
