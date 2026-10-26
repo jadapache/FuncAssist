@@ -6,12 +6,17 @@ import hashlib
 import logging
 import re
 import uuid
+from pathlib import Path
 from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
+
+from app.core.settings import USER_DATA_DIR
+from app.core.storage import load_app_settings
+
 
 from app.api.transcription_stream import emit_progress
 from app.features.inventario.xlsx_builder import create_inventario_xlsx
@@ -383,3 +388,38 @@ async def export_levantamiento(req: ExportDocumentRequest) -> Response:
     )
   except Exception as exc:
     raise HTTPException(status_code=500, detail=f"Error al generar DOCX de Levantamiento: {exc}") from exc
+
+
+@router.post("/dictate")
+async def dictate_audio(file: UploadFile = File(...)):
+  """Transcribe a short voice dictation audio snippet for chat composition."""
+  content = await file.read()
+  if not content:
+    raise HTTPException(status_code=400, detail="Audio recording is empty.")
+
+  suffix = Path(file.filename or "audio.webm").suffix or ".webm"
+  temp_dir = USER_DATA_DIR / "temp_voice"
+  temp_dir.mkdir(parents=True, exist_ok=True)
+  temp_file = temp_dir / f"voice_{uuid.uuid4().hex[:8]}{suffix}"
+
+  try:
+    temp_file.write_bytes(content)
+    ai_cfg = load_app_settings().get("ai", {})
+    provider_id = (ai_cfg.get("transcription_provider") or "auto").lower()
+    model_id = ai_cfg.get("transcription_model") or "base"
+
+    from app.features.transcription.service import _resolve_provider
+    engine = _resolve_provider(provider_id, model_id)
+    res = await asyncio.to_thread(engine.transcribe, str(temp_file))
+    transcribed_text = res.text.strip() if res else ""
+    return {"text": transcribed_text, "filename": file.filename}
+  except Exception as exc:
+    logger.warning(f"Voice dictation transcription failed: {exc}")
+    return {"text": "", "error": str(exc), "filename": file.filename}
+  finally:
+    if temp_file.exists():
+      try:
+        temp_file.unlink()
+      except Exception:
+        pass
+
