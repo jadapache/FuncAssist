@@ -14,31 +14,59 @@ from typing import Any, Dict
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.security import machine_fingerprint as _machine_fingerprint
-
-SECRET_PREFIX = "enc::"
-
-
-
 from app.core.settings import SETTINGS_DIR
 
-def _get_master_secret() -> str:
-    """Obtiene la clave maestra desde variables de entorno, archivo persistente o huella del sistema."""
-    secret = os.getenv("PMQA_SECRET_KEY") or os.getenv("SECRET_KEY")
-    if secret:
-        return secret
+try:
+    import keyring
+except ImportError:  # pragma: no cover
+    keyring = None
 
+SECRET_PREFIX = "enc::"
+SERVICE_NAME = "funcassist"
+KEYRING_SECRET_KEY = "master-secret"
+
+
+def _read_legacy_key_file() -> str | None:
     key_file = SETTINGS_DIR / "secret.key"
     try:
         if key_file.exists():
             saved = key_file.read_text(encoding="utf-8").strip()
             if saved:
                 return saved
-        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        new_secret = secrets.token_urlsafe(32)
-        key_file.write_text(new_secret, encoding="utf-8")
-        return new_secret
     except Exception:
-        return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
+        return None
+    return None
+
+
+def _get_or_create_keyring_secret() -> str | None:
+    if keyring is None:
+        return None
+    try:
+        stored = keyring.get_password(SERVICE_NAME, KEYRING_SECRET_KEY)
+        if stored:
+            return stored
+        new_key = secrets.token_urlsafe(32)
+        keyring.set_password(SERVICE_NAME, KEYRING_SECRET_KEY, new_key)
+        return new_key
+    except Exception:
+        return None
+
+
+def _get_master_secret() -> str:
+    """Obtiene la clave maestra desde variables de entorno, almacenamiento seguro o huella del sistema."""
+    secret = os.getenv("PMQA_SECRET_KEY") or os.getenv("SECRET_KEY")
+    if secret:
+        return secret
+
+    legacy = _read_legacy_key_file()
+    if legacy:
+        return legacy
+
+    keyring_secret = _get_or_create_keyring_secret()
+    if keyring_secret:
+        return keyring_secret
+
+    return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
 
 
 def _get_fernet() -> Fernet:
