@@ -1,5 +1,6 @@
 import {
   API_BASE,
+  getAuthHeaders,
   handleResponse,
   type AgenticPromptResponse,
 } from '../../../api/client'
@@ -34,6 +35,7 @@ export const docAgentApi = {
     form.append('file', file)
     const res = await fetch(`${API_BASE}/api/doc-agent/parse-attachment`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
       body: form,
     })
     const data = await handleResponse<{ filename: string; content: string; char_count: number }>(res)
@@ -48,7 +50,7 @@ export const docAgentApi = {
   agenticPrompt: (payload: AgenticPromptPayload): Promise<AgenticPromptResponse> =>
     fetch(`${API_BASE}/api/doc-agent/agentic-prompt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,
@@ -81,6 +83,7 @@ export const docAgentApi = {
   cancelRun: async (runId: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/api/doc-agent/runs/${encodeURIComponent(runId)}/cancel`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
     })
     if (!res.ok) {
       throw new Error(`Failed to cancel run ${runId}`)
@@ -96,7 +99,7 @@ export const docAgentApi = {
   ): Promise<AgenticPromptResponse> => {
     const res = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt-stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       signal,
       body: JSON.stringify({
         prompt: payload.query,
