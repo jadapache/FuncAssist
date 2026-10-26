@@ -40,8 +40,9 @@ def _derive_fernet_key(secret: str) -> bytes:
 
 def _resolve_secret() -> str:
   settings = get_settings()
-  if settings.pmqa_secret_key:
-    return settings.pmqa_secret_key
+  secret = settings.secret_key
+  if secret:
+    return secret
 
   if keyring is not None:
     try:

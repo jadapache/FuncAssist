@@ -13,45 +13,34 @@ from typing import Any, Dict
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.core.security import machine_fingerprint as _machine_fingerprint
-
 SECRET_PREFIX = "enc::"
-
-
 
 _MASTER_SECRET_CACHE: str | None = None
 
 
 def _get_master_secret() -> str:
-    """Obtiene la clave maestra desde variables de entorno, base de datos o huella del sistema."""
+    """Obtiene la clave maestra estrictamente desde variables de entorno."""
     global _MASTER_SECRET_CACHE
     if _MASTER_SECRET_CACHE:
         return _MASTER_SECRET_CACHE
 
-    secret = os.getenv("PMQA_SECRET_KEY") or os.getenv("SECRET_KEY")
-    if secret:
-        _MASTER_SECRET_CACHE = secret
-        return secret
+    secret = os.getenv("SECRET_KEY") or os.getenv("PMQA_SECRET_KEY")
+    if not secret:
+        try:
+            from app.core.settings import get_settings
+            settings = get_settings()
+            secret = settings.secret_key or settings.pmqa_secret_key
+        except Exception:
+            pass
 
-    try:
-        from app.db.database import get_sync_db
-        from app.db.models import SettingModel
-        from sqlalchemy import select
-        with get_sync_db() as db:
-            setting = db.scalar(select(SettingModel).where(SettingModel.key == "system:master_secret"))
-            if setting and setting.value:
-                _MASTER_SECRET_CACHE = setting.value
-                return setting.value
-            new_secret = secrets.token_urlsafe(32)
-            db.add(SettingModel(key="system:master_secret", value=new_secret))
-            db.commit()
-            _MASTER_SECRET_CACHE = new_secret
-            return new_secret
-    except Exception:
-        pass
+    if secret and secret.strip():
+        _MASTER_SECRET_CACHE = secret.strip()
+        return _MASTER_SECRET_CACHE
 
-    _MASTER_SECRET_CACHE = f"qa-mgmt-local-secret::{_machine_fingerprint()}"
-    return _MASTER_SECRET_CACHE
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required for encryption and security. "
+        "Please define SECRET_KEY in your .env file or container environment."
+    )
 
 
 def _get_fernet() -> Fernet:
