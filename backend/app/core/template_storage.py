@@ -120,6 +120,19 @@ async def get_template(template_id: str) -> Optional[Dict[str, Any]]:
             return item
     return None
 
+
+def get_template_file_path(template_id: str) -> Optional[Path]:
+    items = _load_index()
+    for item in items:
+        if item.get("id") == template_id:
+            stored = item.get("stored_filename")
+            if stored:
+                p = TEMPLATES_DIR / stored
+                if p.exists():
+                    return p
+    return None
+
+
 def extract_docx_structure(file_path: Path) -> Dict[str, Any]:
     if docx is None:
         return {"content": "Librería python-docx no disponible.", "header": "", "footer": ""}
