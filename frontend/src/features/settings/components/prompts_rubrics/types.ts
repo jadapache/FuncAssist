@@ -2,10 +2,23 @@ export interface FeatureMeta {
   id: string
   title: string
   description: string
-  category: 'workspace' | 'qa' | 'product'
+  category: 'workspace' | 'qa' | 'product' | 'custom'
+  isCustom?: boolean
 }
 
 export const FEATURE_METAS: FeatureMeta[] = [
+  {
+    id: 'generic_plan',
+    title: 'Plan Técnico y Plan de Pruebas (/plan)',
+    description: 'Estructuración de planes técnicos, casos de prueba, riesgos, mitigación y cronograma.',
+    category: 'qa',
+  },
+  {
+    id: 'generic_report',
+    title: 'Informe Técnico y Ejecutivo (/informe)',
+    description: 'Elaboración de informes formales con hallazgos, evidencias, impacto y recomendaciones.',
+    category: 'workspace',
+  },
   {
     id: 'mejoras_doc',
     title: 'Redacción y Mejoras de Documentos',

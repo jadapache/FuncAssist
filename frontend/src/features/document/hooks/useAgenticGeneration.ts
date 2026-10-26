@@ -1,12 +1,14 @@
 /**
  * Hook que encapsula el ciclo completo de generación agentic:
- * prompt del usuario → llamada al backend → parsing de artefactos → actualización de estado.
+ * prompt del usuario → llamada al backend → streaming en vivo en el chat → actualización de estado.
  */
 
-import { useCallback, useRef, useState } from 'react'
-import { api, type KnowledgeDocument } from '../../../api/client'
-import { generateArtifactSubtitle, parseMultipleArtifacts } from '../../../utils/artifactSplitter'
-import type { ThinkingStep, ChatPersistMessage, DocumentArtifact, ChatConversation } from './useChatPersistence'
+import { useCallback, useState } from 'react'
+import { generateArtifactSubtitle, parseMultipleArtifacts, parseStreamForChatAndArtifacts } from '../../../utils/artifactSplitter'
+import type { EphemeralAttachmentDoc } from '../api/docAgentApi'
+import { useAgentRun } from './useAgentRun'
+import type { AgentRunState } from '../types/agentEvents'
+import type { ChatPersistMessage, DocumentArtifact, ChatConversation, ChatAttachment } from './useChatPersistence'
 import type { Artifact } from '../../../types/artifacts'
 import type { FuncionalFeatureConfig } from '../../../features/funcional'
 import type { CanonicalDocumentOperation } from '../../../features/document/agent/core/types'
@@ -17,7 +19,6 @@ interface UseAgenticGenerationOptions {
   config: FuncionalFeatureConfig
   templateContent: string
   sources: string[]
-  uploaded: KnowledgeDocument[]
   activeConversation: ChatConversation | null
   activeArtifact: Artifact | null
   activeArtifactId: string | null
@@ -25,7 +26,7 @@ interface UseAgenticGenerationOptions {
   docHistoryContent: string
   adapter: UniverAdapter
   agent: DocumentAgent
-  onUpdateConversation: (updates: Partial<ChatConversation>) => void
+  onUpdateConversation: (updates: Partial<ChatConversation>, targetId?: string) => void
   onSetActiveArtifactId: (id: string) => void
   onDocHistoryPush: (content: string) => void
   onDocHistoryReset: (content: string) => void
@@ -43,31 +44,179 @@ interface UseAgenticGenerationOptions {
 
 export interface GenerationResult {
   isGenerating: boolean
-  liveThinkingSteps: ThinkingStep[]
-  handleSendMessage: (query?: string) => Promise<void>
+  streamingText: string
+  generationStatus: string
+  liveThinkingSteps: unknown[]
+  runState: AgentRunState
+  handleCancelRun: () => Promise<void>
+  handleSendMessage: (
+    query?: string,
+    attachedImages?: Array<{ name: string; dataUrl: string; size?: number }>,
+    attachedDocs?: EphemeralAttachmentDoc[],
+  ) => Promise<void>
+}
+
+interface IntentResolution {
+  commandSlug: string | null
+  cleanQuery: string
+  targetFeature: string
+  targetMode: string
+  initialStatus: string
+  isChatOnly: boolean
+}
+
+function resolveIntentAndStatus(
+  queryText: string,
+  defaultFeature: string,
+): IntentResolution {
+  const pLower = queryText.toLowerCase()
+  const isQuestion =
+    pLower.startsWith('¿') ||
+    pLower.startsWith('que ') ||
+    pLower.startsWith('qué ') ||
+    pLower.startsWith('como ') ||
+    pLower.startsWith('cómo ') ||
+    pLower.startsWith('cual ') ||
+    pLower.startsWith('cuál ') ||
+    pLower.startsWith('por que') ||
+    pLower.startsWith('por qué') ||
+    pLower.startsWith('explica') ||
+    pLower.includes('?')
+
+  const commandMatch = queryText.match(/^\/([a-zA-Z0-9_-]+)(?:\s+(.*))?$/s)
+  const commandSlug = commandMatch ? commandMatch[1].toLowerCase() : null
+  const cleanQuery = commandMatch && commandMatch[2] ? commandMatch[2].trim() : queryText
+
+  if (commandSlug) {
+    if (commandSlug === 'plan') {
+      return {
+        commandSlug,
+        cleanQuery,
+        targetFeature: 'generic_plan',
+        targetMode: 'plan',
+        initialStatus: 'Generando plan...',
+        isChatOnly: false,
+      }
+    }
+    if (commandSlug === 'informe' || commandSlug === 'report') {
+      return {
+        commandSlug,
+        cleanQuery,
+        targetFeature: 'generic_report',
+        targetMode: 'report',
+        initialStatus: 'Elaborando informe...',
+        isChatOnly: false,
+      }
+    }
+    if (commandSlug === 'plantilla') {
+      return {
+        commandSlug,
+        cleanQuery,
+        targetFeature: defaultFeature,
+        targetMode: 'template',
+        initialStatus: 'Estructurando documento...',
+        isChatOnly: false,
+      }
+    }
+    return {
+      commandSlug,
+      cleanQuery,
+      targetFeature: commandSlug,
+      targetMode: commandSlug,
+      initialStatus: `Ejecutando /${commandSlug}...`,
+      isChatOnly: false,
+    }
+  }
+
+  if (isQuestion) {
+    return {
+      commandSlug: null,
+      cleanQuery,
+      targetFeature: defaultFeature,
+      targetMode: 'chat',
+      initialStatus: 'Pensando...',
+      isChatOnly: true,
+    }
+  }
+
+  if (pLower.includes('plan de') || pLower.includes('genera un plan') || pLower.includes('crea un plan')) {
+    return {
+      commandSlug: 'plan',
+      cleanQuery,
+      targetFeature: 'generic_plan',
+      targetMode: 'plan',
+      initialStatus: 'Generando plan...',
+      isChatOnly: false,
+    }
+  }
+
+  if (pLower.includes('informe') || pLower.includes('reporte') || pLower.includes('resumen ejecutivo')) {
+    return {
+      commandSlug: 'informe',
+      cleanQuery,
+      targetFeature: 'generic_report',
+      targetMode: 'report',
+      initialStatus: 'Elaborando informe...',
+      isChatOnly: false,
+    }
+  }
+
+  if (pLower.includes('completa la plantilla') || pLower.includes('genera el documento')) {
+    return {
+      commandSlug: 'plantilla',
+      cleanQuery,
+      targetFeature: defaultFeature,
+      targetMode: 'template',
+      initialStatus: 'Estructurando documento...',
+      isChatOnly: false,
+    }
+  }
+
+  return {
+    commandSlug: null,
+    cleanQuery,
+    targetFeature: defaultFeature,
+    targetMode: 'auto',
+    initialStatus: 'Pensando...',
+    isChatOnly: false,
+  }
+}
+
+function resolveAssistantBubbleText(
+  resMsg: string | undefined,
+  finalContent: string,
+  targetMode: string,
+  detectedIntent: string,
+  docTitle: string,
+): string {
+  if (resMsg && !resMsg.includes('<artifact') && resMsg !== finalContent) {
+    return resMsg.replace(/<\/?chat>/gi, '').trim()
+  }
+
+  const parsed = parseStreamForChatAndArtifacts(finalContent, docTitle)
+  if (parsed.chatText && !parsed.chatText.includes('<artifact') && parsed.chatText !== finalContent) {
+    return parsed.chatText
+  }
+
+  if (targetMode === 'plan' || detectedIntent === 'generic_plan') {
+    return 'He elaborado el plan solicitado. Puedes revisarlo, editarlo y descargarlo en el panel de Artefactos.'
+  }
+  if (targetMode === 'report' || detectedIntent === 'generic_report') {
+    return 'He estructurado el informe solicitado con las evidencias y hallazgos. Puedes consultarlo en el panel de Artefactos.'
+  }
+  return 'He generado el documento correspondiente en el panel de artefactos.'
 }
 
 export function useAgenticGeneration(opts: UseAgenticGenerationOptions): GenerationResult {
   const [isGenerating, setIsGenerating] = useState(false)
-  const [liveThinkingSteps, setLiveThinkingSteps] = useState<ThinkingStep[]>([])
-  const liveThinkingStepsRef = useRef<ThinkingStep[]>([])
-
-  const updateLiveThinkingSteps = useCallback(
-    (updater: ThinkingStep[] | ((prev: ThinkingStep[]) => ThinkingStep[])) => {
-      setLiveThinkingSteps((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : updater
-        liveThinkingStepsRef.current = next
-        return next
-      })
-    },
-    [],
-  )
+  const [streamingText, setStreamingText] = useState('')
+  const [generationStatus, setGenerationStatus] = useState('Pensando...')
+  const { runState, executeRun, cancelRun } = useAgentRun()
 
   const {
     config,
     templateContent,
     sources,
-    uploaded,
     activeConversation,
     activeArtifact,
     activeArtifactId,
@@ -88,104 +237,111 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
   } = opts
 
   const handleSendMessage = useCallback(
-    async (customQuery?: string) => {
+    async (
+      customQuery?: string,
+      attachedImages?: Array<{ name: string; dataUrl: string; size?: number }>,
+      attachedDocs?: EphemeralAttachmentDoc[],
+    ) => {
       const queryText = (customQuery || '').trim()
-      if (!queryText || isGenerating) return
+      if ((!queryText && (!attachedImages || attachedImages.length === 0) && (!attachedDocs || attachedDocs.length === 0)) || isGenerating) {
+        return
+      }
 
       setIsGenerating(true)
+      setStreamingText('')
       onResetPromptInputs?.()
 
       const userMsgId = crypto.randomUUID()
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
+      const docAttachments: ChatAttachment[] = (attachedDocs || []).map((doc) => ({
+        id: doc.id,
+        name: doc.filename,
+        type: 'file',
+        size: doc.char_count,
+      }))
+
+      const imgAttachments: ChatAttachment[] = (attachedImages || []).map((img, idx) => ({
+        id: `att-${idx}-${Date.now()}`,
+        name: img.name,
+        type: 'image',
+        dataUrl: img.dataUrl,
+        size: img.size,
+      }))
+
+      const allAttachments = [...imgAttachments, ...docAttachments]
+
       const userMessage: ChatPersistMessage = {
         id: userMsgId,
         role: 'user',
-        content: queryText,
+        content: queryText || (allAttachments.length > 0 ? 'Documentos e imágenes adjuntas' : ''),
         timestamp: now,
+        attachments: allAttachments.length > 0 ? allAttachments : undefined,
       }
 
-      // Create or title conversation dynamically on first user prompt
       let targetConv = activeConversation
+      const titleSeed = queryText || attachedDocs?.[0]?.filename || 'Consulta'
       if (!targetConv) {
-        const convTitle = queryText.length > 28 ? `${queryText.slice(0, 28)}...` : queryText
+        const convTitle = titleSeed.length > 28 ? `${titleSeed.slice(0, 28)}...` : titleSeed
         targetConv = createConversation(convTitle)
       } else if (
         targetConv.messages.length === 0 &&
         (targetConv.name === 'Nueva conversación' || targetConv.name.startsWith('Conversación '))
       ) {
-        const convTitle = queryText.length > 28 ? `${queryText.slice(0, 28)}...` : queryText
+        const convTitle = titleSeed.length > 28 ? `${titleSeed.slice(0, 28)}...` : titleSeed
         renameConversation(targetConv.id, convTitle)
       }
 
+      const targetConvId = targetConv.id
       const currentMsgs = targetConv?.messages ?? []
       const updatedMsgs = [...currentMsgs, userMessage]
-      onUpdateConversation({ messages: updatedMsgs })
+      onUpdateConversation({ messages: updatedMsgs }, targetConvId)
       onScrollToBottom()
 
-      // Initialize thinking steps
-      const steps: ThinkingStep[] = [
-        { id: '1', label: '1. Identificando objetivo y entidades de negocio', status: 'in_progress' },
-        { id: '2', label: '2. Consultando fuentes de conocimiento activas', status: 'pending' },
-        { id: '3', label: '3. Mutando árbol canónico del documento', status: 'pending' },
-        { id: '4', label: '4. Verificando plantilla', status: 'pending' },
-        { id: '5', label: '5. Renderizando contenido', status: 'pending' },
-      ]
-      updateLiveThinkingSteps(steps)
+      const defaultFeature = config.uploadTags || config.slug
+      const resolution = resolveIntentAndStatus(queryText, defaultFeature)
+      setGenerationStatus(resolution.initialStatus)
 
       try {
-        // Step 1 -> Step 2
-        await new Promise((r) => setTimeout(r, 400))
-        updateLiveThinkingSteps((prev) =>
-          prev.map((s) =>
-            s.id === '1'
-              ? { ...s, status: 'completed' }
-              : s.id === '2'
-                ? { ...s, status: 'in_progress' }
-                : s,
-          ),
-        )
-
-        // Run backend Agentic RAG prompt API with live streaming
         const currentDocContent = docHistoryContent || activeArtifact?.content || templateContent || ''
         let latestAccumulatedText = ''
+        let liveIntent = resolution.targetFeature
 
-        const res = await api.agenticPromptStream(
+        const res = await executeRun(
           {
             query: queryText,
+            feature: resolution.targetFeature,
+            mode: resolution.targetMode,
+            images: attachedImages?.map((img) => ({
+              name: img.name,
+              data: img.dataUrl,
+            })),
+            attached_docs: attachedDocs?.map((d) => ({
+              filename: d.filename,
+              content: d.content || '',
+            })),
             current_document: currentDocContent,
             chat_context: currentMsgs.slice(-4).map((m) => `${m.role}: ${m.content}`),
             sources,
-            document_ids: uploaded.map((d) => d.id),
+            conversation_id: targetConvId,
           },
           (accumulatedText) => {
             latestAccumulatedText = accumulatedText
 
-            // Update live thinking steps as chunks stream in
-            updateLiveThinkingSteps((prev) =>
-              prev.map((s) =>
-                s.id === '1' || s.id === '2'
-                  ? { ...s, status: 'completed' }
-                  : s.id === '3' || s.id === '4' || s.id === '5'
-                    ? { ...s, status: 'in_progress' }
-                    : s,
-              ),
-            )
-
-            // Parse multi-artifacts dynamically during streaming
-            const streamExtracted = parseMultipleArtifacts(
+            const parsedStream = parseStreamForChatAndArtifacts(
               accumulatedText,
               config.docxTitle || config.title,
               'docx',
               templateContent,
             )
 
-            if (streamExtracted.length > 0) {
+            if (!parsedStream.isConversational && parsedStream.artifacts.length > 0) {
+              setStreamingText(parsedStream.chatText)
               onSetDocPanelCollapsed(false)
 
               const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              const baseList = [...artifacts]
-              const mergedList: Artifact[] = streamExtracted.map((item, idx) => {
+              const baseList = [...((targetConv?.artifacts || []) as Artifact[])]
+              const mergedList: Artifact[] = parsedStream.artifacts.map((item, idx) => {
                 const existing = baseList.find((a) => a.title.toLowerCase() === item.title.toLowerCase())
                 return {
                   id: existing ? existing.id : `art-stream-${idx}`,
@@ -198,23 +354,60 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
                 }
               })
 
-              onUpdateConversation({
-                artifacts: mergedList as DocumentArtifact[],
-                documentContent: streamExtracted[0]?.content || accumulatedText,
-              })
+              onUpdateConversation(
+                {
+                  artifacts: mergedList as DocumentArtifact[],
+                  documentContent: parsedStream.artifacts[0]?.content || accumulatedText,
+                },
+                targetConvId,
+              )
 
-              if (streamExtracted[0]?.content) {
-                onDocHistoryPush(streamExtracted[0].content)
+              if (parsedStream.artifacts[0]?.content) {
+                onDocHistoryPush(parsedStream.artifacts[0].content)
               }
+            } else {
+              setStreamingText(parsedStream.chatText || accumulatedText)
             }
+          },
+          (intent) => {
+            liveIntent = intent
+            if (intent === 'generic_plan') setGenerationStatus('Generando plan...')
+            else if (intent === 'generic_report') setGenerationStatus('Elaborando informe...')
+            else if (intent === 'template_mutation') setGenerationStatus('Mutando plantilla...')
+            else setGenerationStatus('Pensando...')
           },
         )
 
         const candidateContent = res.document_updates || res.answer || latestAccumulatedText
         if (!candidateContent || !candidateContent.trim()) {
           throw new Error(
-            'El modelo no generó contenido para el documento. Verifica la conexión y tu clave de API en Configuración.',
+            'El modelo no generó contenido para la respuesta. Verifica la conexión y tu clave de API en Configuración.',
           )
+        }
+
+        const detectedIntent = res.intent_detected || liveIntent
+        const hasExplicitArtifacts = (res.artifacts && res.artifacts.length > 0) || candidateContent.includes('<artifact')
+        const isChatIntent = resolution.isChatOnly || (detectedIntent === 'chat' && !hasExplicitArtifacts)
+
+        if (isChatIntent) {
+          const rawChat = res.assistant_message || res.answer || candidateContent
+          const cleanChat = rawChat.replace(/<\/?chat>/gi, '').trim()
+          const assistantMessage: ChatPersistMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: cleanChat,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }
+
+          onUpdateConversation(
+            {
+              messages: [...updatedMsgs, assistantMessage],
+            },
+            targetConvId,
+          )
+          setStreamingText('')
+          setIsGenerating(false)
+          return
         }
 
         let finalContent = candidateContent
@@ -236,8 +429,6 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           finalContent = adapter.getRawContent()
         }
 
-        updateLiveThinkingSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' })))
-
         const backendArtifacts = res.artifacts
         const extractedArtifacts =
           backendArtifacts && backendArtifacts.length > 0
@@ -251,13 +442,14 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
               config.docxTitle || config.title,
               config.defaultExtension || 'docx',
               templateContent,
+              false,
             )
 
-        let updatedArtifacts: Artifact[] = [...artifacts]
+        const convArtifacts = (targetConv?.artifacts || []) as Artifact[]
+        let updatedArtifacts: Artifact[] = [...convArtifacts]
         let targetArtifactId: string | null = activeArtifactId
 
         if (extractedArtifacts.length > 1) {
-          // Multi-artifact response: create each distinct artifact
           const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           const newCreatedItems: Artifact[] = extractedArtifacts.map((extracted, idx) => ({
             id: crypto.randomUUID(),
@@ -269,66 +461,64 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             updatedAt: 'Hace un momento',
           }))
 
-          updatedArtifacts = [...updatedArtifacts, ...newCreatedItems]
+          updatedArtifacts = [...convArtifacts, ...newCreatedItems]
           targetArtifactId = newCreatedItems[0].id
           onSetActiveArtifactId(newCreatedItems[0].id)
           onDocHistoryReset(newCreatedItems[0].content)
-        } else if (artifacts.length === 0) {
-          // Create first single artifact dynamically
+        } else if (extractedArtifacts.length === 1 || resolution.targetMode === 'plan' || resolution.targetMode === 'report' || convArtifacts.length === 0) {
           const newArtId = crypto.randomUUID()
+          const artifactTitle =
+            extractedArtifacts[0]?.title ||
+            (resolution.commandSlug
+              ? `${resolution.commandSlug.toUpperCase()}: ${resolution.cleanQuery.slice(0, 30)}`
+              : config.docxTitle || config.title)
+
           const newArtifact: Artifact = {
             id: newArtId,
-            title: extractedArtifacts[0]?.title || config.docxTitle || config.title,
-            subtitle: 'Generado por Asistente IA',
-            extension: extractedArtifacts[0]?.extension || 'docx',
-            content: finalContent,
+            title: artifactTitle,
+            subtitle: generateArtifactSubtitle(extractedArtifacts[0]?.content || finalContent) || 'Documento generado por IA',
+            extension: extractedArtifacts[0]?.extension || config.defaultExtension || 'docx',
+            content: extractedArtifacts[0]?.content || finalContent,
             createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             updatedAt: 'Hace un momento',
           }
-          updatedArtifacts = [newArtifact]
+          updatedArtifacts = [...convArtifacts, newArtifact]
           targetArtifactId = newArtId
           onSetActiveArtifactId(newArtId)
-          onDocHistoryReset(finalContent)
+          onDocHistoryReset(newArtifact.content)
         } else {
-          // Update currently active artifact
-          const targetId = activeArtifact?.id || artifacts[0].id
-          updatedArtifacts = artifacts.map((a) =>
+          const targetId = activeArtifact?.id || convArtifacts[0]?.id
+          updatedArtifacts = convArtifacts.map((a) =>
             a.id === targetId ? { ...a, content: finalContent, updatedAt: 'Hace un momento' } : a,
           )
           onDocHistoryPush(finalContent)
         }
 
-        // Formulate a concise chat bubble message for the user
-        const isFullDocumentMarkdown =
-          (res.answer &&
-            (res.answer.startsWith('#') || res.answer.includes('## ') || res.answer.includes('| --- |'))) ||
-          (res.document_updates && res.document_updates.length > 150)
+        const bubbleContent = resolveAssistantBubbleText(
+          res.assistant_message,
+          finalContent,
+          resolution.targetMode,
+          detectedIntent,
+          config.docxTitle || config.title,
+        )
 
-        let bubbleContent = res.assistant_message
-        if (!bubbleContent || isFullDocumentMarkdown) {
-          bubbleContent =
-            extractedArtifacts.length > 1
-              ? `Se han generado ${extractedArtifacts.length} artefactos de forma independiente y progresiva en tiempo real. Puedes navegar entre ellos, editarlos o descargarlos desde el panel de Artefactos a la derecha.`
-              : 'Documento generado exitosamente. Puedes revisarlo, editarlo en directo o descargarlo desde el panel de Artefactos a la derecha.'
-        }
-
-        // Save assistant response message with attached thinking steps
         const assistantMessage: ChatPersistMessage = {
           id: crypto.randomUUID(),
           role: 'assistant',
           content: bubbleContent,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          thinkingSteps: steps.map((s) => ({ ...s, status: 'completed' })),
         }
 
-        onUpdateConversation({
-          messages: [...updatedMsgs, assistantMessage],
-          artifacts: updatedArtifacts as DocumentArtifact[],
-          documentContent: finalContent,
-          activeArtifactId: targetArtifactId || undefined,
-        })
+        onUpdateConversation(
+          {
+            messages: [...updatedMsgs, assistantMessage],
+            artifacts: updatedArtifacts as DocumentArtifact[],
+            documentContent: finalContent,
+            activeArtifactId: targetArtifactId || undefined,
+          },
+          targetConvId,
+        )
 
-        // Expand right Artefactos panel now that LLM document response is ready
         onSetDocPanelCollapsed(false)
       } catch (err) {
         console.error('Error in agentic pipeline:', err)
@@ -348,74 +538,47 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         else if (isRateLimitError) errorCategory = 'rate_limit'
         else if (isContextMissingError) errorCategory = 'context'
 
-        // Mark current liveThinkingSteps with failed status
-        const currentSteps = liveThinkingStepsRef.current.length > 0 ? liveThinkingStepsRef.current : steps
-        const failedSteps: ThinkingStep[] = currentSteps.map((s) => {
-          if (s.status === 'in_progress') {
-            const stepDetail = isContextMissingError
-              ? 'No se encontraron fragmentos relevantes en las fuentes de contexto'
-              : errMsg
-            return { ...s, status: 'failed', details: stepDetail }
-          }
-          if (s.status === 'completed') {
-            return s
-          }
-          return { ...s, status: 'failed' }
-        })
-
         let displayMsg = errMsg
         if (isAuthError) {
-          displayMsg = `Error: La API key guardada no es válida. Por favor actualízala en Configuración.`
+          displayMsg = 'Error: La API key guardada no es válida. Por favor actualízala en Configuración.'
         } else if (isRateLimitError) {
-          const limitMatch = errMsg.match(/Limit\s*(\d+)/i)
-          const reqMatch = errMsg.match(/Requested\s*(\d+)/i)
-          const reqTokens = reqMatch ? reqMatch[1] : 'la cantidad enviada de'
-          const limitTokens = limitMatch ? limitMatch[1] : 'el'
-          displayMsg = `La solicitud con ${reqTokens} tokens supera el límite de ${limitTokens} tokens de salida para este modelo. Por favor, selecciona un modelo diferente en Configuración.`
+          displayMsg = 'La solicitud supera el límite de tokens de salida para este modelo.'
         } else if (isContextMissingError) {
-          if (/no matching chunks/i.test(errMsg)) {
-            displayMsg = `No se tiene información suficiente para responder a esta solicitud.`
-          } else if (/no documents uploaded/i.test(errMsg)) {
-            displayMsg = `La base de conocimiento no tiene documentos para consultar.`
-          } else if (errMsg.startsWith('No se encontró') || errMsg.startsWith('No hay')) {
-            displayMsg = errMsg
-          } else {
-            displayMsg = `No se encontró contexto suficiente para procesar la consulta.`
-          }
-        } else if (errMsg.startsWith('La solicitud con') || errMsg.startsWith('Hubo un error')) {
-          displayMsg = errMsg
-        } else {
-          displayMsg = `Error al conectar o recibir respuesta del modelo: ${errMsg}`
+          displayMsg = 'No se encontró contexto suficiente en las fuentes para procesar la consulta.'
         }
 
-        const assistantMessage: ChatPersistMessage = {
+        const failureMessage: ChatPersistMessage = {
           id: crypto.randomUUID(),
           role: 'assistant',
           content: displayMsg,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          thinkingSteps: failedSteps,
         }
 
-        onUpdateConversation({ messages: [...updatedMsgs, assistantMessage] })
+        onUpdateConversation(
+          {
+            messages: [...updatedMsgs, failureMessage],
+          },
+          targetConvId,
+        )
+
         onError?.(displayMsg, isAuthError, errorCategory)
       } finally {
         setIsGenerating(false)
-        updateLiveThinkingSteps([])
+        setStreamingText('')
+        onScrollToBottom()
       }
     },
     [
       isGenerating,
+      onResetPromptInputs,
       activeConversation,
-      createConversation,
-      renameConversation,
       onUpdateConversation,
       onScrollToBottom,
       docHistoryContent,
       activeArtifact,
       templateContent,
-      sources,
-      uploaded,
       config,
+      sources,
       adapter,
       agent,
       artifacts,
@@ -424,11 +587,20 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       onDocHistoryReset,
       onDocHistoryPush,
       onSetDocPanelCollapsed,
-      onResetPromptInputs,
+      createConversation,
+      renameConversation,
       onError,
-      updateLiveThinkingSteps,
     ],
   )
 
-  return { isGenerating, liveThinkingSteps, handleSendMessage }
+  return {
+    isGenerating,
+    streamingText,
+    generationStatus: runState.activeStatusText || generationStatus,
+    liveThinkingSteps: runState.steps,
+    runState,
+    handleCancelRun: cancelRun,
+    handleSendMessage,
+  }
 }
+

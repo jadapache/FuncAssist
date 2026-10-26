@@ -40,3 +40,9 @@ api_router.include_router(features_pm.router)
 api_router.include_router(features_qa.router)
 api_router.include_router(features_doc.router)
 api_router.include_router(templates.router)
+
+
+@api_router.post("/runs/{run_id}/cancel")
+async def cancel_run_alias(run_id: str):
+    return await document_agent.cancel_agent_run(run_id)
+

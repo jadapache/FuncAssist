@@ -6,14 +6,16 @@ import {
   FileCode,
   FileText,
   ListOrdered,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
   Sparkles,
+  X,
 } from 'lucide-react'
 import { api, type AIPromptTemplate, type AIRubric } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
-import { FEATURE_METAS, type FeatureMeta } from './prompts_rubrics/types'
+import { FEATURE_METAS, AVAILABLE_SOURCES, type FeatureMeta } from './prompts_rubrics/types'
 import { FeatureSelectorSidebar } from './prompts_rubrics/FeatureSelectorSidebar'
 import { PromptEditor } from './prompts_rubrics/PromptEditor'
 import { RubricEditor } from './prompts_rubrics/RubricEditor'
@@ -32,6 +34,16 @@ export const AiPromptsRubricsEditor = () => {
   const [loading, setLoading] = useState<boolean>(true)
   const [saving, setSaving] = useState<boolean>(false)
   const [resetting, setResetting] = useState<boolean>(false)
+
+  // Create new prompt modal state
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newFeatureSlug, setNewFeatureSlug] = useState('')
+  const [newFeatureTitle, setNewFeatureTitle] = useState('')
+  const [newFeatureDesc, setNewFeatureDesc] = useState('')
+  const [newFeatureSystem, setNewFeatureSystem] = useState('')
+  const [newFeatureUserTemplate, setNewFeatureUserTemplate] = useState('')
+  const [newFeatureSources, setNewFeatureSources] = useState<string[]>(['knowledge'])
+  const [creatingPrompt, setCreatingPrompt] = useState(false)
 
   // Current working prompt / rubric state
   const [promptData, setPromptData] = useState<AIPromptTemplate | null>(null)
@@ -254,6 +266,50 @@ export const AiPromptsRubricsEditor = () => {
     toast.success(`Variable ${placeholder} agregada`)
   }
 
+  const handleToggleCreateSource = (srcId: string) => {
+    setNewFeatureSources((prev) =>
+      prev.includes(srcId) ? prev.filter((s) => s !== srcId) : [...prev, srcId],
+    )
+  }
+
+  const handleCreatePromptSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const cleanSlug = newFeatureSlug
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '_')
+      .replace(/^_+|_+$/g, '')
+    if (!cleanSlug) {
+      toast.error('El identificador (slug) es obligatorio y debe ser alfanumérico')
+      return
+    }
+    setCreatingPrompt(true)
+    try {
+      await api.createAiPrompt({
+        feature: cleanSlug,
+        title: newFeatureTitle.trim() || cleanSlug,
+        description: newFeatureDesc.trim() || `Prompt personalizado para ${cleanSlug}`,
+        system: newFeatureSystem.trim() || 'Eres un asistente especializado en QA.',
+        user_template: newFeatureUserTemplate.trim() || 'Solicitud: {query}\n\nContexto:\n{context}',
+        allowed_sources: newFeatureSources,
+      })
+      toast.success(`Prompt "${cleanSlug}" creado exitosamente`)
+      setShowCreateModal(false)
+      setNewFeatureSlug('')
+      setNewFeatureTitle('')
+      setNewFeatureDesc('')
+      setNewFeatureSystem('')
+      setNewFeatureUserTemplate('')
+      setNewFeatureSources(['knowledge'])
+      await loadAll()
+      setSelectedFeature(cleanSlug)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear el prompt')
+    } finally {
+      setCreatingPrompt(false)
+    }
+  }
+
   const allFeatures = useMemo(() => {
     const list: FeatureMeta[] = [...FEATURE_METAS]
     const existingIds = new Set(list.map((f) => f.id))
@@ -263,9 +319,10 @@ export const AiPromptsRubricsEditor = () => {
         existingIds.add(p.feature)
         list.push({
           id: p.feature,
-          title: p.feature.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          description: `Configuración de plantilla y rúbrica para ${p.feature}`,
-          category: 'workspace',
+          title: (p.title as string) || p.feature.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          description: (p.description as string) || `Prompt personalizado para ${p.feature}`,
+          category: 'custom',
+          isCustom: true,
         })
       }
     }
@@ -274,9 +331,10 @@ export const AiPromptsRubricsEditor = () => {
         existingIds.add(r.feature)
         list.push({
           id: r.feature,
-          title: r.feature.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          description: `Configuración de plantilla y rúbrica para ${r.feature}`,
-          category: 'workspace',
+          title: (r.title as string) || r.feature.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          description: (r.description as string) || `Configuración de rúbrica para ${r.feature}`,
+          category: 'custom',
+          isCustom: true,
         })
       }
     }
@@ -317,6 +375,15 @@ export const AiPromptsRubricsEditor = () => {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="btn btn-primary text-xs py-2 px-3 inline-flex items-center gap-1.5 bg-[#002777] text-white shadow-xs cursor-pointer"
+            title="Crear un nuevo prompt o comando de IA"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Nuevo Prompt</span>
+          </button>
           <button
             type="button"
             disabled={loading}
@@ -513,6 +580,141 @@ export const AiPromptsRubricsEditor = () => {
             </div>
           </div>
         </div>
+
+      {/* Create Prompt Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto font-sans">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1 rounded-lg bg-[#002777] text-white">
+                  <Plus className="h-4 w-4" />
+                </span>
+                <h3 className="text-base font-bold text-slate-900">Crear Nuevo Prompt de IA</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePromptSubmit} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 block">
+                  Identificador Único (Comando / Slug)
+                </label>
+                <input
+                  type="text"
+                  value={newFeatureSlug}
+                  onChange={(e) => setNewFeatureSlug(e.target.value)}
+                  placeholder="ej: qa_security o auditoria"
+                  className="input-field text-xs text-slate-800 w-full font-mono"
+                  required
+                />
+                <span className="text-[10px] text-slate-400">
+                  Se utilizará como comando de acceso directo en el chat (ej: /{newFeatureSlug.toLowerCase().trim() || 'slug'})
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 block">
+                  Título Descriptivo
+                </label>
+                <input
+                  type="text"
+                  value={newFeatureTitle}
+                  onChange={(e) => setNewFeatureTitle(e.target.value)}
+                  placeholder="ej: Auditoría de Seguridad y Vulnerabilidades"
+                  className="input-field text-xs text-slate-800 w-full"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 block">
+                  Descripción Corta
+                </label>
+                <input
+                  type="text"
+                  value={newFeatureDesc}
+                  onChange={(e) => setNewFeatureDesc(e.target.value)}
+                  placeholder="ej: Evalúa especificaciones funcionales detectando riesgos de seguridad..."
+                  className="input-field text-xs text-slate-800 w-full"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 block">
+                  Instrucción del Sistema (Rol y Reglas)
+                </label>
+                <textarea
+                  rows={3}
+                  value={newFeatureSystem}
+                  onChange={(e) => setNewFeatureSystem(e.target.value)}
+                  placeholder="Eres un especialista en seguridad QA..."
+                  className="input-field text-xs text-slate-800 w-full font-mono p-2.5"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 block">
+                  Plantilla de Mensaje de Usuario
+                </label>
+                <textarea
+                  rows={2}
+                  value={newFeatureUserTemplate}
+                  onChange={(e) => setNewFeatureUserTemplate(e.target.value)}
+                  placeholder="Solicitud: {query}\n\nContexto:\n{context}"
+                  className="input-field text-xs text-slate-800 w-full font-mono p-2.5"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-800 block">
+                  Fuentes de Contexto Conectadas
+                </label>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {AVAILABLE_SOURCES.map((src) => (
+                    <label
+                      key={src.id}
+                      className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer text-[11px]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={newFeatureSources.includes(src.id)}
+                        onChange={() => handleToggleCreateSource(src.id)}
+                        className="rounded text-[#002777]"
+                      />
+                      <span className="truncate">{src.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="btn btn-secondary text-xs py-2 px-4 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingPrompt}
+                  className="btn btn-primary text-xs py-2 px-5 bg-[#002777] text-white cursor-pointer disabled:opacity-50"
+                >
+                  {creatingPrompt ? 'Guardando...' : 'Crear y Activar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
