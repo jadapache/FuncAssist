@@ -14,6 +14,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
     "@univerjs/core": "^1.0.2",
     "@univerjs/design": "^1.0.2",
     "@univerjs/docs": "^1.0.2",

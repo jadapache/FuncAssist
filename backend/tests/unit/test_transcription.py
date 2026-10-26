@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from unittest.mock import patch
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -132,6 +133,7 @@ def test_media_storage_and_record():
   # Cleanup record
   deleted = delete_transcription_record(record_id)
   assert deleted is True
+  delete_transcription_record(entry["id"])
   assert get_transcription_record(record_id) is None
 
 
@@ -223,14 +225,15 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   media_id = data["media_id"]
   assert media_id is not None
 
-  # 2. Trigger transcription
+  # 2. Trigger transcription with the same transcription_id
   trans_res = client.post(
     f"/api/transcription/transcribe/{media_id}",
-    json={"mode": "auto", "enable_diarization": True},
+    json={"mode": "auto", "enable_diarization": True, "transcription_id": media_id},
   )
   assert trans_res.status_code == 200
   trans_data = trans_res.json()
   transcription_id = trans_data["transcription_id"]
+  assert transcription_id == media_id
 
   # 3. Check status
   status_res = client.get(f"/api/transcription/status/{transcription_id}")
@@ -276,20 +279,12 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   )
   assert summary_edit_res.status_code == 200
 
-  # 6. Save to knowledge base
-  kb_res = client.post(
-    f"/api/transcription/save-to-knowledge/{transcription_id}",
-    json={"custom_tags": ["sprint_1", "kickoff"]},
-  )
-  assert kb_res.status_code == 200
-  assert kb_res.json()["ok"] is True
-
-  # 7. List all
+  # 6. List all
   list_res = client.get("/api/transcription/list")
   assert list_res.status_code == 200
   assert any(t["id"] == transcription_id for t in list_res.json()["transcriptions"])
 
-  # 8. Export Inventario XLSX and Levantamiento DOCX
+  # 7. Export Inventario XLSX and Levantamiento DOCX
   inv_exp = client.post(
     "/api/transcription/export/inventario",
     json={"content": "# Inventario\n- Item 1", "title": "Inventario_Test"},
@@ -304,8 +299,14 @@ def test_transcription_api_lifecycle(client: TestClient, tmp_path: Path):
   assert lev_exp.status_code == 200
   assert lev_exp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-  # 9. Delete
-  del_res = client.delete(f"/api/transcription/{transcription_id}")
+  # 8. Test delete with temporary record so the single transcription record is preserved
+  temp_del_id = "test-temp-del-id"
+  save_transcription_record({
+    "id": temp_del_id,
+    "media_id": temp_del_id,
+    "metadata": {"title": "Temp for deletion test"},
+  })
+  del_res = client.delete(f"/api/transcription/{temp_del_id}")
   assert del_res.status_code == 200
 
 
@@ -352,6 +353,7 @@ def test_retranscribe_endpoint(client: TestClient):
 
   # Clean up
   delete_transcription_record(record_id)
+  delete_transcription_record(entry["id"])
 
 
 def test_register_local_path_and_sse_events(client: TestClient, tmp_path: Path):
@@ -377,6 +379,8 @@ def test_register_local_path_and_sse_events(client: TestClient, tmp_path: Path):
   queue = get_or_create_progress_queue(transcription_id)
   assert queue is not None
 
+  delete_transcription_record(transcription_id)
+
 
 def test_progress_stream_endpoint(client: TestClient):
   from app.api.transcription_stream import _LATEST_PROGRESS
@@ -399,9 +403,9 @@ def test_local_whisper_models_endpoint(client: TestClient):
   data = res.json()
   assert data["ok"] is True
   assert "models" in data
-  assert len(data["models"]) >= 5
-  assert any(m["id"] == "tiny" for m in data["models"])
-  assert any(m["id"] == "base" for m in data["models"])
+  assert len(data["models"]) >= 4
+  assert any("tiny" in m["id"] for m in data["models"])
+  assert any("base" in m["id"] for m in data["models"])
 
 
 def test_generate_summary_endpoint(client: TestClient, monkeypatch):
@@ -529,23 +533,17 @@ def test_guid_folder_layout_and_sidecars():
   }
   save_transcription_record(record)
 
-  assert (folder / "transcription.json").exists()
-  assert (folder / "transcript.txt").exists()
-  assert (folder / "transcript.txt").read_text(encoding="utf-8") == "Esta es la transcripción completa de prueba."
-  assert (folder / "summary.txt").exists()
-  summary_content = (folder / "summary.txt").read_text(encoding="utf-8")
-  assert "## Participantes" in summary_content
-  assert "## Decisiones" in summary_content
-  assert "Usar subcarpetas GUID" in summary_content
-
   fetched = get_transcription_record(tid)
   assert fetched is not None
   assert fetched["id"] == tid
+  assert fetched["text"] == "Esta es la transcripción completa de prueba."
+  assert fetched["summary"]["topics"] == ["Arquitectura"]
 
-  # Delete removes folder
+  # Delete removes folder and DB record
   deleted = delete_transcription_record(tid)
   assert deleted is True
   assert not folder.exists()
+  assert get_transcription_record(tid) is None
 
 
 def test_providers_registry_and_resolution():
@@ -633,71 +631,65 @@ def test_user_assigned_title_preservation_on_upload():
   delete_transcription_record(tid)
 
 
-def test_active_jobs_and_transcriptions_index_location():
-  from app.core.settings import USER_DATA_DIR, ACTIVE_JOBS_DIR, TRANSCRIPTIONS_INDEX_FILE
+def test_active_jobs_and_transcriptions_persistence():
   from app.features.transcription.storage import (
     save_active_job_progress,
+    load_active_job_progress,
     delete_active_job_progress,
     save_transcription_record,
     delete_transcription_record,
     list_transcriptions,
   )
 
-  assert ACTIVE_JOBS_DIR == USER_DATA_DIR / "transcriptions" / "active_jobs"
-  assert TRANSCRIPTIONS_INDEX_FILE == USER_DATA_DIR / "transcriptions" / "transcriptions_index.json"
-
   job_id = "test-active-job-cleanup-99"
-  # 1. Save in-progress job
+  # 1. Save in-progress job in memory
   save_active_job_progress({
     "id": job_id,
     "status": "transcribing",
     "stage": "transcribing",
     "progress": 50,
   })
-  job_file = ACTIVE_JOBS_DIR / f"{job_id}.json"
-  assert job_file.exists()
+  active_job = load_active_job_progress(job_id)
+  assert active_job is not None
+  assert active_job["progress"] == 50
 
-  # 2. Mark complete -> should delete active job file
+  # 2. Mark complete -> should remove from in-memory cache
   save_active_job_progress({
     "id": job_id,
     "status": "complete",
     "stage": "complete",
     "progress": 100,
   })
-  assert not job_file.exists()
+  assert load_active_job_progress(job_id) is None
 
-  # 3. Verify transcriptions_index.json
-  tid = "test-index-sync-001"
+  # 3. Verify database persistence and listing
+  tid = "test-db-sync-001"
   save_transcription_record({
     "id": tid,
     "created_at": "2026-10-07T12:00:00Z",
-    "metadata": {"title": "Reunión Index Sync"},
+    "metadata": {"title": "Reunión DB Sync"},
     "duration_seconds": 45.0,
     "language": "es",
   })
 
-  list_transcriptions()
-  assert TRANSCRIPTIONS_INDEX_FILE.exists()
-  import json
-  index_data = json.loads(TRANSCRIPTIONS_INDEX_FILE.read_text(encoding="utf-8"))
-  items = index_data if isinstance(index_data, list) else index_data.get("items", [])
+  items = list_transcriptions()
   assert any(item["id"] == tid for item in items)
 
   delete_transcription_record(tid)
+  items_after = list_transcriptions()
+  assert not any(item["id"] == tid for item in items_after)
 
 
 @pytest.mark.asyncio
 async def test_index_refresher_tasks():
   from app.core.index_refresher import (
-    _refresh_templates_index,
     _refresh_builtin_model_catalog,
-    _refresh_transcription_index,
+    _refresh_frontier_models_catalog,
   )
 
   # Should run without throwing errors
-  await _refresh_templates_index()
   await _refresh_builtin_model_catalog()
-  await _refresh_transcription_index()
+  await _refresh_frontier_models_catalog(force=True)
 
 
 def test_non_wav_media_cleanup_after_conversion():

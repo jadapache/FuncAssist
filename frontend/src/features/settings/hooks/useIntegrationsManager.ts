@@ -4,13 +4,15 @@ import { api } from '../../../api/client'
 import type { IntegrationInfo } from '../../../types'
 import { useToast } from '../../../context/ToastContext'
 
-export function useIntegrationsManager() {
+export function useIntegrationsManager(options?: { enabled?: boolean }) {
   const { toast } = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
-  const [loadingIntegrations, setLoadingIntegrations] = useState(true)
+  const [loadingIntegrations, setLoadingIntegrations] = useState(false)
   const [busyIntegrationId, setBusyIntegrationId] = useState<string | null>(null)
+
+  const isEnabled = options?.enabled ?? true
 
   const loadIntegrations = useCallback(async () => {
     setLoadingIntegrations(true)
@@ -26,11 +28,13 @@ export function useIntegrationsManager() {
   }, [toast])
 
   useEffect(() => {
+    if (!isEnabled) return
     void loadIntegrations()
-  }, [loadIntegrations])
+  }, [loadIntegrations, isEnabled])
 
   // OAuth callbacks listener
   useEffect(() => {
+    if (!isEnabled) return
     const handleCallback = (key: 'jira' | 'github' | 'gitlab', label: string) => {
       const status = searchParams.get(key)
       const rawMessage = searchParams.get('message')

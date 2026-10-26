@@ -98,6 +98,10 @@ export function useTranscriptionActions(
 
   // Fetch transcription data
   const loadTranscription = useCallback(async () => {
+    // If transcription is actively running in browser, do not query backend until completed
+    if (activeProgress && activeProgress.status !== 'complete' && activeProgress.status !== 'failed') {
+      return
+    }
     try {
       const res = await transcriptionApi.getTranscriptionResult(transcriptionId)
       setTranscriptionResult(res)
@@ -109,10 +113,10 @@ export function useTranscriptionActions(
         initMap[spk] = spk
       })
       setSpeakerMap(initMap)
-    } catch (err: any) {
-      console.warn('Could not load transcription result:', err)
+    } catch {
+      // Result not ready or unavailable yet
     }
-  }, [transcriptionId])
+  }, [transcriptionId, activeProgress])
 
   useEffect(() => {
     loadTranscription()

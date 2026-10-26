@@ -2,7 +2,7 @@ import os
 import sys
 import multiprocessing
 from pathlib import Path
-# Force UTF-8 mode on Windows before importing anything (Tauri & PyInstaller best practice)
+# Force UTF-8 mode on Windows before importing anything
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["PYTHONUTF8"] = "1"
 if sys.stdout and hasattr(sys.stdout, "encoding") and sys.stdout.encoding != "utf-8":
@@ -29,41 +29,41 @@ else:
     if str(root_backend) not in sys.path:
         sys.path.insert(0, str(root_backend))
 
-# Prevent LiteLLM remote sync fetch
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+import uvicorn
+from app.core.settings import get_settings
 
-# Fix for tiktoken dynamic plugin discovery in PyInstaller frozen executables
-try:
-    import tiktoken.registry
-    import tiktoken_ext.openai_public
 
-    tiktoken.registry._available_plugin_modules = lambda: ["tiktoken_ext.openai_public"]
-    if tiktoken.registry.ENCODING_CONSTRUCTORS is None:
-        tiktoken.registry.ENCODING_CONSTRUCTORS = dict(tiktoken_ext.openai_public.ENCODING_CONSTRUCTORS)
+def main():
+    multiprocessing.freeze_support()
+    settings = get_settings()
+
+    port = settings.server_port or 6728
+    host = settings.server_host or "127.0.0.1"
+
+    # In production/frozen mode, reload must be False
+    reload_mode = not getattr(sys, "frozen", False)
+
+    print(f"Starting FuncAssist server on http://{host}:{port} (reload={reload_mode})...")
+
+    # Use app instance directly instead of string import to ensure frozen compatibility
+    if getattr(sys, "frozen", False):
+        from app.main import app
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=True,
+        )
     else:
-        tiktoken.registry.ENCODING_CONSTRUCTORS.update(tiktoken_ext.openai_public.ENCODING_CONSTRUCTORS)
-except Exception as e:
-    print(f"Warning initializing tiktoken: {e}", file=sys.stderr)
+        uvicorn.run(
+            "app.main:app",
+            host=host,
+            port=port,
+            reload=reload_mode,
+            log_level="info",
+        )
 
-# Ensure Windows Credential Manager keyring backend is registered if on Windows
-if sys.platform == "win32":
-    try:
-        import keyring
-        import keyring.backends.Windows
-
-        keyring.set_keyring(keyring.backends.Windows.WinVaultKeyring())
-    except Exception as e:
-        print(f"Warning initializing keyring: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
-    import uvicorn
-    from app.main import app
-
-    uvicorn.run(
-        app,
-        host="127.0.0.1",
-        port=6728,
-        log_level="info",
-        access_log=False,
-    )
+    main()

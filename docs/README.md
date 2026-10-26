@@ -10,7 +10,7 @@ Bienvenido a la documentación técnica de **FuncAssist**, un asistente local pa
 - **[Frontend](./FRONTEND.md)** — Componentes React, hooks personalizados, gestión de estado, interfaz de usuario.
 - **[API Reference](./API_REFERENCE.md)** — Especificación completa de endpoints REST.
 - [x] **[Base de Conocimiento (SQLite FTS5)](./KNOWLEDGE_BASE_SQLITE_FTS5.md)** — Motor RAG con SQLite FTS5, BM25, soporte de red compartida y migración.
-- **[CI/CD & Desktop Releases](./CICD_RELEASE_GUIDE.md)** — Pipeline de GitHub Actions, compilación Windows MSI/EXE y auto-actualizaciones.
+- **[CI/CD Pipeline](./CICD_RELEASE_GUIDE.md)** — Pipeline automatizado de GitHub Actions (tests, linting, build frontend y release).
 - **[Database Schema](./DATABASE.md)** — Modelos de datos, tablas SQLite, relaciones.
 - **[Deployment](./DEPLOYMENT.md)** — Docker, Render.com, configuración de producción.
 - **[Contributing](./CONTRIBUTING.md)** — Guía para contribuidores: convenciones de código, branching, testing.
@@ -43,7 +43,6 @@ QA Project MGMT es una solución integrada para equipos de QA y Product Manageme
 | **Backend** | Python 3.11+, FastAPI, Pydantic, SQLite con aiosqlite |
 | **AI** | LiteLLM (multi-provider), Ollama (local), OpenAI, Anthropic |
 | **RAG** | BM25 (rank-bm25), ingesta de documentos (pypdf, python-docx) |
-| **Desktop** | Tauri (integración Rust opcional) |
 | **Deployment** | Docker, Render.com, HTTPS ready |
 
 ---

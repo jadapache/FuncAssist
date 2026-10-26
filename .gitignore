@@ -14,7 +14,6 @@ lib/
 lib64/
 parts/
 sdist/
-var/
 wheels/
 share/python-wheels/
 *.egg-info/
@@ -141,14 +140,8 @@ local/transcriptions/**
 _legacy_archive/
 pm_qa_copilot/
 
-# Tauri / Rust
-src-tauri/target/
-src-tauri/bin/
+
 
 # AI Models & Downloads
 backend/app/ai/models/*
 !backend/app/ai/models/.gitkeep
-
-#Generated Signing Keys
-~/.tauri/qa_mgmt.key
-~/.tauri/qa_mgmt.key.pub
