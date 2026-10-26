@@ -413,9 +413,9 @@ async def dictate_audio(file: UploadFile = File(...)):
     res = await asyncio.to_thread(engine.transcribe, str(temp_file))
     transcribed_text = res.text.strip() if res else ""
     return {"text": transcribed_text, "filename": file.filename}
-  except Exception as exc:
-    logger.warning(f"Voice dictation transcription failed: {exc}")
-    return {"text": "", "error": str(exc), "filename": file.filename}
+  except Exception:
+    logger.exception("Voice dictation transcription failed")
+    return {"text": "", "error": "Transcription failed due to an internal error.", "filename": file.filename}
   finally:
     if temp_file.exists():
       try:
