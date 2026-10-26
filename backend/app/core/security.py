@@ -34,7 +34,10 @@ def verify_password(password: str, password_hash: str, salt: str) -> bool:
 
 def _get_signing_key() -> bytes:
     settings = get_settings()
-    secret = settings.pmqa_secret_key or "pmqa-secret-signing-key-2026"
+    secret = (
+        settings.secret_key
+        or os.getenv("SECRET_KEY")
+    )
     return hashlib.sha256(secret.encode("utf-8")).digest()
 
 

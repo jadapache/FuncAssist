@@ -69,3 +69,16 @@ def test_storage_encryption_roundtrip():
     # Assert load_app_settings decrypts key in memory
     loaded = load_app_settings()
     assert loaded["ai"]["groq_api_key"] == "gsk_real_secret_key_999"
+
+
+def test_missing_secret_key_raises_error(monkeypatch):
+    import app.core.secrets as secrets_mod
+    monkeypatch.setattr(secrets_mod, "_MASTER_SECRET_CACHE", None)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("PMQA_SECRET_KEY", raising=False)
+    from app.core.settings import Settings
+    monkeypatch.setattr("app.core.settings.get_settings", lambda: Settings(secret_key=None, pmqa_secret_key=None))
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
+        secrets_mod._get_master_secret()
+
