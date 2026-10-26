@@ -27,6 +27,7 @@ import {
 } from '../../../features/document/hooks/useChatPersistence'
 import { ChatHistorySidebar } from './ChatHistorySidebar'
 import { AgenticThinkingBubble } from './AgenticThinkingBubble'
+import { useAuth } from '../../../context/AuthContext'
 import { ArtifactsStudio } from './ArtifactsStudio'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { useAgenticGeneration } from '../hooks/useAgenticGeneration'
@@ -48,6 +49,7 @@ export const AgenticDocumentWorkspace = ({
   config,
   eyebrow = 'FUNCIONAL TOOLS',
 }: AgenticDocumentWorkspaceProps) => {
+  const { user } = useAuth()
   const { toast } = useToast()
   const chatBottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -69,7 +71,7 @@ export const AgenticDocumentWorkspace = ({
     renameConversation,
     deleteConversation,
     switchConversation,
-  } = useChatPersistence(config.slug)
+  } = useChatPersistence(config.slug, user?.id)
 
   // UI state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -202,6 +204,7 @@ export const AgenticDocumentWorkspace = ({
   } = useArtifacts({
     conversationArtifacts: activeConversation?.artifacts ?? [],
     onUpdateConversation: updateConversation,
+    currentConversationId: activeConversationId,
   })
 
   // Document undo/redo history for active artifact content
@@ -227,25 +230,73 @@ export const AgenticDocumentWorkspace = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeArtifactId, activeConversationId])
 
-  // Autosave debounce for active artifact
+  // Autosave debounce for active artifact explicitly scoped to target conversation
   useEffect(() => {
-    if (!docHistory.isDirty || !activeArtifact) return
+    if (!docHistory.isDirty || !activeArtifact || !activeConversationId) return
+    const targetConvId = activeConversationId
+    const targetArtifactId = activeArtifact.id
     const timer = setTimeout(() => {
       setIsSaving(true)
+      const updatedList = artifacts.map((a) =>
+        a.id === targetArtifactId
+          ? { ...a, content: docHistory.content, updatedAt: 'Hace un momento' }
+          : a,
+      )
+      updateConversation(
+        {
+          artifacts: updatedList as DocumentArtifact[],
+          documentContent: docHistory.content,
+        },
+        targetConvId,
+      )
+      docHistory.markSaved()
+      setTimeout(() => setIsSaving(false), 300)
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [docHistory.content, docHistory.isDirty, activeArtifact, artifacts, activeConversationId, updateConversation, docHistory])
+
+  // Flush dirty state before switching conversation
+  const handleSwitchConversation = useCallback(
+    (newId: string) => {
+      if (docHistory.isDirty && activeArtifact && activeConversationId) {
+        const updatedList = artifacts.map((a) =>
+          a.id === activeArtifact.id
+            ? { ...a, content: docHistory.content, updatedAt: 'Hace un momento' }
+            : a,
+        )
+        updateConversation(
+          {
+            artifacts: updatedList as DocumentArtifact[],
+            documentContent: docHistory.content,
+          },
+          activeConversationId,
+        )
+        docHistory.markSaved()
+      }
+      switchConversation(newId)
+    },
+    [docHistory, activeArtifact, activeConversationId, artifacts, updateConversation, switchConversation],
+  )
+
+  // Flush dirty state before creating a new conversation
+  const handleCreateNewConversation = useCallback(() => {
+    if (docHistory.isDirty && activeArtifact && activeConversationId) {
       const updatedList = artifacts.map((a) =>
         a.id === activeArtifact.id
           ? { ...a, content: docHistory.content, updatedAt: 'Hace un momento' }
           : a,
       )
-      updateConversation({
-        artifacts: updatedList as DocumentArtifact[],
-        documentContent: docHistory.content,
-      })
+      updateConversation(
+        {
+          artifacts: updatedList as DocumentArtifact[],
+          documentContent: docHistory.content,
+        },
+        activeConversationId,
+      )
       docHistory.markSaved()
-      setTimeout(() => setIsSaving(false), 300)
-    }, 1500)
-    return () => clearTimeout(timer)
-  }, [docHistory.content, docHistory.isDirty, activeArtifact, artifacts, updateConversation, docHistory])
+    }
+    createConversation('Nueva conversación')
+  }, [docHistory, activeArtifact, activeConversationId, artifacts, updateConversation, createConversation])
 
   // Scroll chat to bottom
   const scrollToBottom = useCallback(() => {
@@ -400,8 +451,8 @@ export const AgenticDocumentWorkspace = ({
           activeConversationId={activeConversationId}
           isCollapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onSelectConversation={switchConversation}
-          onCreateConversation={() => createConversation('Nueva conversación')}
+          onSelectConversation={handleSwitchConversation}
+          onCreateConversation={handleCreateNewConversation}
           onDeleteConversation={deleteConversation}
           onRenameConversation={renameConversation}
         />
