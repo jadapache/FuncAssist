@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,11 +88,31 @@ class Settings(BaseSettings):
     extra="ignore",
   )
 
-  pmqa_host: str = "127.0.0.1"
-  pmqa_port: int = 8000
-  pmqa_frontend_url: str = "http://127.0.0.1:5173"
-  pmqa_backend_url: str = "http://127.0.0.1:8000"
-  pmqa_secret_key: str | None = None
+  host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("HOST", "PMQA_HOST"))
+  port: int = Field(default=8000, validation_alias=AliasChoices("PORT", "PMQA_PORT"))
+  frontend_url: str = Field(default="http://127.0.0.1:5173", validation_alias=AliasChoices("FRONTEND_URL", "PMQA_FRONTEND_URL"))
+  backend_url: str = Field(default="http://127.0.0.1:8000", validation_alias=AliasChoices("BACKEND_URL", "PMQA_BACKEND_URL"))
+  secret_key: str | None = Field(default=None, validation_alias=AliasChoices("SECRET_KEY", "PMQA_SECRET_KEY"))
+
+  @property
+  def pmqa_host(self) -> str:
+    return self.host
+
+  @property
+  def pmqa_port(self) -> int:
+    return self.port
+
+  @property
+  def pmqa_frontend_url(self) -> str:
+    return self.frontend_url
+
+  @property
+  def pmqa_backend_url(self) -> str:
+    return self.backend_url
+
+  @property
+  def pmqa_secret_key(self) -> str | None:
+    return self.secret_key
 
   jira_client_id: str = ""
   jira_client_secret: str = ""
@@ -159,8 +180,8 @@ class Settings(BaseSettings):
     if self.cors_origins_str.strip() == "*":
       return ["*"]
     origins = {
-      self.pmqa_frontend_url.rstrip("/"),
-      self.pmqa_backend_url.rstrip("/"),
+      self.frontend_url.rstrip("/"),
+      self.backend_url.rstrip("/"),
       "http://localhost:5173",
       "http://127.0.0.1:5173",
       "http://localhost:8000",
