@@ -24,12 +24,12 @@ def _get_master_secret() -> str:
     if _MASTER_SECRET_CACHE:
         return _MASTER_SECRET_CACHE
 
-    secret = os.getenv("SECRET_KEY") or os.getenv("PMQA_SECRET_KEY")
+    secret = os.getenv("SECRET_KEY")
     if not secret:
         try:
             from app.core.settings import get_settings
             settings = get_settings()
-            secret = settings.secret_key or settings.pmqa_secret_key
+            secret = settings.secret_key
         except Exception:
             pass
 

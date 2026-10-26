@@ -5,11 +5,11 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
-      - key: PMQA_FRONTEND_URL
+      - key: FRONTEND_URL
         sync: false
-      - key: PMQA_BACKEND_URL
+      - key: BACKEND_URL
         sync: false
-      - key: PMQA_SECRET_KEY
+      - key: SECRET_KEY
         generateValue: true
       - key: OPENAI_API_KEY
         sync: false

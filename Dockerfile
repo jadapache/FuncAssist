@@ -13,8 +13,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PMQA_HOST=0.0.0.0 \
-    PMQA_PORT=8000
+    HOST=0.0.0.0 \
+    PORT=8000
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
