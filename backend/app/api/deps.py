@@ -69,6 +69,23 @@ async def get_current_user(
     return {k: v for k, v in user.items() if k not in ("password_hash", "password_salt")}
 
 
+async def get_optional_current_user(
+    authorization: str | None = Header(default=None),
+    user_repo: IUserRepository = Depends(get_user_repository),
+) -> Optional[dict[str, Any]]:
+    """Dependency to optionally retrieve current user from Bearer JWT token if provided."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ")[1].strip()
+    payload = decode_access_token(token)
+    if not payload or "username" not in payload:
+        return None
+    user = await user_repo.get_by_username(payload["username"])
+    if not user or user.get("status") != "approved":
+        return None
+    return {k: v for k, v in user.items() if k not in ("password_hash", "password_salt")}
+
+
 async def get_current_admin_user(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:

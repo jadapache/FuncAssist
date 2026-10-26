@@ -145,6 +145,7 @@ async def run_grounded_feature(
     document_ids: list[str] | None = None,
     chat_context: str | None = None,
     template_content: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     prep = await _prepare_grounded_context(
         feature=feature,
@@ -157,7 +158,7 @@ async def run_grounded_feature(
     if isinstance(prep, dict):  # refused
         return prep
 
-    provider = resolve_provider()
+    provider = resolve_provider(user_id=user_id)
     completion = await provider.complete(prep.messages, max_tokens=4096)
 
     citations = [
@@ -214,6 +215,7 @@ async def run_grounded_feature_stream(
     document_ids: list[str] | None = None,
     chat_context: str | None = None,
     template_content: str | None = None,
+    user_id: str | None = None,
 ):
     """Versión streaming de run_grounded_feature. Yields text chunks via SSE."""
     prep = await _prepare_grounded_context(
@@ -228,7 +230,7 @@ async def run_grounded_feature_stream(
         reason = prep.get("reason", "Error desconocido al preparar contexto.")
         raise RuntimeError(reason)
 
-    provider = resolve_provider()
+    provider = resolve_provider(user_id=user_id)
     accumulated_text: list[str] = []
 
     async for chunk in provider.complete_stream(prep.messages, max_tokens=8192):
@@ -296,6 +298,7 @@ class AgenticChatConfig:
     template_content: str | None = None
     images: list[dict[str, str]] | None = None
     attached_docs: list[dict[str, Any]] | None = None
+    user_id: str | None = None
 
 
 async def _build_chat_system_prompt(intent: str, feature: str | None = None) -> str:
@@ -379,7 +382,7 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
     user_message = _assemble_multimodal_message(full_user_text, cfg.images)
     messages = [AIMessage(role="system", content=sys_prompt), user_message]
 
-    provider = resolve_provider()
+    provider = resolve_provider(user_id=cfg.user_id)
     accumulated_text: list[str] = []
 
     async for chunk in provider.complete_stream(messages, max_tokens=8192):
