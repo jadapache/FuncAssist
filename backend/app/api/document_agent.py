@@ -5,12 +5,15 @@ from __future__ import annotations
 import io
 import re
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
 import json
+import logging
 import uuid
 from pydantic import BaseModel, Field
 
+from app.api.deps import get_optional_current_user
+from app.db.repositories import ChatRepository
 from app.context.knowledge import extract_text
 from app.services.event_serializer import AgentRunEmitter, run_registry
 
@@ -277,12 +280,17 @@ def validate_operation(payload: Dict[str, Any]):
 
 
 @router.post("/agentic-prompt", response_model=AgenticPromptResponse)
-async def handle_agentic_prompt(req: AgenticPromptRequest):
+async def handle_agentic_prompt(
+    req: AgenticPromptRequest,
+    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    chat_repo: ChatRepository = Depends(ChatRepository),
+):
     """
     Agentic RAG orchestrator for document requests.
     Translates raw user prompt + RAG/Document context into structured canonical operations.
     Supports insertions, image attachments, corrections, and modifications.
     """
+    user_id = current_user.get("id") if current_user else None
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
     active_doc_state = req.doc_state
@@ -444,6 +452,7 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
         template_content=_load_active_template_content(req.template_id),
         images=req.images,
         attached_docs=req.attached_docs,
+        user_id=user_id,
     )
 
     try:
@@ -460,6 +469,32 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
             "He generado y estructurado el documento corporativo en el visor de artefactos."
             if is_template else full_content
         )
+
+        conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
+        try:
+            await chat_repo.save_message(
+                session_id=conv_id,
+                role="user",
+                content=prompt_str,
+                user_id=user_id,
+            )
+            await chat_repo.save_message(
+                session_id=conv_id,
+                role="assistant",
+                content=asst_msg,
+                context_sources=[{"source": s} for s in sources_to_use],
+                user_id=user_id,
+            )
+            await chat_repo.save_session({
+                "id": conv_id,
+                "user_id": user_id,
+                "title": prompt_str[:35],
+                "feature_slug": req.feature or "general",
+                "document_content": full_content if is_template else "",
+                "artifacts": art_dicts,
+            })
+        except Exception:
+            pass
 
         return AgenticPromptResponse(
             intent_detected=intent,
@@ -481,11 +516,16 @@ async def handle_agentic_prompt(req: AgenticPromptRequest):
 
 
 @router.post("/agentic-prompt-stream")
-async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
+async def handle_agentic_prompt_stream(
+    req: AgenticPromptRequest,
+    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    chat_repo: ChatRepository = Depends(ChatRepository),
+):
     """
     Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
     Streams token events live as text is produced by the LLM.
     """
+    user_id = current_user.get("id") if current_user else None
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
 
@@ -501,7 +541,7 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
     is_responsables_intent = not is_question and any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
 
     if is_image_intent or is_correction_intent or is_responsables_intent:
-        res = await handle_agentic_prompt(req)
+        res = await handle_agentic_prompt(req, current_user=current_user, chat_repo=chat_repo)
         async def fast_gen():
             yield f"data: {json.dumps({'type': 'full', 'data': res.model_dump(by_alias=True)})}\n\n"
         return StreamingResponse(fast_gen(), media_type="text/event-stream")
@@ -537,6 +577,7 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
         template_content=_load_active_template_content(req.template_id),
         images=req.images,
         attached_docs=req.attached_docs,
+        user_id=user_id,
     )
 
     run_id = req.run_id or f"run-{uuid.uuid4().hex[:12]}"
@@ -601,6 +642,32 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
                 artifacts=art_dicts,
                 sources=sources_to_use,
             ).to_sse_packet()
+
+            # Auto-persist session & messages to PostgreSQL entity
+            try:
+                await chat_repo.save_message(
+                    session_id=conv_id,
+                    role="user",
+                    content=query_text,
+                    user_id=user_id,
+                )
+                await chat_repo.save_message(
+                    session_id=conv_id,
+                    role="assistant",
+                    content=asst_msg,
+                    context_sources=[{"source": s} for s in sources_to_use],
+                    user_id=user_id,
+                )
+                await chat_repo.save_session({
+                    "id": conv_id,
+                    "user_id": user_id,
+                    "title": query_text[:35],
+                    "feature_slug": req.feature or "general",
+                    "document_content": full_content if is_template else "",
+                    "artifacts": art_dicts,
+                })
+            except Exception:
+                pass
 
             final_response = {
                 "answer": full_content,
