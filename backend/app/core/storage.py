@@ -14,19 +14,10 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 
 from app.core.secrets import decrypt_ai_settings, encrypt_ai_settings
-from app.core.security import machine_fingerprint as _machine_fingerprint
 from app.core.settings import get_settings
 from app.db.models import SettingModel
 
 logger = logging.getLogger(__name__)
-
-try:
-  import keyring
-except ImportError:  # pragma: no cover
-  keyring = None
-
-SERVICE_NAME = "funcassist"
-KEYRING_USERNAME = "encryption-key"
 
 # In-memory fallbacks when database is initializing or during tests
 _CACHE_APP_SETTINGS: dict[str, Any] = {}
@@ -40,22 +31,14 @@ def _derive_fernet_key(secret: str) -> bytes:
 
 def _resolve_secret() -> str:
   settings = get_settings()
-  secret = settings.secret_key
-  if secret:
-    return secret
+  secret = settings.secret_key or os.getenv("SECRET_KEY")
+  if secret and secret.strip():
+    return secret.strip()
 
-  if keyring is not None:
-    try:
-      stored = keyring.get_password(SERVICE_NAME, KEYRING_USERNAME)
-      if stored:
-        return stored
-      generated = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
-      keyring.set_password(SERVICE_NAME, KEYRING_USERNAME, generated)
-      return generated
-    except Exception:
-      pass
-
-  return f"pmqa-local::{_machine_fingerprint()}"
+  raise RuntimeError(
+    "SECRET_KEY environment variable is required for application storage and encryption. "
+    "Please define SECRET_KEY in your .env or container environment."
+  )
 
 
 def _fernet() -> Fernet:

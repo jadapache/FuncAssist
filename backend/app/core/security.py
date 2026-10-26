@@ -34,11 +34,10 @@ def verify_password(password: str, password_hash: str, salt: str) -> bool:
 
 def _get_signing_key() -> bytes:
     settings = get_settings()
-    secret = (
-        settings.secret_key
-        or os.getenv("SECRET_KEY")
-    )
-    return hashlib.sha256(secret.encode("utf-8")).digest()
+    secret = settings.secret_key or os.getenv("SECRET_KEY")
+    if not secret or not secret.strip():
+        raise RuntimeError("SECRET_KEY environment variable is required for application security and tokens.")
+    return hashlib.sha256(secret.strip().encode("utf-8")).digest()
 
 
 def create_access_token(payload: Dict[str, Any], expires_in_seconds: int = 86400 * 7) -> str:

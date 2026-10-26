@@ -75,10 +75,32 @@ def test_missing_secret_key_raises_error(monkeypatch):
     import app.core.secrets as secrets_mod
     monkeypatch.setattr(secrets_mod, "_MASTER_SECRET_CACHE", None)
     monkeypatch.delenv("SECRET_KEY", raising=False)
-    monkeypatch.delenv("PMQA_SECRET_KEY", raising=False)
-    from app.core.settings import Settings
-    monkeypatch.setattr("app.core.settings.get_settings", lambda: Settings(secret_key=None, pmqa_secret_key=None))
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None)
+    monkeypatch.setattr("app.core.settings.get_settings", lambda: fake_settings)
 
     with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
         secrets_mod._get_master_secret()
+
+
+def test_storage_resolve_secret_missing_raises_error(monkeypatch):
+    import app.core.storage as storage_mod
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None)
+    monkeypatch.setattr(storage_mod, "get_settings", lambda: fake_settings)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
+        storage_mod._resolve_secret()
+
+
+def test_startup_missing_secret_key_fails(monkeypatch):
+    import app.main as main_mod
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None, cors_origins=[])
+    monkeypatch.setattr(main_mod, "get_settings", lambda: fake_settings)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required to start the application"):
+        main_mod.create_app()
 
