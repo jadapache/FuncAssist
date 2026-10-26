@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -19,6 +20,8 @@ from app.context.knowledge_migration import (
   verify_integrity,
 )
 from app.context.service import assemble_context
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -101,13 +104,27 @@ async def retrieve(body: RetrieveRequest) -> dict[str, Any]:
 @router.get("/db-status")
 async def get_database_status() -> dict[str, Any]:
   """Return detailed status of the active knowledge base engine (PostgreSQL RAG / pgvector)."""
-  return get_db_status()
+  try:
+    return get_db_status()
+  except Exception as exc:
+    logger.exception("Error al consultar el estado de la base de datos de conocimiento: %s", exc)
+    raise HTTPException(
+      status_code=500,
+      detail="Error interno al obtener el estado de la base de datos de conocimiento.",
+    ) from None
 
 
 @router.get("/path")
 async def get_knowledge_path() -> dict[str, Any]:
   """Backward-compatible endpoint returning active storage info and engine details."""
-  status = get_db_status()
+  try:
+    status = get_db_status()
+  except Exception as exc:
+    logger.exception("Error al consultar la configuracion de almacenamiento de conocimiento: %s", exc)
+    raise HTTPException(
+      status_code=500,
+      detail="Error interno al consultar la configuracion de almacenamiento de conocimiento.",
+    ) from None
   resolved = str(get_knowledge_base_dir())
   return {
     "configured_path": status.get("host", ""),
@@ -124,7 +141,14 @@ async def get_knowledge_path() -> dict[str, Any]:
 @router.put("/path")
 async def set_knowledge_path(body: KnowledgeBasePathRequest) -> dict[str, Any]:
   """In server mode, database connections are managed via DATABASE_URL environment variable."""
-  status = get_db_status()
+  try:
+    status = get_db_status()
+  except Exception as exc:
+    logger.exception("Error al actualizar la configuracion de almacenamiento de conocimiento: %s", exc)
+    raise HTTPException(
+      status_code=500,
+      detail="Error interno al consultar la configuracion de almacenamiento de conocimiento.",
+    ) from None
   return {
     "ok": True,
     "message": "En el servidor la conexión de PostgreSQL se gestiona mediante la variable de entorno DATABASE_URL.",

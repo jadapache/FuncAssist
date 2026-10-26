@@ -1,11 +1,13 @@
 import json
 import pytest
+from unittest.mock import MagicMock, patch
 from app.core.secrets import (
     encrypt_secret,
     decrypt_secret,
     is_encrypted,
     encrypt_ai_settings,
     decrypt_ai_settings,
+    _get_master_secret,
 )
 from app.core.storage import save_app_settings, load_app_settings, _CACHE_APP_SETTINGS
 
@@ -69,3 +71,38 @@ def test_storage_encryption_roundtrip():
     # Assert load_app_settings decrypts key in memory
     loaded = load_app_settings()
     assert loaded["ai"]["groq_api_key"] == "gsk_real_secret_key_999"
+
+
+def test_master_secret_from_env():
+    with patch.dict("os.environ", {"PMQA_SECRET_KEY": "env-custom-master-secret"}):
+        assert _get_master_secret() == "env-custom-master-secret"
+
+
+def test_master_secret_from_legacy_file(tmp_path):
+    legacy_file = tmp_path / "secret.key"
+    legacy_file.write_text("legacy-file-secret", encoding="utf-8")
+
+    with patch.dict("os.environ", {}, clear=True), \
+         patch("app.core.secrets.SETTINGS_DIR", tmp_path):
+        assert _get_master_secret() == "legacy-file-secret"
+
+
+def test_master_secret_from_keyring(tmp_path):
+    mock_keyring = MagicMock()
+    mock_keyring.get_password.return_value = "keyring-stored-secret"
+
+    with patch.dict("os.environ", {}, clear=True), \
+         patch("app.core.secrets.SETTINGS_DIR", tmp_path), \
+         patch("app.core.secrets.keyring", mock_keyring):
+        assert _get_master_secret() == "keyring-stored-secret"
+        assert not (tmp_path / "secret.key").exists()
+
+
+def test_master_secret_fallback_to_fingerprint(tmp_path):
+    with patch.dict("os.environ", {}, clear=True), \
+         patch("app.core.secrets.SETTINGS_DIR", tmp_path), \
+         patch("app.core.secrets.keyring", None), \
+         patch("app.core.secrets._machine_fingerprint", return_value="test-fingerprint"):
+        secret = _get_master_secret()
+        assert secret == "qa-mgmt-local-secret::test-fingerprint"
+        assert not (tmp_path / "secret.key").exists()

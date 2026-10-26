@@ -618,8 +618,9 @@ def get_db_status() -> dict[str, Any]:
       status["host"] = params["host"] or (conn.info.host if hasattr(conn.info, "host") else "remote")
       status["database"] = params["database"] or (conn.info.dbname if hasattr(conn.info, "dbname") else "")
       status["connected"] = True
-  except Exception as e:
+  except Exception as exc:
+    logger.exception("Error al consultar el estado de la base de datos de conocimiento: %s", exc)
     status["connected"] = False
-    status["error"] = str(e)
+    status["error"] = "Error al conectar o consultar la base de datos de conocimiento."
 
   return status
