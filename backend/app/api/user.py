@@ -23,7 +23,7 @@ class UpdateProfileRequest(BaseModel):
 
 @router.get("/profile")
 async def get_user_profile() -> UserProfile:
-    """Get current user profile from app.json."""
+    """Get current user profile from PostgreSQL settings."""
     settings = load_app_settings()
     return UserProfile(
         display_name=settings.get("display_name", "Usuario"),

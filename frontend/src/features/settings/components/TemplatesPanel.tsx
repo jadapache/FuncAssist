@@ -1,8 +1,3 @@
-/**
- * TemplatesPanel.tsx
- * Main orchestrator for Corporate Templates Management and AI Rules & Rubrics.
- * Decoupled into modular components: TemplatesListSection, TemplateBuilderModal, and TemplateTagSidebar.
- */
 
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -20,10 +15,12 @@ import { TemplatesListSection } from './templates/TemplatesListSection'
 import { TemplateBuilderModal } from './templates/TemplateBuilderModal'
 import type { TabSidebar } from './templates/TemplateTagSidebar'
 
+
 export const TemplatesPanel = () => {
   const { toast } = useToast()
 
   const [panelSection, setPanelSection] = useState<'corporate' | 'ai_rules'>('corporate')
+  const [aiRulesMounted, setAiRulesMounted] = useState(false)
   const [templates, setTemplates] = useState<CorporateTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -266,6 +263,11 @@ export const TemplatesPanel = () => {
     toast.success(`Etiqueta {{${tagName}}} removida`)
   }
 
+  const handleSwitchToAiRules = () => {
+    setPanelSection('ai_rules')
+    setAiRulesMounted(true)
+  }
+
   return (
     <div className="space-[#f8fafc] min-h-screen space-y-6 font-sans">
       {/* Top Section Tabs Nav */}
@@ -273,11 +275,10 @@ export const TemplatesPanel = () => {
         <button
           type="button"
           onClick={() => setPanelSection('corporate')}
-          className={`pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer ${
-            panelSection === 'corporate'
+          className={`pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer ${panelSection === 'corporate'
               ? 'border-[#002777] text-[#002777] font-bold'
               : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
+            }`}
         >
           <FileText className="h-4 w-4" />
           <span>Plantillas Corporativas & Documentos</span>
@@ -285,12 +286,11 @@ export const TemplatesPanel = () => {
 
         <button
           type="button"
-          onClick={() => setPanelSection('ai_rules')}
-          className={`pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer ${
-            panelSection === 'ai_rules'
+          onClick={handleSwitchToAiRules}
+          className={`pb-3 flex items-center gap-2 border-b-2 transition cursor-pointer ${panelSection === 'ai_rules'
               ? 'border-[#002777] text-[#002777] font-bold'
               : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
+            }`}
         >
           <Sparkles className="h-4 w-4 text-purple-600" />
           <span>Prompting IA & Reglas por Rol</span>
@@ -299,7 +299,7 @@ export const TemplatesPanel = () => {
 
       {/* Main Section Content */}
       <div className="px-6 pb-12">
-        {panelSection === 'corporate' ? (
+        <div className={panelSection === 'corporate' ? 'block' : 'hidden'}>
           <TemplatesListSection
             templates={templates}
             loading={loading}
@@ -324,9 +324,14 @@ export const TemplatesPanel = () => {
             onSetEditModule={setEditModule}
             onSaveEdit={handleSaveEdit}
             formatFileSize={formatFileSize}
+            onReload={() => void loadTemplates()}
           />
-        ) : (
-          <AiPromptsRubricsEditor />
+        </div>
+
+        {aiRulesMounted && (
+          <div className={panelSection === 'ai_rules' ? 'block' : 'hidden'}>
+            <AiPromptsRubricsEditor />
+          </div>
         )}
 
         {/* Builder Modal */}

@@ -2,6 +2,7 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -103,6 +104,53 @@ class Settings(BaseSettings):
   gitlab_client_secret: str = ""
   gitlab_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/gitlab/callback"
   gitlab_base_url: str = "https://gitlab.com"
+  cors_origins_str: str = ""
+
+  # Database Connection
+  database_url: str | None = None
+
+  def get_database_url(self, for_sqlalchemy: bool = False) -> str | None:
+    """Return configured PostgreSQL connection URL.
+    
+    If for_sqlalchemy is True, ensures the URL dialect is postgresql+psycopg://.
+    """
+    url = self.database_url or os.getenv("DATABASE_URL")
+    if url and url.strip():
+      clean_url = url.strip()
+      if for_sqlalchemy:
+        if clean_url.startswith("postgresql://"):
+          clean_url = "postgresql+psycopg://" + clean_url[len("postgresql://"):]
+        elif clean_url.startswith("postgres://"):
+          clean_url = "postgresql+psycopg://" + clean_url[len("postgres://"):]
+      return clean_url
+    return None
+
+  def get_knowledge_db_url(self) -> str | None:
+    return self.get_database_url(for_sqlalchemy=False)
+
+  def get_database_params(self) -> dict[str, Any]:
+    """Parse connection parameters from database_url if needed."""
+    url = self.get_database_url(for_sqlalchemy=False)
+    if not url:
+      return {
+        "host": "",
+        "port": 5432,
+        "user": "",
+        "password": "",
+        "database": "",
+      }
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    return {
+      "host": parsed.hostname or "",
+      "port": parsed.port or 5432,
+      "user": parsed.username or "",
+      "password": parsed.password or "",
+      "database": (parsed.path or "").lstrip("/"),
+    }
+
+  def get_knowledge_db_params(self) -> dict[str, Any]:
+    return self.get_database_params()
 
   @property
   def pmqa_frontend_url(self) -> str:
@@ -118,6 +166,8 @@ class Settings(BaseSettings):
 
   @property
   def cors_origins(self) -> list[str]:
+    if self.cors_origins_str.strip() == "*":
+      return ["*"]
     origins = {
       self.fa_frontend_url.rstrip("/"),
       self.fa_backend_url.rstrip("/"),
@@ -129,6 +179,11 @@ class Settings(BaseSettings):
       "https://tauri.localhost",
       "tauri://localhost",
     }
+    if self.cors_origins_str:
+      for o in self.cors_origins_str.split(","):
+        cleaned = o.strip().rstrip("/")
+        if cleaned:
+          origins.add(cleaned)
     return [origin for origin in origins if origin]
 
 

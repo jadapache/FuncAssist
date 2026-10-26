@@ -54,14 +54,6 @@ export const VoiceAudioSection = ({
   setShowTranscriptionKey,
   savingAi,
   handleVoiceAudioSave,
-  localWhisperModels = [],
-  downloadingWhisperId = null,
-  deletingWhisperId = null,
-  fetchingWhisperModels = false,
-  fetchLocalWhisperModels,
-  handleDownloadWhisperModel,
-  handleDeleteWhisperModel,
-  downloadTasks = {},
 }: VoiceAudioSectionProps) => {
   // Construcción de la lista de modelos de voz locales integrados
   const builtinFromCatalog = catalogModels.filter(
@@ -69,11 +61,51 @@ export const VoiceAudioSection = ({
       m.task_type === 'transcription' &&
       (m.provider === 'builtin' ||
         m.provider === 'local' ||
-        m.provider === 'faster-whisper' ||
-        m.provider === 'moonshine' ||
-        m.provider === 'onnx' ||
-        m.provider === 'whisper-python'),
+        m.provider === 'onnx'),
   )
+
+  const DEFAULT_ONNX_MODELS: LocalVoiceModelItem[] = [
+    {
+      id: 'whisper-tiny',
+      name: 'Whisper Tiny (ONNX Web / Ultra Rápido)',
+      tag: 'onnx:whisper-tiny',
+      description: 'Modelo Whisper optimizado para ONNX Web Runtime. Ultraligero (~40 MB), ideal para CPU WASM o transcribir con mínimo consumo.',
+      size: '~40 MB',
+      accuracy: 'Básica (Ultra Rápido)',
+      provider: 'onnx',
+      engine: 'onnxruntime-web',
+    },
+    {
+      id: 'whisper-base',
+      name: 'Whisper Base (ONNX Web / Recomendado)',
+      tag: 'onnx:whisper-base',
+      description: 'Excelente balance entre velocidad y precisión para reuniones estándar. Funciona de manera fluida en WebGPU y CPU.',
+      size: '~75 MB',
+      accuracy: 'Estándar (Recomendado)',
+      provider: 'onnx',
+      engine: 'onnxruntime-web',
+    },
+    {
+      id: 'whisper-small',
+      name: 'Whisper Small (ONNX Web / Alta Precisión)',
+      tag: 'onnx:whisper-small',
+      description: 'Mayor fidelidad y precisión con acentos en español y terminología técnica. Recomendado con aceleración WebGPU.',
+      size: '~250 MB',
+      accuracy: 'Alta',
+      provider: 'onnx',
+      engine: 'onnxruntime-web',
+    },
+    {
+      id: 'whisper-large-v3-turbo',
+      name: 'Whisper Large v3 Turbo (ONNX Web / Máxima Precisión)',
+      tag: 'onnx:whisper-large-v3-turbo',
+      description: 'Modelo de máxima fidelidad multilingüe optimizado en ONNX para WebGPU.',
+      size: '~800 MB',
+      accuracy: 'Máxima',
+      provider: 'onnx',
+      engine: 'onnxruntime-web',
+    },
+  ]
 
   const localVoiceModelsList: LocalVoiceModelItem[] =
     builtinFromCatalog.length > 0
@@ -82,35 +114,19 @@ export const VoiceAudioSection = ({
           name: m.name,
           tag: m.raw_id || m.id,
           description: m.description,
-          size: m.size || '~142 MB',
+          size: m.size || '~75 MB',
           accuracy: m.accuracy || 'Estándar',
-          provider: m.provider,
-          engine: m.provider === 'onnx' ? 'onnxruntime' : m.provider === 'faster-whisper' ? 'faster-whisper' : 'whisper',
-          is_downloaded: m.is_downloaded,
+          provider: 'onnx',
+          engine: 'onnxruntime-web',
+          is_downloaded: true,
           disk_size_mb: m.disk_size_mb,
         }))
-      : (localWhisperModels && localWhisperModels.length > 0)
-      ? localWhisperModels.map((wm) => ({
-          id: wm.id,
-          name: wm.name,
-          tag: wm.id,
-          description: wm.description || 'Modelo de transcripción local',
-          size: wm.size || '142 MB',
-          accuracy: wm.accuracy || 'Estándar',
-          provider: 'builtin',
-          engine: 'whisper',
-          is_downloaded: wm.is_downloaded,
-          disk_size_mb: wm.disk_size_mb,
-        }))
-      : []
+      : DEFAULT_ONNX_MODELS
 
   const isBuiltIn =
     voiceAudioProvider === 'builtin' ||
     voiceAudioProvider === 'local' ||
-    voiceAudioProvider === 'faster-whisper' ||
-    voiceAudioProvider === 'moonshine' ||
-    voiceAudioProvider === 'onnx' ||
-    voiceAudioProvider === 'whisper-python'
+    voiceAudioProvider === 'onnx'
 
   return (
     <form
@@ -183,14 +199,6 @@ export const VoiceAudioSection = ({
               localVoiceModelsList={localVoiceModelsList}
               model={voiceAudioModel}
               setModel={setVoiceAudioModel}
-              localWhisperModels={localWhisperModels}
-              downloadingWhisperId={downloadingWhisperId}
-              deletingWhisperId={deletingWhisperId}
-              fetchingWhisperModels={fetchingWhisperModels}
-              fetchLocalWhisperModels={fetchLocalWhisperModels}
-              handleDownloadWhisperModel={handleDownloadWhisperModel}
-              handleDeleteWhisperModel={handleDeleteWhisperModel}
-              downloadTasks={downloadTasks}
             />
           )}
 

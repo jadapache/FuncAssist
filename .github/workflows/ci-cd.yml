@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 env:
-  RUST_BACKTRACE: 1
   NODE_VERSION: '24'
 
 jobs:
@@ -102,148 +101,11 @@ jobs:
           retention-days: 1
 
   # ============================================================================
-  # PHASE 3: BUILD TAURI WINDOWS RELEASE
-  # ============================================================================
-  build-tauri:
-    name: Build Tauri Windows App
-    needs: build
-    runs-on: windows-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install WebView2 Runtime
-        shell: powershell
-        run: |
-          Invoke-WebRequest `
-            -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' `
-            -OutFile 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
-
-          Start-Process `
-            -FilePath '.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe' `
-            -ArgumentList '/silent /install' `
-            -Wait
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Install Backend Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-          pip install pyinstaller
-
-      - name: Install Root & Frontend Dependencies
-        run: |
-          npm ci
-          npm ci --prefix frontend
-
-      - name: Build Frontend
-        run: npm run build --prefix frontend
-        env:
-          VITE_API_BASE: 'http://localhost:8000'
-
-      - name: Sync Version from Git Tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $tagVersion = "${{ github.ref_name }}".TrimStart("v")
-          Write-Host "Syncing project versions to $tagVersion from git tag ${{ github.ref_name }}"
-          node scripts/set-version.js $tagVersion
-
-      - name: Bundle FFmpeg for Windows Installer
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "src-tauri/bin"
-          $systemFfmpeg = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue)?.Source
-          if ($systemFfmpeg) {
-            Write-Host "Found system FFmpeg at $systemFfmpeg - copying to src-tauri/bin/ffmpeg.exe"
-            Copy-Item $systemFfmpeg -Destination "src-tauri/bin/ffmpeg.exe" -Force
-          } else {
-            Write-Host "Downloading standalone FFmpeg for Windows bundle..."
-            $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-            Invoke-WebRequest -Uri $url -OutFile "ffmpeg.zip"
-            Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_temp" -Force
-            $extracted = Get-ChildItem -Path "ffmpeg_temp" -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
-            Copy-Item $extracted -Destination "src-tauri/bin/ffmpeg.exe" -Force
-            Remove-Item "ffmpeg.zip" -Force
-            Remove-Item -Recurse -Force "ffmpeg_temp"
-          }
-          Write-Host "FFmpeg binary ready in src-tauri/bin:"
-          Get-Item "src-tauri/bin/ffmpeg.exe"
-
-      - name: Build Standalone Backend Executable
-        shell: pwsh
-        run: |
-          python scripts/build-backend.py
-          Write-Host "Verifying standalone backend binary:"
-          Get-Item "src-tauri/bin/funcassist-backend.exe"
-
-      # Diagnose the actual Rust compiler error before packaging.
-      - name: Diagnose Rust Compilation
-        shell: pwsh
-        run: |
-          Write-Host "=== Rust version ==="
-          rustc --version
-          cargo --version
-
-          Write-Host "=== Repository directory ==="
-          Get-Location
-          Get-ChildItem src-tauri
-
-          Write-Host "=== Cargo manifest ==="
-          Get-Content src-tauri/Cargo.toml
-
-          Write-Host "=== Compile Tauri binary ==="
-          cargo check `
-            --manifest-path src-tauri/Cargo.toml `
-            --bin funcassist `
-            --verbose
-
-      - name: Build Tauri Desktop
-        run: npx @tauri-apps/cli build --verbose
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-
-      - name: Upload Tauri Windows Artifacts
-        uses: actions/upload-artifact@v6
-        with:
-          name: tauri-windows-release
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.zip
-          retention-days: 5
-          if-no-files-found: warn
-
-  # ============================================================================
-  # PHASE 4: CREATE GITHUB RELEASE
+  # PHASE 3: CREATE GITHUB RELEASE
   # ============================================================================
   release:
     name: Create GitHub Release
-    needs: build-tauri
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/v')
@@ -254,11 +116,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Download Tauri Artifacts
+      - name: Download Frontend Build Artifact
         uses: actions/download-artifact@v6
         with:
-          name: tauri-windows-release
-          path: ./artifacts
+          name: frontend-dist
+          path: ./dist
+
+      - name: Package Frontend Artifact
+        shell: bash
+        run: |
+          tar -czf funcassist-frontend-dist.tar.gz -C dist .
 
       - name: Create Release Notes
         shell: bash
@@ -270,25 +137,13 @@ jobs:
 
           ### Highlights & Changes
           - Automated Build & Release generated via GitHub Actions
-          - Local AI Functional Assistant & Elicitation Hub
-          - Automatic desktop updater support
-
-          ### Downloads & Installation
-          - **Windows Installer (MSI):** Check release assets below
-          - **Windows Portable / NSIS:** Check release assets below
-
-          ### Upgrade Instructions
-          - If you already have FuncAssist installed, the in-app updater will notify you automatically.
-          - Or download and run the latest installer attached to this release.
+          - AI Functional Assistant & Elicitation Hub (Web / SaaS)
           EOF
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/**/*.msi
-            artifacts/**/*.exe
-            artifacts/**/*.zip
+          files: funcassist-frontend-dist.tar.gz
           body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false

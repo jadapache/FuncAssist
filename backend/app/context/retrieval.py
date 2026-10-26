@@ -8,6 +8,7 @@ from app.context.knowledge import (
   get_chunks_for_documents,
   load_chunks,
   search_chunks_fts,
+  search_chunks_vector,
 )
 from app.context.models import ContextChunk, SourceType
 
@@ -16,8 +17,20 @@ def chunks_from_documents(document_ids: list[str], *, max_chunks: int = 48) -> l
   return [_to_chunk(item, score=None) for item in get_chunks_for_documents(document_ids, max_chunks=max_chunks)]
 
 
-def search_knowledge(query: str, *, top_k: int = 8, tags: list[str] | None = None) -> list[ContextChunk]:
-  # 1. Try SQLite FTS5 — fast, persistent index, handles Spanish accents
+def search_knowledge(
+  query: str,
+  *,
+  top_k: int = 8,
+  tags: list[str] | None = None,
+  query_vector: list[float] | None = None,
+) -> list[ContextChunk]:
+  # 1. If vector is provided, perform vector similarity search
+  if query_vector:
+    vector_results = search_chunks_vector(query_vector, top_k=top_k, tags=tags)
+    if vector_results:
+      return [_to_chunk(item, score=item.get("score")) for item in vector_results]
+
+  # 2. Try PostgreSQL FTS (Spanish tsvector / ranking)
   fts_results = search_chunks_fts(query, top_k=top_k, tags=tags)
   if fts_results:
     return [_to_chunk(item, score=item.get("score")) for item in fts_results]

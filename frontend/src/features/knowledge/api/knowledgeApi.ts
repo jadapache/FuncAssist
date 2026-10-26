@@ -5,6 +5,10 @@ export type KnowledgePathResponse = {
   resolved_path: string
   is_custom: boolean
   is_accessible: boolean
+  engine?: string
+  pgvector_enabled?: boolean
+  doc_count?: number
+  chunk_count?: number
   ok?: boolean
 }
 

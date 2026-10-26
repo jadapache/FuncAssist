@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.context.knowledge import (
   delete_document,
+  get_db_status,
   get_knowledge_base_dir,
   ingest_document,
   list_documents,
@@ -18,7 +20,8 @@ from app.context.knowledge_migration import (
   verify_integrity,
 )
 from app.context.service import assemble_context
-from app.core.storage import load_app_settings, save_app_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -30,7 +33,7 @@ class RetrieveRequest(BaseModel):
 
 
 class KnowledgeBasePathRequest(BaseModel):
-  path: str  # empty string = revert to local default
+  path: str = ""
 
 
 @router.get("/documents")
@@ -94,49 +97,66 @@ async def retrieve(body: RetrieveRequest) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Path Configuration Endpoints
+# Database Status & Engine Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/db-status")
+async def get_database_status() -> dict[str, Any]:
+  """Return detailed status of the active knowledge base engine (PostgreSQL RAG / pgvector)."""
+  try:
+    return get_db_status()
+  except Exception as exc:
+    logger.exception("Error al consultar el estado de la base de datos de conocimiento: %s", exc)
+    raise HTTPException(
+      status_code=500,
+      detail="Error interno al obtener el estado de la base de datos de conocimiento.",
+    ) from None
 
 
 @router.get("/path")
 async def get_knowledge_path() -> dict[str, Any]:
-  settings = load_app_settings()
-  current_path = settings.get("knowledge_base_path", "")
+  """Backward-compatible endpoint returning active storage info and engine details."""
+  try:
+    status = get_db_status()
+  except Exception as exc:
+    logger.exception("Error al consultar la configuracion de almacenamiento de conocimiento: %s", exc)
+    raise HTTPException(
+      status_code=500,
+      detail="Error interno al consultar la configuracion de almacenamiento de conocimiento.",
+    ) from None
   resolved = str(get_knowledge_base_dir())
   return {
-    "configured_path": current_path,
+    "configured_path": status.get("host", ""),
     "resolved_path": resolved,
-    "is_custom": bool(current_path.strip()),
-    "is_accessible": Path(resolved).exists() if current_path else True,
+    "is_custom": status.get("is_postgres", False),
+    "is_accessible": status.get("connected", True),
+    "engine": status.get("engine", "postgresql"),
+    "pgvector_enabled": status.get("pgvector_enabled", False),
+    "doc_count": status.get("doc_count", 0),
+    "chunk_count": status.get("chunk_count", 0),
   }
 
 
 @router.put("/path")
 async def set_knowledge_path(body: KnowledgeBasePathRequest) -> dict[str, Any]:
-  new_path = body.path.strip()
-
-  if new_path:
-    p = Path(new_path)
-    if not p.exists():
-      try:
-        p.mkdir(parents=True, exist_ok=True)
-      except Exception as exc:
-        raise HTTPException(
-          status_code=400,
-          detail=f"Cannot access or create path '{new_path}': {exc}",
-        ) from exc
-
-  settings = load_app_settings()
-  settings["knowledge_base_path"] = new_path
-  save_app_settings(settings)
-
-  resolved = str(get_knowledge_base_dir())
+  """In server mode, database connections are managed via DATABASE_URL environment variable."""
+  try:
+    status = get_db_status()
+  except Exception as exc:
+    logger.exception("Error al actualizar la configuracion de almacenamiento de conocimiento: %s", exc)
+    raise HTTPException(
+      status_code=500,
+      detail="Error interno al consultar la configuracion de almacenamiento de conocimiento.",
+    ) from None
   return {
     "ok": True,
-    "configured_path": new_path,
-    "resolved_path": resolved,
-    "is_custom": bool(new_path),
-    "is_accessible": Path(resolved).exists() if new_path else True,
+    "message": "En el servidor la conexión de PostgreSQL se gestiona mediante la variable de entorno DATABASE_URL.",
+    "configured_path": status.get("host", ""),
+    "resolved_path": str(get_knowledge_base_dir()),
+    "is_custom": status.get("is_postgres", False),
+    "is_accessible": status.get("connected", True),
+    "engine": status.get("engine", "postgresql"),
   }
 
 
@@ -147,7 +167,7 @@ async def set_knowledge_path(body: KnowledgeBasePathRequest) -> dict[str, Any]:
 
 @router.get("/admin/integrity")
 async def check_integrity() -> dict[str, Any]:
-  """Run SQLite + FTS5 integrity checks. Safe to call at any time."""
+  """Run PostgreSQL integrity checks. Safe to call at any time."""
   return verify_integrity()
 
 

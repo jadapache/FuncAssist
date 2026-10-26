@@ -1,3 +1,5 @@
+import { AUTH_TOKEN_KEY } from '../constants/app'
+import { authApi } from './modules/auth'
 import { knowledgeApi } from '../features/knowledge/api/knowledgeApi'
 import { aiSettingsApi } from '../features/settings/api/aiSettingsApi'
 import { featuresApi } from './modules/features'
@@ -27,6 +29,28 @@ export const API_BASE =
     ? 'http://127.0.0.1:6728'
     : '')
 
+export const getAuthHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY)
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export type AuthUser = {
+  id: string
+  username: string
+  email?: string
+  full_name?: string
+  role?: string
+  status?: string
+  created_at?: string
+}
+
+export type AuthResponse = {
+  token?: string
+  status?: string
+  message?: string
+  user: AuthUser
+}
+
 export const handleResponse = async <T,>(response: Response): Promise<T> => {
   if (!response.ok) {
     let detail = `Request failed (${response.status})`
@@ -35,6 +59,26 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
       detail = body.detail ?? detail
     } catch {
       // ignore
+    }
+    if (Array.isArray(detail)) {
+      detail = detail
+        .map((item: unknown) => {
+          if (typeof item === 'string') return item
+          if (typeof item === 'object' && item !== null) {
+            const errObj = item as { loc?: (string | number)[]; type?: string; msg?: string }
+            if (
+              errObj.loc?.includes('username') &&
+              (errObj.type === 'string_pattern_mismatch' || errObj.msg?.includes('pattern'))
+            ) {
+              return 'El nombre de usuario admite solo letras y números'
+            }
+            if (errObj.msg) {
+              return errObj.msg.replace(/^Value error,\s*/i, '')
+            }
+          }
+          return JSON.stringify(item)
+        })
+        .join('. ')
     }
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
   }
@@ -45,6 +89,7 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
 }
 
 export const api = {
+  ...authApi,
   ...userApi,
   ...knowledgeApi,
   ...aiSettingsApi,

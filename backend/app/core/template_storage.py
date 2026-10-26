@@ -5,12 +5,15 @@ Módulo de almacenamiento, extracción de contenido y administración de plantil
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     import docx
@@ -77,7 +80,19 @@ def _save_index(items: List[Dict[str, Any]]) -> None:
     INDEX_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
 
-def list_templates() -> List[Dict[str, Any]]:
+async def list_templates() -> List[Dict[str, Any]]:
+    try:
+        from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
+        repo = CorporateTemplateRepository()
+        items = await repo.list()
+        if items is not None:
+            for item in items:
+                if "tags" not in item:
+                    item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
+            return items
+    except Exception as exc:
+        logger.debug(f"DB list_templates fallback to index: {exc}")
+
     items = _load_index()
     for item in items:
         if "tags" not in item:
@@ -85,7 +100,18 @@ def list_templates() -> List[Dict[str, Any]]:
     return items
 
 
-def get_template(template_id: str) -> Optional[Dict[str, Any]]:
+async def get_template(template_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
+        repo = CorporateTemplateRepository()
+        item = await repo.get(template_id)
+        if item:
+            if "tags" not in item:
+                item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
+            return item
+    except Exception as exc:
+        logger.debug(f"DB get_template fallback to index: {exc}")
+
     items = _load_index()
     for item in items:
         if item["id"] == template_id:
@@ -93,7 +119,6 @@ def get_template(template_id: str) -> Optional[Dict[str, Any]]:
                 item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
             return item
     return None
-
 
 def extract_docx_structure(file_path: Path) -> Dict[str, Any]:
     if docx is None:
@@ -261,18 +286,19 @@ def detect_tags(content: str) -> List[str]:
     return sorted(list(found))
 
 
-def save_template_file(
+async def save_template_file(
     filename: str, file_bytes: bytes, title: str = "", module: str = "general"
 ) -> Dict[str, Any]:
+    import asyncio
     ensure_template_dirs()
     template_id = str(uuid.uuid4())
     ext = Path(filename).suffix.lower()
     stored_filename = f"{template_id}{ext}"
     file_path = TEMPLATES_DIR / stored_filename
-    file_path.write_bytes(file_bytes)
+    await asyncio.to_thread(file_path.write_bytes, file_bytes)
 
     # Initial content extraction & tag detection
-    content_sample = extract_template_content(stored_filename)
+    content_sample = await asyncio.to_thread(extract_template_content, stored_filename)
     detected = detect_tags(content_sample)
     default_tags = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
     merged_tags = sorted(list(set(default_tags + detected)))
@@ -287,22 +313,29 @@ def save_template_file(
         "module": module or "general",
         "tags": merged_tags,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-
     }
 
     items = _load_index()
     items.append(item)
     _save_index(items)
+
+    try:
+        from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
+        await CorporateTemplateRepository().upsert(item)
+    except Exception as exc:
+        logger.debug(f"DB save_template_file error: {exc}")
+
     return item
 
 
-def update_template_metadata(
+async def update_template_metadata(
     template_id: str,
     title: Optional[str] = None,
     module: Optional[str] = None,
     tags: Optional[List[str]] = None,
     content: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
+    import asyncio
     items = _load_index()
     for item in items:
         if item["id"] == template_id:
@@ -318,19 +351,27 @@ def update_template_metadata(
                 file_path = TEMPLATES_DIR / item.get("stored_filename", "")
                 ext = file_path.suffix.lower()
                 if ext in [".md", ".txt", ".json", ".html", ".xml", ".csv"]:
-                    file_path.write_text(content, encoding="utf-8")
+                    await asyncio.to_thread(file_path.write_text, content, encoding="utf-8")
                 else:
                     sidecar = TEMPLATES_DIR / f"{item['stored_filename']}.content.md"
-                    sidecar.write_text(content, encoding="utf-8")
+                    await asyncio.to_thread(sidecar.write_text, content, encoding="utf-8")
                 item["file_size"] = len(content.encode("utf-8"))
 
             _save_index(items)
+
+            try:
+                from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
+                await CorporateTemplateRepository().upsert(item)
+            except Exception as exc:
+                logger.debug(f"DB update_template error: {exc}")
+
             return item
     return None
 
 
-def get_template_detail(template_id: str) -> Optional[Dict[str, Any]]:
-    item = get_template(template_id)
+async def get_template_detail(template_id: str) -> Optional[Dict[str, Any]]:
+    import asyncio
+    item = await get_template(template_id)
     if not item:
         return None
 
@@ -340,22 +381,22 @@ def get_template_detail(template_id: str) -> Optional[Dict[str, Any]]:
     header_text = ""
     footer_text = ""
 
-    if "custom_content" in item:
+    if "custom_content" in item and item["custom_content"] is not None:
         content = item["custom_content"]
     else:
         sidecar = TEMPLATES_DIR / f"{stored_name}.content.md"
         if sidecar.exists():
-            content = sidecar.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(sidecar.read_text, encoding="utf-8")
         elif file_path.suffix.lower() == ".docx":
-            parsed = extract_docx_structure(file_path)
+            parsed = await asyncio.to_thread(extract_docx_structure, file_path)
             content = parsed["content"]
             header_text = parsed["header"]
             footer_text = parsed["footer"]
         else:
-            content = extract_template_content(stored_name)
+            content = await asyncio.to_thread(extract_template_content, stored_name)
 
     if file_path.suffix.lower() == ".docx" and not header_text:
-        parsed = extract_docx_structure(file_path)
+        parsed = await asyncio.to_thread(extract_docx_structure, file_path)
         header_text = parsed.get("header", "")
         footer_text = parsed.get("footer", "")
 
@@ -371,8 +412,8 @@ def get_template_detail(template_id: str) -> Optional[Dict[str, Any]]:
         "system_tags": DEFAULT_SYSTEM_TAGS,
     }
 
-
-def delete_template(template_id: str) -> bool:
+async def delete_template(template_id: str) -> bool:
+    import asyncio
     items = _load_index()
     target = None
     new_items = []
@@ -387,9 +428,16 @@ def delete_template(template_id: str) -> bool:
         file_path = TEMPLATES_DIR / target.get("stored_filename", "")
         if file_path.exists():
             try:
-                file_path.unlink()
+                await asyncio.to_thread(file_path.unlink)
             except Exception:
                 pass
+
+        try:
+            from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
+            await CorporateTemplateRepository().delete(template_id)
+        except Exception as exc:
+            logger.debug(f"DB delete_template error: {exc}")
+
         return True
     return False
 

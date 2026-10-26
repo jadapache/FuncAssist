@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Cpu, Database, FileText, Layers } from 'lucide-react'
+import { Cpu, Database, FileText, Layers, ShieldCheck } from 'lucide-react'
 import { AiModelsPanel } from '../../../features/settings/components/AiModelsPanel'
 import { IntegrationsPanel } from '../../../features/settings/components/IntegrationsPanel'
 import { KnowledgeBaseSection } from '../../../features/settings/components/KnowledgeBaseSection'
 import { TemplatesPanel } from '../../../features/settings/components/TemplatesPanel'
+import { UserApprovalsPanel } from '../../../features/settings/components/UserApprovalsPanel'
 import { useIntegrationsManager } from '../../../features/settings/hooks/useIntegrationsManager'
+import { useUserApprovalsManager } from '../../../features/settings/hooks/useUserApprovalsManager'
 import type { SettingsTabItem, TabType } from '../../../features/settings/types'
 import { PageHeader } from '../../../components/common'
 import { useUser } from '../../../context/UserContext'
@@ -13,11 +15,18 @@ import { useUser } from '../../../context/UserContext'
 export const SettingsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useUser()
-  const role = user?.user_role || 'admin'
+  const role = user?.user_role || 'funcional'
+  const isAdmin = role === 'admin'
 
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const t = new URLSearchParams(window.location.search).get('tab')
-    if (t === 'integrations' || t === 'ai_models' || t === 'templates' || t === 'knowledge') {
+    if (
+      t === 'integrations' ||
+      t === 'ai_models' ||
+      t === 'templates' ||
+      t === 'knowledge' ||
+      t === 'approvals'
+    ) {
       return t as TabType
     }
     if (
@@ -30,19 +39,39 @@ export const SettingsPage = () => {
     return 'ai_models'
   })
 
-  // Integrations manager to populate badge count
-  const integrationsManager = useIntegrationsManager()
+  const integrationsManager = useIntegrationsManager({ enabled: activeTab === 'integrations' })
+  const userApprovalsManager = useUserApprovalsManager({ enabled: isAdmin && activeTab === 'approvals' })
+
+  const [aiModelsMounted, setAiModelsMounted] = useState(activeTab === 'ai_models')
+  const [templatesMounted, setTemplatesMounted] = useState(activeTab === 'templates')
+  const [knowledgeMounted, setKnowledgeMounted] = useState(activeTab === 'knowledge')
+  const [integrationsMounted, setIntegrationsMounted] = useState(activeTab === 'integrations')
+  const [approvalsMounted, setApprovalsMounted] = useState(activeTab === 'approvals')
 
   useEffect(() => {
     const tab = searchParams.get('tab')
-    if (tab === 'integrations' || tab === 'ai_models' || tab === 'templates' || tab === 'knowledge') {
-      setActiveTab(tab as TabType)
+    let next: TabType | null = null
+    if (
+      tab === 'integrations' ||
+      tab === 'ai_models' ||
+      tab === 'templates' ||
+      tab === 'knowledge' ||
+      tab === 'approvals'
+    ) {
+      next = tab as TabType
     } else if (searchParams.get('jira') || searchParams.get('github') || searchParams.get('gitlab')) {
-      setActiveTab('integrations')
+      next = 'integrations'
+    }
+    if (next) {
+      setActiveTab(next)
+      if (next === 'ai_models') setAiModelsMounted(true)
+      if (next === 'templates') setTemplatesMounted(true)
+      if (next === 'knowledge') setKnowledgeMounted(true)
+      if (next === 'integrations') setIntegrationsMounted(true)
+      if (next === 'approvals') setApprovalsMounted(true)
     }
   }, [searchParams])
 
-  // Filter tabs based on role (integrations accessible to admin, pm, funcional, qa)
   const canSeeIntegrations = ['admin', 'pm', 'funcional', 'qa'].includes(role)
 
   const TABS: SettingsTabItem[] = [
@@ -61,7 +90,7 @@ export const SettingsPage = () => {
     {
       id: 'knowledge',
       label: 'Base de Conocimiento',
-      subtitle: 'Almacenamiento SQLite FTS5 y red compartida',
+      subtitle: 'Almacenamiento PostgreSQL RAG (Full-Text & Vector)',
       icon: Database,
     },
     ...(canSeeIntegrations
@@ -75,6 +104,17 @@ export const SettingsPage = () => {
         },
       ]
       : []),
+    ...(isAdmin
+      ? [
+        {
+          id: 'approvals' as TabType,
+          label: 'Solicitudes de Acceso',
+          subtitle: 'Aprobación de nuevos usuarios',
+          icon: ShieldCheck,
+          badgeCount: userApprovalsManager.pendingRequests.length,
+        },
+      ]
+      : []),
   ]
 
   return (
@@ -82,7 +122,7 @@ export const SettingsPage = () => {
       <PageHeader
         eyebrow="SISTEMA & PREFERENCIAS"
         title="Configuración del Sistema"
-        subtitle="Administra los modelos de IA, base de conocimiento, plantillas e integraciones."
+        subtitle="Administra los modelos de IA, base de conocimiento, plantillas, integraciones y accesos de usuario."
       />
 
       {/* Nav Tabs Bar */}
@@ -97,19 +137,26 @@ export const SettingsPage = () => {
               onClick={() => {
                 setActiveTab(t.id)
                 setSearchParams({ tab: t.id }, { replace: true })
+                if (t.id === 'ai_models') setAiModelsMounted(true)
+                if (t.id === 'templates') setTemplatesMounted(true)
+                if (t.id === 'knowledge') setKnowledgeMounted(true)
+                if (t.id === 'integrations') setIntegrationsMounted(true)
+                if (t.id === 'approvals') setApprovalsMounted(true)
               }}
               className={[
                 'flex flex-1 min-w-[200px] items-center gap-3 rounded-xl px-4 py-3 text-left transition-all duration-200 cursor-pointer',
                 isActive
                   ? 'bg-white text-[#002777] shadow-md ring-1 ring-black/5 font-bold'
                   : 'text-slate-600 hover:bg-white/60 hover:text-slate-900 font-medium',
-              ].join(' ')}
+              ].join(' ')
+              }
             >
               <div
                 className={[
                   'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
                   isActive ? 'bg-[#002777] text-white' : 'bg-slate-200/80 text-slate-600',
-                ].join(' ')}
+                ].join(' ')
+                }
               >
                 <Icon className="h-5 w-5" />
               </div>
@@ -129,12 +176,29 @@ export const SettingsPage = () => {
         })}
       </nav>
 
-      {/* Tab Panels */}
-      {activeTab === 'ai_models' && <AiModelsPanel />}
-      {activeTab === 'templates' && <TemplatesPanel />}
-      {activeTab === 'knowledge' && <KnowledgeBaseSection />}
-      {activeTab === 'integrations' && canSeeIntegrations && (
-        <IntegrationsPanel integrationsManager={integrationsManager} />
+      {/* Tab Panels - lazy mount to avoid re-fetching on tab switch */}
+      <div className={activeTab === 'ai_models' ? 'block' : 'hidden'}>
+        {aiModelsMounted && <AiModelsPanel />}
+      </div>
+      <div className={activeTab === 'templates' ? 'block' : 'hidden'}>
+        {templatesMounted && <TemplatesPanel />}
+      </div>
+      <div className={activeTab === 'knowledge' ? 'block' : 'hidden'}>
+        {knowledgeMounted && <KnowledgeBaseSection />}
+      </div>
+      {canSeeIntegrations && (
+        <div className={activeTab === 'integrations' ? 'block' : 'hidden'}>
+          {integrationsMounted && (
+            <IntegrationsPanel integrationsManager={integrationsManager} />
+          )}
+        </div>
+      )}
+      {isAdmin && (
+        <div className={activeTab === 'approvals' ? 'block' : 'hidden'}>
+          {approvalsMounted && (
+            <UserApprovalsPanel userApprovalsManager={userApprovalsManager} />
+          )}
+        </div>
       )}
     </div>
   )

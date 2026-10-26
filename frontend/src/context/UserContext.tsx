@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import { api, type UserProfile, type UserRole } from '../api/client'
+import { useAuth } from './AuthContext'
 
 export type { UserRole, UserProfile }
 
@@ -14,68 +15,37 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined)
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isFirstTimeSetup, setIsFirstTimeSetup] = useState(false)
+  const { user: authUser, isLoading, updateUser } = useAuth()
 
-  useEffect(() => {
-    let isMounted = true
-
-    const loadUser = async () => {
-      localStorage.removeItem('funcassist_auth_token')
-      const maxRetries = 25
-      let lastError: unknown = null
-
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          const profile = await api.getUserProfile()
-
-          if (!isMounted) return
-
-          // Check if this is first-time setup (display_name is default or empty)
-          if (!profile.display_name || profile.display_name === 'Usuario') {
-            setIsFirstTimeSetup(true)
-          } else {
-            setUser(profile)
-            setIsFirstTimeSetup(false)
-          }
-          setIsLoading(false)
-          return
-        } catch (error) {
-          lastError = error
-          // If connection failed, wait before retrying to give backend time to finish starting
-          if (attempt < maxRetries - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 800))
-          }
-        }
+  const userProfile: UserProfile | null = authUser
+    ? {
+        display_name: authUser.full_name || authUser.username,
+        user_role: (authUser.role as UserRole) || 'funcional',
       }
-
-      if (!isMounted) return
-      console.error('Error loading user profile after retries:', lastError)
-      setIsFirstTimeSetup(true)
-      setIsLoading(false)
-    }
-
-    void loadUser()
-
-    return () => {
-      isMounted = false
-    }
-  }, [])
+    : null
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
-    const updated = await api.updateUserProfile(updates)
-    setUser(updated)
+    if (!authUser) return
+    const res = await api.updateProfile({
+      full_name: updates.display_name,
+    })
+    updateUser(res.user)
   }
 
-  const completeSetup = async (profile: UserProfile) => {
-    const created = await api.setupUser(profile)
-    setUser(created)
-    setIsFirstTimeSetup(false)
+  const completeSetup = async (_profile: UserProfile) => {
+    // Kept for backward compatibility
   }
 
   return (
-    <UserContext.Provider value={{ user, isLoading, isFirstTimeSetup, updateProfile, completeSetup }}>
+    <UserContext.Provider
+      value={{
+        user: userProfile,
+        isLoading,
+        isFirstTimeSetup: false,
+        updateProfile,
+        completeSetup,
+      }}
+    >
       {children}
     </UserContext.Provider>
   )

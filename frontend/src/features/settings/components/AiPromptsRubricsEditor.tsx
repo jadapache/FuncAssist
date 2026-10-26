@@ -19,6 +19,7 @@ import { PromptEditor } from './prompts_rubrics/PromptEditor'
 import { RubricEditor } from './prompts_rubrics/RubricEditor'
 import { JsonCodeEditor } from './prompts_rubrics/JsonCodeEditor'
 
+
 export const AiPromptsRubricsEditor = () => {
   const { toast } = useToast()
 
@@ -43,7 +44,7 @@ export const AiPromptsRubricsEditor = () => {
   // Search filter for features list
   const [searchQuery, setSearchQuery] = useState<string>('')
 
-  // Fetch all prompts and rubrics from backend
+  // Fetch all prompts and rubrics from backend - solo al montar o recargar explícitamente
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
@@ -51,9 +52,25 @@ export const AiPromptsRubricsEditor = () => {
         api.getAiPrompts(),
         api.getAiRubrics(),
       ])
-      setPromptsList(promptsRes.prompts || [])
-      setRubricsList(rubricsRes.rubrics || [])
+      const pList = promptsRes?.prompts || []
+      const rList = rubricsRes?.rubrics || []
+
+      setPromptsList(pList)
+      setRubricsList(rList)
+
+      // Inicializar de inmediato los datos del feature activo sin esperar un ciclo extra
+      const curP = pList.find((p) => p.feature === selectedFeature) || null
+      const curR = rList.find((r) => r.feature === selectedFeature) || null
+      setPromptData(curP ? { ...curP } : null)
+      setRubricData(curR ? { ...curR, criteria: [...(curR.criteria || [])] } : null)
+
+      const targetObj = activeDocType === 'prompt' ? curP : curR
+      if (targetObj) {
+        setRawJsonText(JSON.stringify(targetObj, null, 2))
+        setJsonError(null)
+      }
     } catch (err) {
+      console.error('Failed to load prompts/rubrics:', err)
       toast.error(err instanceof Error ? err.message : 'Error al cargar reglas y prompts')
     } finally {
       setLoading(false)
@@ -64,13 +81,13 @@ export const AiPromptsRubricsEditor = () => {
     void loadAll()
   }, [loadAll])
 
-  // Sync current selection
+  // Sync current selection when user picks a different feature or switches docType
   useEffect(() => {
     const curP = promptsList.find((p) => p.feature === selectedFeature) || null
     const curR = rubricsList.find((r) => r.feature === selectedFeature) || null
 
-    setPromptData(curP ? JSON.parse(JSON.stringify(curP)) : null)
-    setRubricData(curR ? JSON.parse(JSON.stringify(curR)) : null)
+    setPromptData(curP ? { ...curP } : null)
+    setRubricData(curR ? { ...curR, criteria: [...(curR.criteria || [])] } : null)
 
     const targetObj = activeDocType === 'prompt' ? curP : curR
     if (targetObj) {
@@ -170,7 +187,7 @@ export const AiPromptsRubricsEditor = () => {
         setPromptData(saved)
         setPromptsList((prev) => prev.map((p) => (p.feature === selectedFeature ? saved : p)))
         setRawJsonText(JSON.stringify(saved, null, 2))
-        toast.success(`Prompt "${selectedFeature}.json" guardado (Versión v${saved.version})`)
+        toast.success(`Prompt para "${selectedFeature}" guardado (Versión v${saved.version})`)
       } else {
         let payloadToSave = rubricData
         if (editMode === 'json') {
@@ -185,7 +202,7 @@ export const AiPromptsRubricsEditor = () => {
         setRubricData(saved)
         setRubricsList((prev) => prev.map((r) => (r.feature === selectedFeature ? saved : r)))
         setRawJsonText(JSON.stringify(saved, null, 2))
-        toast.success(`Rúbrica "${selectedFeature}.json" guardada (Versión v${saved.version})`)
+        toast.success(`Rúbrica para "${selectedFeature}" guardada (Versión v${saved.version})`)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar cambios')
@@ -212,13 +229,13 @@ export const AiPromptsRubricsEditor = () => {
         setPromptData(resetRes)
         setPromptsList((prev) => prev.map((p) => (p.feature === selectedFeature ? resetRes : p)))
         setRawJsonText(JSON.stringify(resetRes, null, 2))
-        toast.success(`Prompt "${selectedFeature}.json" restablecido a los valores predeterminados`)
+        toast.success(`Prompt para "${selectedFeature}" restablecido a valores predeterminados`)
       } else {
         const resetRes = await api.resetAiRubric(selectedFeature)
         setRubricData(resetRes)
         setRubricsList((prev) => prev.map((r) => (r.feature === selectedFeature ? resetRes : r)))
         setRawJsonText(JSON.stringify(resetRes, null, 2))
-        toast.success(`Rúbrica "${selectedFeature}.json" restablecida a los valores predeterminados`)
+        toast.success(`Rúbrica para "${selectedFeature}" restablecida a valores predeterminados`)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al restablecer valores')
@@ -290,23 +307,13 @@ export const AiPromptsRubricsEditor = () => {
     <div className="space-y-6">
       {/* Header Info Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-blue-50/90 to-indigo-50/70 border border-blue-200/80 p-5 rounded-2xl shadow-xs">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-[#002777] text-white">
-              <Bot className="h-4 w-4" />
-            </span>
-            <h2 className="text-base font-bold text-slate-900">
-              Reglas, Prompts y Rúbricas de IA
-            </h2>
-          </div>
-          <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
-            Edita y ajusta directamente los archivos de configuración{' '}
-            <code className="font-mono text-[11px] bg-white px-1.5 py-0.5 rounded border border-blue-200 text-[#002777]">
-              .json
-            </code>{' '}
-            almacenados en <strong className="text-slate-800">/local/ai/prompts</strong> y{' '}
-            <strong className="text-slate-800">/local/ai/rubrics</strong> para afinar las restricciones del modelo.
-          </p>
+        <div className="flex items-center gap-2">
+          <span className="p-1.5 rounded-lg bg-[#002777] text-white">
+            <Bot className="h-4 w-4" />
+          </span>
+          <h2 className="text-base font-bold text-slate-900">
+            Reglas, Prompts y Rúbricas de IA
+          </h2>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -315,7 +322,7 @@ export const AiPromptsRubricsEditor = () => {
             disabled={loading}
             onClick={() => void loadAll()}
             className="btn btn-secondary text-xs py-2 px-3 inline-flex items-center gap-1.5 bg-white shadow-xs cursor-pointer"
-            title="Recargar archivos desde el servidor"
+            title="Recargar desde la base de datos"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Recargar</span>
@@ -323,46 +330,33 @@ export const AiPromptsRubricsEditor = () => {
         </div>
       </div>
 
-      {loading ? (
-        <div className="card p-12 text-center text-slate-500 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3">
-          <RefreshCw className="h-6 w-6 animate-spin text-[#002777]" />
-          <span className="text-sm font-semibold">Cargando catálogo de prompts y rúbricas...</span>
+      {/* MAIN CONTENT GRID */}
+      <div className="grid gap-6 lg:grid-cols-12 items-start">
+        {/* LEFT COLUMN: FEATURES LIST SELECTOR */}
+        <div className="lg:col-span-4 space-y-3">
+          <FeatureSelectorSidebar
+            features={filteredFeatures}
+            selectedFeature={selectedFeature}
+            promptsList={promptsList}
+            rubricsList={rubricsList}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onSelectFeature={setSelectedFeature}
+          />
         </div>
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-12 items-start">
-          {/* LEFT COLUMN: FEATURES LIST SELECTOR */}
-          <div className="lg:col-span-4 space-y-3">
-            <FeatureSelectorSidebar
-              features={filteredFeatures}
-              selectedFeature={selectedFeature}
-              promptsList={promptsList}
-              rubricsList={rubricsList}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onSelectFeature={setSelectedFeature}
-            />
-          </div>
 
           {/* RIGHT COLUMN: EDITOR CANVAS */}
           <div className="lg:col-span-8 space-y-4">
             <div className="card p-6 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-5">
               {/* Header of Active Editor */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">
-                      {currentMeta?.title || selectedFeature}
-                    </h3>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-100 text-[#002777]">
-                      v{currentVersion}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Ruta física:{' '}
-                    <code className="font-mono text-[#002777] bg-slate-100 px-1 rounded">
-                      /local/ai/{activeDocType === 'prompt' ? 'prompts' : 'rubrics'}/{selectedFeature}.json
-                    </code>
-                  </p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900">
+                    {currentMeta?.title || selectedFeature}
+                  </h3>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-100 text-[#002777]">
+                    v{currentVersion}
+                  </span>
                 </div>
 
                 {/* Document Type Switcher: Prompt vs Rubric */}
@@ -378,7 +372,7 @@ export const AiPromptsRubricsEditor = () => {
                     ].join(' ')}
                   >
                     <FileText className="h-3.5 w-3.5" />
-                    <span>Prompt (.json)</span>
+                    <span>Prompt</span>
                   </button>
                   <button
                     type="button"
@@ -391,7 +385,7 @@ export const AiPromptsRubricsEditor = () => {
                     ].join(' ')}
                   >
                     <ListOrdered className="h-3.5 w-3.5" />
-                    <span>Rúbrica (.json)</span>
+                    <span>Rúbrica</span>
                   </button>
                 </div>
               </div>
@@ -512,14 +506,13 @@ export const AiPromptsRubricsEditor = () => {
                     ) : (
                       <Save className="h-3.5 w-3.5" />
                     )}
-                    <span>{saving ? 'Guardando en disco...' : 'Guardar Cambios (.json)'}</span>
+                    <span>{saving ? 'Guardando...' : 'Guardar Cambios'}</span>
                   </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      )}
     </div>
   )
 }

@@ -183,7 +183,20 @@ def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
             logger.debug(f"Catalog sync check skipped: {exc}")
 
     frontier_models: list[AIModelInfo] = []
-    if target_file and target_file.exists():
+
+    # Attempt to load frontier models from PostgreSQL entity first
+    try:
+        from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
+        db_items = AIModelCatalogRepository().list_sync()
+        if db_items:
+            frontier_models = [
+                AIModelInfo(**item) for item in db_items
+                if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
+            ]
+    except Exception as exc:
+        logger.debug(f"DB load frontier models fallback: {exc}")
+
+    if not frontier_models and target_file and target_file.exists():
         try:
             with open(target_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
