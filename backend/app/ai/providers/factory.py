@@ -8,13 +8,12 @@ from typing import Any
 from app.ai.providers.base import AIProvider
 from app.ai.providers.implementations import LiteLLMProvider
 from app.ai.providers.registry import find_provider_spec
-from app.core.storage import load_app_settings
+from app.core.storage import load_app_settings, load_user_ai_settings
 
 
-def get_ai_settings() -> dict[str, Any]:
-  """Load AI settings from storage"""
-  settings = load_app_settings()
-  ai = settings.get("ai") or {}
+def get_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
+  """Load AI settings for a specific user from storage, falling back to global settings."""
+  ai = load_user_ai_settings(user_id) if user_id else (load_app_settings().get("ai") or {})
   return {
     "provider": ai.get("provider") or os.getenv("AI_PROVIDER") or None,
     "model": ai.get("model") or os.getenv("AI_MODEL") or None,
@@ -37,8 +36,9 @@ def resolve_provider(
   model_name: str | None = None,
   api_key: str | None = None,
   base_url: str | None = None,
+  user_id: str | None = None,
 ) -> AIProvider:
-  config = get_ai_settings()
+  config = get_ai_settings(user_id=user_id)
   target_name = (provider_name or config.get("provider") or "").lower()
   spec = find_provider_spec(target_name)
 

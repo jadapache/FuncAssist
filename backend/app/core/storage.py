@@ -208,3 +208,50 @@ def save_app_settings(payload: dict[str, Any]) -> dict[str, Any]:
     logger.debug("Failed to persist app settings to PostgreSQL, kept in memory: %s", exc)
 
   return current
+
+
+def load_user_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
+  """Load AI settings for a specific user ID, falling back to global settings."""
+  if not user_id:
+    return load_app_settings().get("ai") or {}
+
+  key = f"user_ai:{user_id}"
+  try:
+    from app.db.database import get_sync_db
+    with get_sync_db() as db:
+      setting = db.scalar(select(SettingModel).where(SettingModel.key == key))
+      if setting and setting.value_json:
+        stored = json.loads(setting.value_json)
+        if isinstance(stored, dict):
+          return decrypt_ai_settings(stored)
+  except Exception as exc:
+    logger.debug("Could not read user AI settings from DB: %s", exc)
+
+  # Fallback to global AI settings
+  return load_app_settings().get("ai") or {}
+
+
+def save_user_ai_settings(user_id: str, ai_data: dict[str, Any]) -> dict[str, Any]:
+  """Save user-specific AI settings in PostgreSQL settings table with encryption."""
+  current = load_user_ai_settings(user_id)
+  current.update(ai_data)
+
+  to_store = encrypt_ai_settings(dict(current))
+  key = f"user_ai:{user_id}"
+
+  try:
+    from app.db.database import get_sync_db
+    value_json = json.dumps(to_store, ensure_ascii=False)
+    with get_sync_db() as db:
+      setting = db.scalar(select(SettingModel).where(SettingModel.key == key))
+      if setting:
+        setting.value_json = value_json
+      else:
+        setting = SettingModel(key=key, value_json=value_json)
+        db.add(setting)
+      db.commit()
+  except Exception as exc:
+    logger.debug("Failed to persist user AI settings to DB: %s", exc)
+
+  return current
+
