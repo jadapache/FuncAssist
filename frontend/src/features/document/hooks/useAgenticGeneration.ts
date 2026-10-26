@@ -5,7 +5,9 @@
 
 import { useCallback, useState } from 'react'
 import { generateArtifactSubtitle, parseMultipleArtifacts, parseStreamForChatAndArtifacts } from '../../../utils/artifactSplitter'
-import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
+import type { EphemeralAttachmentDoc } from '../api/docAgentApi'
+import { useAgentRun } from './useAgentRun'
+import type { AgentRunState } from '../types/agentEvents'
 import type { ChatPersistMessage, DocumentArtifact, ChatConversation, ChatAttachment } from './useChatPersistence'
 import type { Artifact } from '../../../types/artifacts'
 import type { FuncionalFeatureConfig } from '../../../features/funcional'
@@ -45,6 +47,8 @@ export interface GenerationResult {
   streamingText: string
   generationStatus: string
   liveThinkingSteps: unknown[]
+  runState: AgentRunState
+  handleCancelRun: () => Promise<void>
   handleSendMessage: (
     query?: string,
     attachedImages?: Array<{ name: string; dataUrl: string; size?: number }>,
@@ -207,6 +211,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
   const [isGenerating, setIsGenerating] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [generationStatus, setGenerationStatus] = useState('Pensando...')
+  const { runState, executeRun, cancelRun } = useAgentRun()
 
   const {
     config,
@@ -301,7 +306,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         let latestAccumulatedText = ''
         let liveIntent = resolution.targetFeature
 
-        const res = await docAgentApi.agenticPromptStream(
+        const res = await executeRun(
           {
             query: queryText,
             feature: resolution.targetFeature,
@@ -576,8 +581,11 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
   return {
     isGenerating,
     streamingText,
-    generationStatus,
-    liveThinkingSteps: [],
+    generationStatus: runState.activeStatusText || generationStatus,
+    liveThinkingSteps: runState.steps,
+    runState,
+    handleCancelRun: cancelRun,
     handleSendMessage,
   }
 }
+
