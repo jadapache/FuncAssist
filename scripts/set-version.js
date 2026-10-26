@@ -24,18 +24,4 @@ frontPkg.version = cleanVersion;
 fs.writeFileSync(frontPkgPath, JSON.stringify(frontPkg, null, 2) + '\n', 'utf8');
 console.log('✓ Updated frontend/package.json');
 
-// 3. src-tauri/tauri.conf.json
-const tauriConfPath = path.resolve(__dirname, '../src-tauri/tauri.conf.json');
-const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
-tauriConf.version = cleanVersion;
-fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n', 'utf8');
-console.log('✓ Updated src-tauri/tauri.conf.json');
-
-// 4. src-tauri/Cargo.toml
-const cargoPath = path.resolve(__dirname, '../src-tauri/Cargo.toml');
-let cargo = fs.readFileSync(cargoPath, 'utf8');
-cargo = cargo.replace(/^version\s*=\s*"[^"]+"/m, `version = "${cleanVersion}"`);
-fs.writeFileSync(cargoPath, cargo, 'utf8');
-console.log('✓ Updated src-tauri/Cargo.toml');
-
 console.log(`\nAll version references synchronized to ${cleanVersion}!`);
