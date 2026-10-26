@@ -434,3 +434,23 @@ def test_api_knowledge_endpoints(mock_postgres_db):
   del_res = client.delete(f"/api/knowledge/documents/{doc_id}")
   assert del_res.status_code == 200
   assert del_res.json()["ok"] is True
+
+
+def test_db_status_exception_does_not_leak_stack_trace():
+  from unittest.mock import patch
+  with patch("app.context.knowledge._db", side_effect=RuntimeError("psycopg.OperationalError: password authentication failed for user 'sensitive_admin'")):
+    status = get_db_status()
+    assert status["connected"] is False
+    assert "sensitive_admin" not in status.get("error", "")
+    assert status["error"] == "Error al conectar o consultar la base de datos de conocimiento."
+
+
+def test_api_db_status_exception_sanitized(mock_postgres_db):
+  from unittest.mock import patch
+  app = create_app()
+  client = TestClient(app)
+  with patch("app.api.knowledge.get_db_status", side_effect=RuntimeError("psycopg connection failed with credentials")):
+    res = client.get("/api/knowledge/db-status")
+    assert res.status_code == 500
+    assert "credentials" not in res.text
+    assert res.json()["detail"] == "Error interno al obtener el estado de la base de datos de conocimiento."

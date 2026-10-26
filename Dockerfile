@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./backend/requirements.txt
@@ -29,6 +29,6 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 RUN mkdir -p local/connections local/cache local/settings local/knowledge local/ai/logs
 
 WORKDIR /app/backend
-EXPOSE 8000
+EXPOSE 6728
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-6728}"]

@@ -122,13 +122,13 @@ async def register(
     )
 
     clean_user = _sanitize_user(user)
-    user_status = user.get("status", "pending")
+    user_status = clean_user.get("status", "pending")
 
     if user_status == "approved":
         token = create_access_token({
-            "sub": user["id"],
-            "username": user["username"],
-            "role": user.get("role", "admin"),
+            "sub": str(clean_user["id"]),
+            "username": str(clean_user["username"]),
+            "role": str(clean_user.get("role", "admin")),
         })
         return {
             "token": token,
@@ -185,9 +185,9 @@ async def login(
 
     clean_user = _sanitize_user(user)
     token = create_access_token({
-        "sub": user["id"],
-        "username": user["username"],
-        "role": user.get("role", "user"),
+        "sub": str(clean_user["id"]),
+        "username": str(clean_user["username"]),
+        "role": str(clean_user.get("role", "user")),
     })
 
     return {

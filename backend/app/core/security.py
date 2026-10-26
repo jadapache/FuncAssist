@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from app.core.settings import get_settings
 
+PBKDF2_ITERATIONS = 100_000
+
 
 def generate_salt(length: int = 16) -> str:
     """Genera un salt aleatorio seguro en formato hexadecimal."""
@@ -15,19 +17,20 @@ def generate_salt(length: int = 16) -> str:
 
 
 def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
-    """
-    Aplica cifrado SHA-256 con Salt a la contraseña dada.
-    Devuelve la tupla (password_hash, password_salt).
-    """
+    """Aplica derivacion segura de contrasenas usando PBKDF2-HMAC-SHA256 con Salt."""
     if not salt:
         salt = generate_salt()
-    combined = (salt + password).encode("utf-8")
-    pwd_hash = hashlib.sha256(combined).hexdigest()
+    pwd_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PBKDF2_ITERATIONS,
+    ).hex()
     return pwd_hash, salt
 
 
 def verify_password(password: str, password_hash: str, salt: str) -> bool:
-    """Verifica si la contraseña ingresada coincide con el hash almacenado mediante SHA-256 + Salt."""
+    """Verifica si la contrasena ingresada coincide con el hash almacenado mediante PBKDF2-HMAC-SHA256."""
     computed_hash, _ = hash_password(password, salt=salt)
     return hmac.compare_digest(computed_hash, password_hash)
 
@@ -54,7 +57,7 @@ def create_access_token(payload: Dict[str, Any], expires_in_seconds: int = 86400
 
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
-    """Valida la firma y fecha de expiración del token Bearer."""
+    """Valida la firma y fecha de expiracion del token Bearer."""
     try:
         parts = token.split(".")
         if len(parts) != 2:
@@ -82,10 +85,10 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def machine_fingerprint() -> str:
-    """Genera una huella digital única para el equipo local.
+    """Genera una huella digital unica para el equipo local.
 
-    Combinación de atributos del sistema operativo y del directorio home.
-    Usada como factor en la derivación de claves de cifrado locales.
+    Combinacion de atributos del sistema operativo y del directorio home.
+    Usada como factor en la derivacion de claves de cifrado locales.
     """
     import platform
     from pathlib import Path
@@ -97,4 +100,3 @@ def machine_fingerprint() -> str:
         str(Path.home()),
     ]
     return "|".join(parts)
-

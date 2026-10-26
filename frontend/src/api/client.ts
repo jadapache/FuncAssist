@@ -19,7 +19,15 @@ export type * from '../features/settings/types'
 export type * from '../features/document/types'
 export type * from '../features/transcription/api/transcriptionApi'
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+export const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  (typeof window !== 'undefined' &&
+  (window.location.protocol === 'tauri:' ||
+    window.location.hostname === 'tauri.localhost' ||
+    '__TAURI__' in window ||
+    '__TAURI_INTERNALS__' in window)
+    ? 'http://127.0.0.1:6728'
+    : '')
 
 export const getAuthHeaders = (): Record<string, string> => {
   const token = localStorage.getItem(AUTH_TOKEN_KEY)
