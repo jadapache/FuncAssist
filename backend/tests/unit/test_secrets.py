@@ -119,3 +119,19 @@ def test_derive_fernet_key_pbkdf2():
     token = fernet.encrypt(b"secure_data")
     assert fernet.decrypt(token) == b"secure_data"
 
+
+
+def test_hash_password_and_verify():
+    from app.core.security import hash_password, verify_password, generate_salt
+
+    password = "SuperSecretPassword123!"
+    h1, salt1 = hash_password(password)
+    assert len(h1) == 64
+    assert len(salt1) == 32
+    assert verify_password(password, h1, salt1) is True
+    assert verify_password("WrongPassword123!", h1, salt1) is False
+
+    # Different salts produce different hashes
+    h2, salt2 = hash_password(password)
+    assert salt1 != salt2
+    assert h1 != h2
