@@ -75,6 +75,13 @@ def extract_artifacts(raw_text: str) -> tuple[list[LLMArtifact], str]:
     clean = _ARTIFACT_PATTERN_ALT.sub("", clean)
     clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
 
+    # Si hay bloques <chat>, extraer su contenido como texto limpio de conversacion
+    chat_match = re.search(r'<chat>(.*?)</chat>', clean, re.DOTALL | re.IGNORECASE)
+    if chat_match:
+        clean = chat_match.group(1).strip()
+    else:
+        clean = re.sub(r'</?chat>', '', clean).strip()
+
     return artifacts, clean
 
 
