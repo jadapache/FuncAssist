@@ -1,24 +1,63 @@
 import {
   API_BASE,
+  getAuthHeaders,
   handleResponse,
   type AgenticPromptResponse,
 } from '../../../api/client'
+import type { AgentEventEnvelope } from '../types/agentEvents'
+
+export interface EphemeralAttachmentDoc {
+  id: string
+  filename: string
+  content: string
+  char_count?: number
+}
+
+export interface AgenticPromptPayload {
+  query: string
+  feature?: string
+  mode?: string
+  images?: Array<{ name: string, data: string, mime_type?: string }>
+  attached_docs?: Array<{ filename: string, content: string }>
+  current_document?: string
+  chat_context?: string[]
+  sources?: string[]
+  document_ids?: string[]
+  template_id?: string
+  run_id?: string
+  conversation_id?: string
+}
+
 
 export const docAgentApi = {
-  agenticPrompt: (payload: {
-    query: string
-    current_document?: string
-    chat_context?: string[]
-    sources?: string[]
-    document_ids?: string[]
-    template_id?: string
-  }): Promise<AgenticPromptResponse> =>
+  parseAttachment: async (file: File): Promise<EphemeralAttachmentDoc> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/api/doc-agent/parse-attachment`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+      body: form,
+    })
+    const data = await handleResponse<{ filename: string; content: string; char_count: number }>(res)
+    return {
+      id: crypto.randomUUID(),
+      filename: data.filename,
+      content: data.content,
+      char_count: data.char_count,
+    }
+  },
+
+  agenticPrompt: (payload: AgenticPromptPayload): Promise<AgenticPromptResponse> =>
     fetch(`${API_BASE}/api/doc-agent/agentic-prompt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,
+        feature: payload.feature,
+        mode: payload.mode,
+        images: payload.images,
+        attachedDocs: payload.attached_docs,
         current_document: payload.current_document,
         chat_context: payload.chat_context,
         sources: payload.sources,
@@ -41,28 +80,41 @@ export const docAgentApi = {
       })),
     ),
 
+  cancelRun: async (runId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/api/doc-agent/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    })
+    if (!res.ok) {
+      throw new Error(`Failed to cancel run ${runId}`)
+    }
+  },
+
   agenticPromptStream: async (
-    payload: {
-      query: string
-      current_document?: string
-      chat_context?: string[]
-      sources?: string[]
-      document_ids?: string[]
-      template_id?: string
-    },
+    payload: AgenticPromptPayload,
     onChunk: (accumulatedText: string, chunk: string) => void,
+    onIntent?: (intent: string) => void,
+    onEvent?: (event: AgentEventEnvelope) => void,
+    signal?: AbortSignal,
   ): Promise<AgenticPromptResponse> => {
     const res = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt-stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      signal,
       body: JSON.stringify({
         prompt: payload.query,
         query: payload.query,
+        feature: payload.feature,
+        mode: payload.mode,
+        images: payload.images,
+        attachedDocs: payload.attached_docs,
         current_document: payload.current_document,
         chat_context: payload.chat_context,
         sources: payload.sources,
         document_ids: payload.document_ids,
         templateId: payload.template_id,
+        runId: payload.run_id,
+        conversationId: payload.conversation_id,
       }),
     })
 
@@ -81,9 +133,8 @@ export const docAgentApi = {
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder('utf-8')
-    let accumulatedText = ''
+    const state = { accumulatedText: '', fullResponseData: null as AgenticPromptResponse | null }
     let buffer = ''
-    let fullResponseData: any = null
 
     while (true) {
       const { done, value } = await reader.read()
@@ -94,32 +145,15 @@ export const docAgentApi = {
       buffer = lines.pop() || ''
 
       for (const line of lines) {
-        const trimmed = line.trim()
-        if (trimmed.startsWith('data: ')) {
-          let parsed: any = null
-          try {
-            parsed = JSON.parse(trimmed.slice(6))
-          } catch {
-            // ignore JSON parse errors for incomplete data lines
-            continue
-          }
-
-          if (parsed.type === 'token') {
-            const chunk = parsed.text || ''
-            accumulatedText += chunk
-            onChunk(accumulatedText, chunk)
-          } else if (parsed.type === 'full') {
-            fullResponseData = parsed.data
-            if (parsed.data?.document_updates || parsed.data?.answer) {
-              accumulatedText = parsed.data.document_updates || parsed.data.answer
-              onChunk(accumulatedText, '')
-            }
-          } else if (parsed.type === 'error') {
-            throw new Error(parsed.message || 'Error durante la generación.')
-          }
+        const parsed = parseEventLine(line.trim())
+        if (parsed) {
+          handleParsedEvent(parsed, state, { onChunk, onIntent, onEvent })
         }
       }
     }
+
+    const fullResponseData = state.fullResponseData
+
 
     if (fullResponseData) {
       return {
@@ -137,17 +171,18 @@ export const docAgentApi = {
       }
     }
 
-    if (!accumulatedText.trim()) {
+    if (!state.accumulatedText.trim()) {
       throw new Error(
         'El modelo no devolvió ninguna respuesta o la conexión falló. Verifica tu API Key y la configuración del modelo.',
       )
     }
 
     return {
-      answer: accumulatedText,
-      document_updates: accumulatedText,
+      answer: state.accumulatedText,
+      document_updates: state.accumulatedText,
     }
   },
+
 
   exportMejorasDocx: async (markdown: string, title?: string): Promise<Blob> => {
     const res = await fetch(`${API_BASE}/api/doc-agent/export-docx`, {
@@ -166,3 +201,55 @@ export const docAgentApi = {
     return res.blob()
   },
 }
+
+function parseEventLine(trimmed: string): AgentEventEnvelope | null {
+  if (!trimmed.startsWith('data: ')) return null
+  try {
+    return JSON.parse(trimmed.slice(6)) as AgentEventEnvelope
+  } catch {
+    return null
+  }
+}
+
+function handleParsedEvent(
+  parsed: AgentEventEnvelope,
+  state: { accumulatedText: string; fullResponseData: AgenticPromptResponse | null },
+  callbacks: {
+    onChunk: (accumulatedText: string, chunk: string) => void
+    onIntent?: (intent: string) => void
+    onEvent?: (event: AgentEventEnvelope) => void
+  },
+): void {
+  callbacks.onEvent?.(parsed)
+
+  const isDelta = parsed.type === 'token' || parsed.type === 'message.delta'
+  const isStarted = parsed.type === 'intent' || parsed.type === 'run.started'
+  const isCompleted = parsed.type === 'full' || parsed.type === 'run.completed'
+  const isFailed = parsed.type === 'error' || parsed.type === 'run.failed'
+
+  if (isStarted) {
+    const dataObj = typeof parsed.data === 'object' && parsed.data !== null ? (parsed.data as Record<string, unknown>) : null
+    const detectedIntent = parsed.intent || (dataObj?.task_profile ? String(dataObj.task_profile) : '')
+    if (detectedIntent) callbacks.onIntent?.(detectedIntent)
+  } else if (isDelta) {
+    const dataObj = typeof parsed.data === 'object' && parsed.data !== null ? (parsed.data as Record<string, unknown>) : null
+    const chunk = parsed.text || (dataObj?.delta ? String(dataObj.delta) : '')
+    if (chunk) {
+      state.accumulatedText += chunk
+      callbacks.onChunk(state.accumulatedText, chunk)
+    }
+  } else if (isCompleted) {
+    state.fullResponseData = (parsed.data as AgenticPromptResponse) ?? null
+    if (state.fullResponseData?.document_updates || state.fullResponseData?.answer) {
+      state.accumulatedText = state.fullResponseData.document_updates || state.fullResponseData.answer || ''
+      callbacks.onChunk(state.accumulatedText, '')
+    }
+  } else if (parsed.type === 'run.cancelled') {
+    throw new Error('Generacion cancelada por el usuario.')
+  } else if (isFailed) {
+    const dataObj = typeof parsed.data === 'object' && parsed.data !== null ? (parsed.data as Record<string, unknown>) : null
+    const errMsg = parsed.message || (dataObj?.user_message ? String(dataObj.user_message) : 'Error durante la generacion.')
+    throw new Error(errMsg)
+  }
+}
+

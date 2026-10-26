@@ -4,6 +4,7 @@ import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperMode
 import { useToast } from '../../../context/ToastContext'
 import { useBackgroundJobs } from '../../../context/BackgroundJobContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
+import { webLLMProvider } from '../../ai/providers/WebLLMProvider'
 
 export function useAiSettingsManager() {
   const { toast } = useToast()
@@ -14,7 +15,7 @@ export function useAiSettingsManager() {
 
   // Provider state: 'builtin' | 'ollama' | 'groq' | 'gemini' | 'openai' | 'claude'
   const [provider, setProvider] = useState<string>('builtin')
-  const [model, setModel] = useState<string>('qwen2.5:3b')
+  const [model, setModel] = useState<string>('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
 
   // Collapsible panels
   const [isWritingOpen, setIsWritingOpen] = useState(true)
@@ -193,15 +194,15 @@ export function useAiSettingsManager() {
           setModel(settings.model)
         } else if (isFirstTimeSetup) {
           if (prov === 'groq') setModel('llama-3.3-70b-versatile')
-          else if (prov === 'builtin') setModel('qwen3.5:2b')
+          else if (prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
           else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
-          else setModel('qwen3.5:2b')
+          else setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
         } else {
           // Provider exists but model is unset, assign sensible default for that provider
           if (prov === 'groq') setModel('llama-3.3-70b-versatile')
-          else if (prov === 'builtin') setModel('qwen3.5:2b')
+          else if (prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
           else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
@@ -464,6 +465,26 @@ export function useAiSettingsManager() {
     }
 
     setTestingConnection(true)
+
+    if (provider === 'builtin') {
+      try {
+        const isCached = await webLLMProvider.isModelCached(model)
+        if (!isCached) {
+          toast.error(`El modelo ${model} no se encuentra descargado en la caché del navegador.`)
+          return
+        }
+        await webLLMProvider.initModel(model)
+        const answer = await webLLMProvider.complete([
+          { role: 'user', content: 'Responde únicamente con OK.' },
+        ], { maxTokens: 10 })
+        toast.success(`Prueba exitosa con WebLLM (${model}): ${answer}`)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Error al probar modelo WebLLM en navegador.')
+      } finally {
+        setTestingConnection(false)
+      }
+      return
+    }
 
     const payload: Record<string, string> = {
       provider,

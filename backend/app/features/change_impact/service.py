@@ -7,6 +7,7 @@ async def analyze_change_impact(
     sources: Optional[List[str]] = None,
     document_ids: Optional[List[str]] = None,
     chat_context: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> dict:
     """Analyze change impact across codebase, tickets and requirements."""
     return await run_grounded_feature(
@@ -15,5 +16,6 @@ async def analyze_change_impact(
         sources=sources or ["jira", "github", "knowledge"],
         document_ids=document_ids,
         chat_context=chat_context,
+        user_id=user_id,
     )
 

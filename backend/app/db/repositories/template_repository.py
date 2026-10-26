@@ -47,7 +47,34 @@ class AITemplateRepository:
       tmpl = result.scalar_one_or_none()
 
       if tmpl is None:
-        raise KeyError(f"Template not found: {template_type}:{feature}")
+        version = int(new_data.get("version") or 1)
+        cleaned_payload = {
+          k: v for k, v in new_data.items()
+          if k not in ("id", "template_type", "feature", "version", "updated_by", "created_at", "updated_at")
+        }
+        payload_json = json.dumps(cleaned_payload, ensure_ascii=False)
+        tmpl = AITemplateModel(
+          id=template_id,
+          template_type=template_type,
+          feature=feature,
+          version=version,
+          payload_json=payload_json,
+          updated_by=updated_by or "user",
+        )
+        db.add(tmpl)
+        version_entry = AITemplateVersionModel(
+          id=str(uuid.uuid4()),
+          template_id=template_id,
+          template_type=template_type,
+          feature=feature,
+          version=version,
+          payload_json=payload_json,
+          change_summary=change_summary or f"Created {template_type} for {feature}",
+          created_by=updated_by or "user",
+        )
+        db.add(version_entry)
+        await db.commit()
+        return tmpl.to_dict()
 
       # Merge current payload with new data
       current_dict = tmpl.to_dict()

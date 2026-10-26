@@ -312,9 +312,69 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
       "|---|---|---|---|---|\n"
     ),
   },
+  "generic_plan": {
+    "version": 1,
+    "feature": "generic_plan",
+    "allowed_sources": ["knowledge", "jira", "github"],
+    "system": (
+      "Eres un QA Lead y Arquitecto de Software senior. "
+      "Tu objetivo es elaborar un plan técnico o plan de pruebas exhaustivo, estructurado y riguroso. "
+      "FORMATO DE SALIDA OBLIGATORIO:\n"
+      "1. Escribe primero un mensaje introductorio y ejecutivo en el bloque <chat>...</chat> resumiendo en 2-4 oraciones el alcance del plan.\n"
+      "2. Luego entrega el plan completo delimitado exactamente con:\n"
+      '<artifact title="Plan de [Título Descriptivo]" extension="docx">\n'
+      "[Contenido completo del plan en Markdown profesional con objetivos, alcance, flujos, matrices de prueba, riesgos y cronograma]\n"
+      "</artifact>"
+    ),
+    "user_template": (
+      "Solicitud de Plan: {query}\n\n"
+      "CONTEXTO DISPONIBLE:\n{context}\n\n"
+      "Elabora el plan siguiendo las directivas de formato obligatorio."
+    ),
+  },
+  "generic_report": {
+    "version": 1,
+    "feature": "generic_report",
+    "allowed_sources": ["knowledge", "jira", "github"],
+    "system": (
+      "Eres un analista de aseguramiento de calidad y redactor técnico senior. "
+      "Tu objetivo es elaborar un informe técnico o ejecutivo formal, detallado y riguroso basado en la consulta y evidencias. "
+      "FORMATO DE SALIDA OBLIGATORIO:\n"
+      "1. Escribe primero un mensaje introductorio y ejecutivo en el bloque <chat>...</chat> resumiendo en 2-4 oraciones los hallazgos principales.\n"
+      "2. Luego entrega el informe completo delimitado exactamente con:\n"
+      '<artifact title="Informe de [Título Descriptivo]" extension="docx">\n'
+      "[Contenido completo del informe en Markdown profesional con resumen ejecutivo, hallazgos, evidencias, impacto y recomendaciones]\n"
+      "</artifact>"
+    ),
+    "user_template": (
+      "Solicitud de Informe: {query}\n\n"
+      "CONTEXTO DISPONIBLE:\n{context}\n\n"
+      "Elabora el informe siguiendo las directivas de formato obligatorio."
+    ),
+  },
 }
 
 DEFAULT_RUBRICS: dict[str, dict[str, Any]] = {
+  "generic_plan": {
+    "version": 1,
+    "feature": "generic_plan",
+    "criteria": [
+      "El plan define claramente objetivos, alcance, componentes afectados y supuestos",
+      "Incluye matrices o tablas de casos y escenarios de prueba",
+      "Identifica riesgos técnicos y operativos con sus mitigaciones",
+      "Separa el mensaje conversacional en <chat> y el documento en <artifact>",
+    ],
+  },
+  "generic_report": {
+    "version": 1,
+    "feature": "generic_report",
+    "criteria": [
+      "El informe presenta un resumen ejecutivo claro y accionable",
+      "Sustenta los hallazgos en evidencias objetivas y datos concretos",
+      "Estructura las recomendaciones por orden de prioridad",
+      "Separa el mensaje conversacional en <chat> y el documento en <artifact>",
+    ],
+  },
   "standup": {
     "version": 1,
     "feature": "standup",

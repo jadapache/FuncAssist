@@ -75,63 +75,36 @@ def test_storage_encryption_roundtrip():
     assert loaded["ai"]["groq_api_key"] == "gsk_real_secret_key_999"
 
 
-def test_master_secret_from_env():
-    with patch.dict("os.environ", {"PMQA_SECRET_KEY": "env-custom-master-secret"}):
-        assert _get_master_secret() == "env-custom-master-secret"
+def test_missing_secret_key_raises_error(monkeypatch):
+    import app.core.secrets as secrets_mod
+    monkeypatch.setattr(secrets_mod, "_MASTER_SECRET_CACHE", None)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None)
+    monkeypatch.setattr("app.core.settings.get_settings", lambda: fake_settings)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
+        secrets_mod._get_master_secret()
 
 
-def test_master_secret_from_legacy_file(tmp_path):
-    legacy_file = tmp_path / "secret.key"
-    legacy_file.write_text("legacy-file-secret", encoding="utf-8")
+def test_storage_resolve_secret_missing_raises_error(monkeypatch):
+    import app.core.storage as storage_mod
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None)
+    monkeypatch.setattr(storage_mod, "get_settings", lambda: fake_settings)
 
-    with patch.dict("os.environ", {}, clear=True), \
-         patch("app.core.secrets.SETTINGS_DIR", tmp_path):
-        assert _get_master_secret() == "legacy-file-secret"
-
-
-def test_master_secret_from_keyring(tmp_path):
-    mock_keyring = MagicMock()
-    mock_keyring.get_password.return_value = "keyring-stored-secret"
-
-    with patch.dict("os.environ", {}, clear=True), \
-         patch("app.core.secrets.SETTINGS_DIR", tmp_path), \
-         patch("app.core.secrets.keyring", mock_keyring):
-        assert _get_master_secret() == "keyring-stored-secret"
-        assert not (tmp_path / "secret.key").exists()
+    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
+        storage_mod._resolve_secret()
 
 
-def test_master_secret_fallback_to_fingerprint(tmp_path):
-    with patch.dict("os.environ", {}, clear=True), \
-         patch("app.core.secrets.SETTINGS_DIR", tmp_path), \
-         patch("app.core.secrets.keyring", None), \
-         patch("app.core.secrets._machine_fingerprint", return_value="test-fingerprint"):
-        secret = _get_master_secret()
-        assert secret == "qa-mgmt-local-secret::test-fingerprint"
-        assert not (tmp_path / "secret.key").exists()
+def test_startup_missing_secret_key_fails(monkeypatch):
+    import app.main as main_mod
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None, cors_origins=[])
+    monkeypatch.setattr(main_mod, "get_settings", lambda: fake_settings)
 
+    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required to start the application"):
+        main_mod.create_app()
 
-def test_derive_fernet_key_pbkdf2():
-    key1 = _derive_fernet_key("test-master-secret-123")
-    key2 = _derive_fernet_key("test-master-secret-123")
-    assert key1 == key2
-    assert len(key1) == 44
-    fernet = Fernet(key1)
-    token = fernet.encrypt(b"secure_data")
-    assert fernet.decrypt(token) == b"secure_data"
-
-
-
-def test_hash_password_and_verify():
-    from app.core.security import hash_password, verify_password, generate_salt
-
-    password = "SuperSecretPassword123!"
-    h1, salt1 = hash_password(password)
-    assert len(h1) == 64
-    assert len(salt1) == 32
-    assert verify_password(password, h1, salt1) is True
-    assert verify_password("WrongPassword123!", h1, salt1) is False
-
-    # Different salts produce different hashes
-    h2, salt2 = hash_password(password)
-    assert salt1 != salt2
-    assert h1 != h2

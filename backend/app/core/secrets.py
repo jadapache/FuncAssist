@@ -14,62 +14,34 @@ from typing import Any, Dict
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.core.security import machine_fingerprint as _machine_fingerprint
-from app.core.settings import SETTINGS_DIR
-
-try:
-    import keyring
-except ImportError:  # pragma: no cover
-    keyring = None
-
 SECRET_PREFIX = "enc::"
-SERVICE_NAME = "funcassist"
-KEYRING_SECRET_KEY = "master-secret"
-PBKDF2_SALT = b"funcassist-qa-mgmt-pbkdf2-salt"
-PBKDF2_ITERATIONS = 100_000
 
-
-def _read_legacy_key_file() -> str | None:
-    key_file = SETTINGS_DIR / "secret.key"
-    try:
-        if key_file.exists():
-            saved = key_file.read_text(encoding="utf-8").strip()
-            if saved:
-                return saved
-    except Exception:
-        return None
-    return None
-
-
-def _get_or_create_keyring_secret() -> str | None:
-    if keyring is None:
-        return None
-    try:
-        stored = keyring.get_password(SERVICE_NAME, KEYRING_SECRET_KEY)
-        if stored:
-            return stored
-        new_key = secrets.token_urlsafe(32)
-        keyring.set_password(SERVICE_NAME, KEYRING_SECRET_KEY, new_key)
-        return new_key
-    except Exception:
-        return None
+_MASTER_SECRET_CACHE: str | None = None
 
 
 def _get_master_secret() -> str:
-    """Obtiene la clave maestra desde variables de entorno, almacenamiento seguro o huella del sistema."""
-    secret = os.getenv("PMQA_SECRET_KEY") or os.getenv("SECRET_KEY")
-    if secret:
-        return secret
+    """Obtiene la clave maestra estrictamente desde variables de entorno."""
+    global _MASTER_SECRET_CACHE
+    if _MASTER_SECRET_CACHE:
+        return _MASTER_SECRET_CACHE
 
-    legacy = _read_legacy_key_file()
-    if legacy:
-        return legacy
+    secret = os.getenv("SECRET_KEY")
+    if not secret:
+        try:
+            from app.core.settings import get_settings
+            settings = get_settings()
+            secret = settings.secret_key
+        except Exception:
+            pass
 
-    keyring_secret = _get_or_create_keyring_secret()
-    if keyring_secret:
-        return keyring_secret
+    if secret and secret.strip():
+        _MASTER_SECRET_CACHE = secret.strip()
+        return _MASTER_SECRET_CACHE
 
-    return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required for encryption and security. "
+        "Please define SECRET_KEY in your .env file or container environment."
+    )
 
 
 @lru_cache(maxsize=8)

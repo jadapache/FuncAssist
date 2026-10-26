@@ -61,48 +61,44 @@ def ensure_draft_dirs() -> None:
     (USER_DRAFTS_DIR / spec).mkdir(parents=True, exist_ok=True)
 
 
-def _load_generated_index() -> List[Dict[str, Any]]:
+def _scan_drafts_from_disk() -> List[Dict[str, Any]]:
+  """Scans metadata.json files directly from user documents Borradores folder."""
   ensure_draft_dirs()
-  if not GENERATED_INDEX_FILE.exists():
-    legacy_candidates = [
-      GENERATED_DIR / "_index.json",
-      USER_DATA_DIR / "Generated" / "_index.json",
-      USER_DATA_DIR / "Generated" / "generated_index.json",
-    ]
-    for leg in legacy_candidates:
-      if leg.exists():
+  items: List[Dict[str, Any]] = []
+  if not USER_DRAFTS_DIR.exists():
+    return items
+
+  for spec_dir in USER_DRAFTS_DIR.iterdir():
+    if not spec_dir.is_dir():
+      continue
+    for draft_dir in spec_dir.iterdir():
+      if not draft_dir.is_dir():
+        continue
+      meta_file = draft_dir / "metadata.json"
+      if meta_file.exists():
         try:
-          data = json.loads(leg.read_text(encoding="utf-8"))
-          items = data if isinstance(data, list) else data.get("items", [])
-          _save_generated_index(items)
-          try:
-            leg.unlink()
-          except Exception:
-            pass
-          return items
+          meta = json.loads(meta_file.read_text(encoding="utf-8"))
+          if isinstance(meta, dict) and "id" in meta:
+            meta["folder_path"] = str(draft_dir)
+            items.append(meta)
         except Exception:
           pass
-    return []
-  try:
-    data = json.loads(GENERATED_INDEX_FILE.read_text(encoding="utf-8"))
-    if isinstance(data, list):
-      return data
-    if isinstance(data, dict) and "items" in data:
-      return data["items"]
-    return []
-  except Exception as exc:
-    logger.warning(f"Error loading {GENERATED_INDEX_FILE}: {exc}")
-    return []
+
+  items.sort(key=lambda x: x.get("last_interaction", x.get("updated_at", "")), reverse=True)
+  return items
+
+
+def _load_generated_index() -> List[Dict[str, Any]]:
+  return _scan_drafts_from_disk()
 
 
 def _save_generated_index(items: List[Dict[str, Any]]) -> None:
-  ensure_draft_dirs()
-  payload = {
-    "generated_at": datetime.now(timezone.utc).isoformat(),
-    "count": len(items),
-    "items": items,
-  }
-  GENERATED_INDEX_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+  # Deprecated: index files in AppData are no longer written
+  if GENERATED_INDEX_FILE.exists():
+    try:
+      GENERATED_INDEX_FILE.unlink()
+    except Exception:
+      pass
 
 
 def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any]]) -> str:
@@ -116,7 +112,7 @@ def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any
   ]
   for msg in messages:
     role = msg.get("role", "user")
-    role_label = "👤 Usuario" if role == "user" else "🤖 Asistente QA"
+    role_label = "Usuario" if role == "user" else "Asistente QA"
     ts = msg.get("timestamp", "")
     lines.append(f"### {role_label} ({ts})")
     lines.append(msg.get("content", "").strip())
@@ -126,10 +122,7 @@ def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any
 
 
 def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
-  """
-  Persist a chat session and its generated artifacts into Documents/QA MGMT/Borradores/{Specification}/
-  and register it in the OS User Data Generated/_index.json.
-  """
+  """Persist a chat session and its generated artifacts into Documents/FuncAssist/Borradores/{Specification}/."""
   ensure_draft_dirs()
   session_id = session_data.get("id") or str(uuid.uuid4())
   title = session_data.get("name") or session_data.get("title") or "Borrador"
@@ -217,6 +210,7 @@ def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
   # 3. Save metadata.json in the draft subfolder
   meta_entry = {
     "id": session_id,
+    "user_id": session_data.get("user_id"),
     "title": title,
     "specification": spec,
     "last_interaction": last_interaction,
@@ -228,17 +222,15 @@ def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
   }
   (draft_folder / "metadata.json").write_text(json.dumps(meta_entry, indent=2, ensure_ascii=False), encoding="utf-8")
 
-  # 4. Update index in USER_DATA_DIR / Generated / _index.json
-  index_items = _load_generated_index()
-  filtered = [item for item in index_items if item.get("id") != session_id]
-  filtered.insert(0, meta_entry)
-  _save_generated_index(filtered)
-
   return meta_entry
 
 
-def list_generated_drafts(specification: Optional[str] = None) -> List[Dict[str, Any]]:
-  items = _load_index_with_fs_sync()
+def list_generated_drafts(
+  specification: Optional[str] = None, user_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+  items = _scan_drafts_from_disk()
+  if user_id:
+    items = [i for i in items if not i.get("user_id") or i.get("user_id") == user_id]
   if specification:
     norm = normalize_specification(specification)
     items = [i for i in items if i.get("specification") == norm]
@@ -246,26 +238,11 @@ def list_generated_drafts(specification: Optional[str] = None) -> List[Dict[str,
 
 
 def _load_index_with_fs_sync() -> List[Dict[str, Any]]:
-  """Reads index and validates against filesystem to avoid stale references."""
-  items = _load_generated_index()
-  valid_items = []
-  changed = False
-
-  for item in items:
-    folder_str = item.get("folder_path")
-    if folder_str and Path(folder_str).exists():
-      valid_items.append(item)
-    else:
-      changed = True
-
-  if changed:
-    _save_generated_index(valid_items)
-
-  return valid_items
+  return _scan_drafts_from_disk()
 
 
 def get_generated_draft(draft_id: str) -> Optional[Dict[str, Any]]:
-  items = _load_index_with_fs_sync()
+  items = _scan_drafts_from_disk()
   for item in items:
     if item.get("id") == draft_id:
       folder_path = Path(item["folder_path"])
@@ -281,22 +258,13 @@ def get_generated_draft(draft_id: str) -> Optional[Dict[str, Any]]:
 
 
 def delete_generated_draft(draft_id: str) -> bool:
-  items = _load_generated_index()
-  target = None
-  remaining = []
-  for item in items:
-    if item.get("id") == draft_id:
-      target = item
-    else:
-      remaining.append(item)
-
+  items = _scan_drafts_from_disk()
+  target = next((item for item in items if item.get("id") == draft_id), None)
   if target:
-    _save_generated_index(remaining)
     folder_str = target.get("folder_path")
     if folder_str:
       folder = Path(folder_str)
       if folder.exists() and folder.is_dir():
         shutil.rmtree(folder, ignore_errors=True)
     return True
-
   return False

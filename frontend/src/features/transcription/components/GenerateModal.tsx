@@ -12,7 +12,7 @@ import {
   Loader2,
   ChevronLeft,
 } from 'lucide-react'
-import { api } from '../../../api/client'
+import { inferenceService } from '../../ai/services/InferenceService'
 import { transcriptionApi } from '../api/transcriptionApi'
 import { useToast } from '../../../context/ToastContext'
 
@@ -51,18 +51,12 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
           ? `Genera el Inventario de Requerimientos y Contexto de Proyecto a partir de la transcripción de la reunión: ${meetingTitle || ''}`
           : `Genera el Levantamiento Detallado de Requerimientos Funcionales, Casos de Uso y Matriz de Trazabilidad a partir de la transcripción de la reunión: ${meetingTitle || ''}`
 
-      const res = await (type === 'inventario'
-        ? api.inventarioDoc({ query: docQuery, document_ids: [] })
-        : api.levantamientoDoc({ query: docQuery, document_ids: [] }))
+      const res = await inferenceService.generateArtifact({
+        instructions: docQuery,
+        context: meetingTitle ? `Reunión: ${meetingTitle}` : undefined,
+      })
 
-      const resObj = res as any
-      const text =
-        resObj.answer ||
-        resObj.answer_clean ||
-        resObj.markdown ||
-        resObj.reason ||
-        'Documento generado con éxito.'
-
+      const text = res.content || 'Documento generado con éxito.'
       const docTitle = `${type === 'inventario' ? 'Inventario' : 'Levantamiento'} - ${meetingTitle || 'Reunion'}`
 
       setGeneratedDoc({
@@ -71,8 +65,9 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         title: docTitle,
       })
       toast.success(`${type === 'inventario' ? 'Inventario' : 'Levantamiento'} generado con IA.`)
-    } catch (err: any) {
-      toast.error(`Error al generar documento: ${err.message}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      toast.error(`Error al generar documento: ${msg}`)
     } finally {
       setIsGenerating(false)
     }
@@ -97,8 +92,9 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       toast.success(`Archivo .${ext} descargado con éxito.`)
-    } catch (err: any) {
-      toast.error(`Error al descargar: ${err.message}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al exportar'
+      toast.error(`Error al descargar: ${msg}`)
     } finally {
       setIsExporting(false)
     }
