@@ -8,9 +8,12 @@ from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
 import json
+import uuid
 from pydantic import BaseModel, Field
 
 from app.context.knowledge import extract_text
+from app.services.event_serializer import AgentRunEmitter, run_registry
+
 
 from app.core.document_agent.schema import (
     CanonicalDocumentState,
@@ -33,11 +36,15 @@ from app.ai.runner import (
     run_grounded_feature_stream,
 )
 from app.core.document_agent.validator import DocumentOperationValidator
-from app.core.template_storage import list_templates
+from app.core.template_storage import list_templates, get_template_file_path
 from app.features.mejoras.docx_builder import create_mejoras_docx
 from app.features.levantamiento.docx_builder import create_levantamiento_docx
 from app.features.inventario.xlsx_builder import create_inventario_xlsx
 from app.features.mejoras.xlsx_builder import create_qa_matrix_xlsx
+from app.schemas.artifacts import FunctionalImprovementArtifact, FunctionalInventoryArtifact
+from app.services.rubric_evaluator import RubricEvaluator
+from app.services.template_renderer.docx_engine import DocxTemplateRenderer
+from app.services.template_renderer.xlsx_engine import XlsxTemplateRenderer
 
 router = APIRouter(prefix="/doc-agent", tags=["document-agent"])
 
@@ -152,6 +159,9 @@ class AgenticPromptRequest(CamelModel):
     document_ids: Optional[List[str]] = Field(default_factory=list, alias="documentIds")
     attached_docs: Optional[List[Dict[str, Any]]] = Field(default_factory=list, alias="attachedDocs")
     template_id: Optional[str] = Field(None, alias="templateId")
+    run_id: Optional[str] = Field(None, alias="runId")
+    conversation_id: Optional[str] = Field(None, alias="conversationId")
+
 
     @property
     def prompt_text(self) -> str:
@@ -183,17 +193,20 @@ AgenticPromptResponse.model_rebuild()
 class ExportDocxRequest(CamelModel):
     content: str = Field(default="", alias="markdown")
     title: str = "Documento de Especificación Funcional"
+    template_id: Optional[str] = Field(None, alias="templateId")
+    artifact_data: Optional[Dict[str, Any]] = Field(None, alias="artifactData")
 
     @property
     def text(self) -> str:
         return self.content
 
 
-
 class ExportXlsxRequest(CamelModel):
     title: str = "Matriz de Inventario y Pruebas"
     content: Optional[str] = Field(default="", alias="markdown")
     rows: Optional[List[Dict[str, Any]]] = None
+    template_id: Optional[str] = Field(None, alias="templateId")
+    artifact_data: Optional[Dict[str, Any]] = Field(None, alias="artifactData")
 
     @property
     def text(self) -> str:
@@ -526,28 +539,68 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
         attached_docs=req.attached_docs,
     )
 
+    run_id = req.run_id or f"run-{uuid.uuid4().hex[:12]}"
+    conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
+    emitter = AgentRunEmitter(run_id=run_id, conversation_id=conv_id)
+    run_registry.register(emitter)
+
     async def stream_generator():
         accumulated_chunks = []
         try:
+            yield emitter.started(task_profile=intent, prompt=query_text).to_sse_packet()
+            yield emitter.step_started("step-classify", "Clasificando intención...").to_sse_packet()
             yield f"data: {json.dumps({'type': 'intent', 'intent': intent})}\n\n"
+            yield emitter.step_completed("step-classify", f"Intención: {intent}").to_sse_packet()
+            yield emitter.step_started("step-generate", "Generando contenido...").to_sse_packet()
 
             async for chunk in run_agentic_chat_stream(cfg):
+                if emitter.is_cancelled:
+                    yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
+                    return
                 accumulated_chunks.append(chunk)
+                yield emitter.message_delta(chunk).to_sse_packet()
                 yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
+
+            if emitter.is_cancelled:
+                yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
+                return
 
             full_content = "".join(accumulated_chunks)
             if not full_content.strip():
-                yield f"data: {json.dumps({'type': 'error', 'message': 'El modelo LLM no generó contenido. Verifica tu conexión o clave de API en Configuración.'})}\n\n"
+                err_text = "El modelo LLM no generó contenido. Verifica tu conexión o clave de API en Configuración."
+                yield emitter.failed("EMPTY_RESPONSE", err_text).to_sse_packet()
+                yield f"data: {json.dumps({'type': 'error', 'message': err_text})}\n\n"
                 return
 
             parsed_arts, clean_ans = extract_artifacts(full_content)
             art_dicts = artifacts_to_dict(parsed_arts)
             is_template = (intent == "template_mutation")
 
+            for idx, art in enumerate(art_dicts):
+                yield emitter.artifact_created(
+                    artifact_id=art.get("id") or f"art-{idx + 1}",
+                    title=art.get("title", "Documento"),
+                    content=art.get("content", ""),
+                    extension=art.get("extension", "docx"),
+                ).to_sse_packet()
+
+            yield emitter.step_completed("step-generate", "Generación completada").to_sse_packet()
+
+            if art_dicts:
+                yield emitter.step_started("step-rubric", "Evaluando artefactos con rúbricas de calidad...").to_sse_packet()
+                rubric_score, rubric_feedback = _evaluate_artifacts_rubric(art_dicts)
+                yield emitter.step_completed("step-rubric", f"Calidad de artefacto: {rubric_score}/100").to_sse_packet()
+
             asst_msg = clean_ans if art_dicts else (
                 "He generado y estructurado el documento corporativo en el panel de artefactos."
                 if is_template else full_content
             )
+
+            yield emitter.completed(
+                final_message=asst_msg,
+                artifacts=art_dicts,
+                sources=sources_to_use,
+            ).to_sse_packet()
 
             final_response = {
                 "answer": full_content,
@@ -557,35 +610,157 @@ async def handle_agentic_prompt_stream(req: AgenticPromptRequest):
                 "answer_clean": clean_ans or full_content,
                 "assistant_message": asst_msg,
                 "artifacts": art_dicts,
+                "run_id": run_id,
+                "conversation_id": conv_id,
             }
             yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as err:
-            err_msg = str(err)
-            lower_err = err_msg.lower()
-            if any(term in lower_err for term in ["api key", "unauthorized", "authentication", "auth", "401", "forbidden", "403", "invalid_api_key"]):
-                err_msg = "Hubo un error de autenticación con el modelo, revisa la API key."
-            elif "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
-                limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
-                req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
-                req_tokens = req_match.group(1) if req_match else "solicitada"
-                limit_tokens = limit_match.group(1) if limit_match else "establecido"
-                err_msg = f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo."
+            err_msg = _format_stream_error(err)
+            yield emitter.failed("RUN_EXCEPTION", err_msg).to_sse_packet()
             yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
+        finally:
+            run_registry.unregister(run_id)
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
+def _try_parse_structured_artifact(
+    content: str, title: str
+) -> Optional[Union[FunctionalImprovementArtifact, FunctionalInventoryArtifact]]:
+    trimmed = content.strip()
+    json_str = None
+    if trimmed.startswith("{") and trimmed.endswith("}"):
+        json_str = trimmed
+    elif "```json" in trimmed:
+        match = re.search(r"```json\s*(\{.*?\})\s*```", trimmed, re.DOTALL)
+        if match:
+            json_str = match.group(1)
+
+    if not json_str:
+        return None
+
+    try:
+        data = json.loads(json_str)
+        if not isinstance(data, dict):
+            return None
+        data.setdefault("artifact_id", f"art-{uuid.uuid4().hex[:8]}")
+        data.setdefault("title", title or "Documento")
+
+        if "problem_statement" in data or "acceptance_criteria" in data:
+            return FunctionalImprovementArtifact(**data)
+        if "modules" in data or "project_name" in data:
+            return FunctionalInventoryArtifact(**data)
+    except Exception:
+        return None
+    return None
+
+
+def _evaluate_artifacts_rubric(art_dicts: List[Dict[str, Any]]) -> tuple[float, str]:
+    if not art_dicts:
+        return 100.0, "Sin artefactos estructurados"
+
+    scores: List[float] = []
+    feedbacks: List[str] = []
+    for art in art_dicts:
+        content = art.get("content", "")
+        title = art.get("title", "")
+        parsed = _try_parse_structured_artifact(content, title)
+        if isinstance(parsed, FunctionalImprovementArtifact):
+            res = RubricEvaluator.evaluate_improvement(parsed)
+            scores.append(res.score)
+            if not res.approved:
+                feedbacks.extend(res.missing_requirements)
+        elif isinstance(parsed, FunctionalInventoryArtifact):
+            res = RubricEvaluator.evaluate_inventory(parsed)
+            scores.append(res.score)
+            if not res.approved:
+                feedbacks.extend(res.missing_requirements)
+        else:
+            scores.append(85.0 if len(content.strip()) >= 50 else 50.0)
+
+    avg_score = round(sum(scores) / len(scores), 1) if scores else 100.0
+    feedback_str = "; ".join(feedbacks) if feedbacks else "Artefactos aprobados por rúbrica."
+    return avg_score, feedback_str
+
+
+def _resolve_export_data(
+    content: str, artifact_data: Optional[Dict[str, Any]], title: str
+) -> Dict[str, Any]:
+    if artifact_data:
+        data = dict(artifact_data)
+        data.setdefault("title", title)
+        return data
+
+    trimmed = (content or "").strip()
+    if trimmed.startswith("{") and trimmed.endswith("}"):
+        try:
+            parsed = json.loads(trimmed)
+            if isinstance(parsed, dict):
+                parsed.setdefault("title", title)
+                return parsed
+        except Exception:
+            pass
+
+    return {"title": title, "content": content, "markdown": content}
+
+
+def _generate_docx_bytes(req: ExportDocxRequest) -> bytes:
+    data = _resolve_export_data(req.content, req.artifact_data, req.title)
+    if req.template_id:
+        tmpl_path = get_template_file_path(req.template_id)
+        if tmpl_path and tmpl_path.suffix.lower() == ".docx":
+            return DocxTemplateRenderer.render(tmpl_path, data)
+
+    title_lower = req.title.lower()
+    if "levantamiento" in title_lower:
+        return create_levantamiento_docx(req.text, title=req.title)
+    return create_mejoras_docx(req.text, title=req.title)
+
+
+def _generate_xlsx_bytes(req: ExportXlsxRequest) -> bytes:
+    data = _resolve_export_data(req.text, req.artifact_data, req.title)
+    if req.rows:
+        data["rows"] = req.rows
+
+    if req.template_id:
+        tmpl_path = get_template_file_path(req.template_id)
+        if tmpl_path and tmpl_path.suffix.lower() == ".xlsx":
+            return XlsxTemplateRenderer.render(tmpl_path, data)
+
+    title_lower = req.title.lower()
+    if "inventario" in title_lower or req.text:
+        return create_inventario_xlsx(markdown_content=req.text, title=req.title, rows=req.rows)
+    return create_qa_matrix_xlsx(title=req.title, rows=req.rows)
+
+
+def _format_stream_error(err: Exception) -> str:
+    err_msg = str(err)
+    lower_err = err_msg.lower()
+    if any(term in lower_err for term in ["api key", "unauthorized", "authentication", "auth", "401", "forbidden", "403", "invalid_api_key"]):
+        return "Hubo un error de autenticación con el modelo, revisa la API key."
+    if "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
+        limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
+        req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
+        req_tokens = req_match.group(1) if req_match else "solicitada"
+        limit_tokens = limit_match.group(1) if limit_match else "establecido"
+        return f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo."
+    return err_msg
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_agent_run(run_id: str):
+    cancelled = run_registry.cancel_run(run_id, reason="User cancelled run")
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Run not found or already completed.")
+    return {"status": "cancelled", "run_id": run_id}
 
 
 @router.post("/export-docx")
 def export_native_docx(req: ExportDocxRequest):
     """Generates and downloads a native Microsoft Word .docx binary file."""
     try:
-        title_lower = req.title.lower()
-        if "levantamiento" in title_lower:
-            docx_bytes = create_levantamiento_docx(req.text, title=req.title)
-        else:
-            docx_bytes = create_mejoras_docx(req.text, title=req.title)
-
+        docx_bytes = _generate_docx_bytes(req)
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', req.title)
         filename = f"{safe_title}.docx"
 
@@ -602,12 +777,7 @@ def export_native_docx(req: ExportDocxRequest):
 def export_native_xlsx(req: ExportXlsxRequest):
     """Genera y descarga un archivo Excel .xlsx nativo para inventarios de requerimientos o matrices QA."""
     try:
-        title_lower = req.title.lower()
-        if "inventario" in title_lower or req.text:
-            xlsx_bytes = create_inventario_xlsx(markdown_content=req.text, title=req.title, rows=req.rows)
-        else:
-            xlsx_bytes = create_qa_matrix_xlsx(title=req.title, rows=req.rows)
-
+        xlsx_bytes = _generate_xlsx_bytes(req)
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', req.title)
         return Response(
             content=xlsx_bytes,
