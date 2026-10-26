@@ -630,7 +630,8 @@ def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
   if suffix == ".wav":
     return media_path
 
-  ffmpeg_cmd = shutil.which("ffmpeg")
+  from app.features.transcription.ffmpeg_utils import get_ffmpeg_binary
+  ffmpeg_cmd = get_ffmpeg_binary()
   if not ffmpeg_cmd:
     return media_path
 

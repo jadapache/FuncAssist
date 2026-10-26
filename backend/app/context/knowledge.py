@@ -31,6 +31,7 @@ from app.core.settings import USER_DATA_DIR, ensure_local_dirs, get_settings
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_DIR = USER_DATA_DIR / "knowledge"
+KNOWLEDGE_DIR = USER_DATA_DIR / "knowledge"
 DOCUMENTS_DIR = KNOWLEDGE_DIR / "documents"
 
 CHUNK_SIZE = 900
