@@ -158,54 +158,42 @@ def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
     if not refresh and _catalog_cache is not None and (now - _catalog_cache_ts) < _CACHE_TTL_SECONDS:
         return _catalog_cache
 
-    target_file = CATALOG_FILE
-    if not target_file.exists():
-        if FALLBACK_CATALOG_FILE.exists():
-            try:
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(FALLBACK_CATALOG_FILE, target_file)
-            except Exception:
-                target_file = FALLBACK_CATALOG_FILE
-        else:
-            logger.error(f"Catalog file not found at {CATALOG_FILE}")
-            target_file = None
-    elif FALLBACK_CATALOG_FILE.exists():
-        # Ensure user catalog has any new frontier models added to repo template
-        try:
-            fb_data = json.loads(FALLBACK_CATALOG_FILE.read_text(encoding="utf-8"))
-            usr_data = json.loads(target_file.read_text(encoding="utf-8"))
-            usr_ids = {item["id"] for item in usr_data if isinstance(item, dict) and "id" in item}
-            missing = [item for item in fb_data if isinstance(item, dict) and item.get("id") not in usr_ids]
-            if missing:
-                usr_data.extend(missing)
-                target_file.write_text(json.dumps(usr_data, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception as exc:
-            logger.debug(f"Catalog sync check skipped: {exc}")
-
     frontier_models: list[AIModelInfo] = []
 
-    # Attempt to load frontier models from PostgreSQL entity first
+    # 1. Attempt to load frontier models from PostgreSQL entity first
     try:
         from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
-        db_items = AIModelCatalogRepository().list_sync()
+        repo = AIModelCatalogRepository()
+        db_items = repo.list_sync()
         if db_items:
             frontier_models = [
                 AIModelInfo(**item) for item in db_items
                 if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
             ]
+        elif FALLBACK_CATALOG_FILE.exists():
+            # Seed PostgreSQL repository from bundled template
+            try:
+                seed_data = json.loads(FALLBACK_CATALOG_FILE.read_text(encoding="utf-8"))
+                repo.bulk_upsert_sync(seed_data)
+                frontier_models = [
+                    AIModelInfo(**item) for item in seed_data
+                    if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
+                ]
+            except Exception as seed_err:
+                logger.debug(f"Failed to seed catalog into DB: {seed_err}")
     except Exception as exc:
         logger.debug(f"DB load frontier models fallback: {exc}")
 
-    if not frontier_models and target_file and target_file.exists():
+    # 2. Read-only in-memory fallback from repository bundled file (without modifying disk)
+    if not frontier_models and FALLBACK_CATALOG_FILE.exists():
         try:
-            with open(target_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = json.loads(FALLBACK_CATALOG_FILE.read_text(encoding="utf-8"))
             frontier_models = [
                 AIModelInfo(**item) for item in data
                 if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
             ]
         except Exception as e:
-            logger.error(f"Failed to load AI models catalog from {target_file}: {e}")
+            logger.error(f"Failed to load fallback catalog from {FALLBACK_CATALOG_FILE}: {e}")
 
     builtin_models = _load_builtin_model_infos()
     combined = frontier_models + builtin_models

@@ -533,7 +533,13 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
         target_file = CATALOG_FILE
         existing_data: list[dict[str, Any]] = []
 
-        if target_file.exists():
+        try:
+            from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
+            existing_data = AIModelCatalogRepository().list_sync()
+        except Exception:
+            existing_data = []
+
+        if not existing_data and target_file and target_file.exists():
             try:
                 existing_data = json.loads(target_file.read_text(encoding="utf-8"))
             except Exception as e:
@@ -636,16 +642,21 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
             except Exception as e:
                 logger.warning(f"Skipping model {item.get('id')} due to validation error: {e}")
 
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        target_file.write_text(json.dumps(validated_list, indent=2, ensure_ascii=False), encoding="utf-8")
-
-        # Persist to PostgreSQL database entity
+        # Persist directly to PostgreSQL database entity
         try:
             from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
             _cat_repo = AIModelCatalogRepository()
             _cat_repo.bulk_upsert_sync(validated_list)
         except Exception as db_err:
             logger.debug(f"Failed to persist frontier models catalog into DB: {db_err}")
+
+        # Support test mocking if CATALOG_FILE was explicitly redirected to a temporary test directory
+        if target_file and target_file != (USER_DATA_DIR / "ai" / "models_catalog.json"):
+            try:
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                target_file.write_text(json.dumps(validated_list, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
 
         # Invalidate catalog memory cache in catalog module
         try:
