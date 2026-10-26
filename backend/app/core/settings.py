@@ -1,9 +1,5 @@
 import os
 import sys
-
-# Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,6 +7,8 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
@@ -18,9 +16,9 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 def _get_user_data_dir() -> Path:
   """
   Returns the OS-standard user application data directory.
-  Precedence: DATA_DIR env var > LOCAL_DIR env var > platform default.
+  Precedence: DATA_DIR env var > platform default.
   """
-  env_override = os.getenv("DATA_DIR") or os.getenv("LOCAL_DIR")
+  env_override = os.getenv("DATA_DIR")
   if env_override:
     return Path(env_override)
 
@@ -59,7 +57,7 @@ def _get_user_documents_dir() -> Path:
 
 # Primary path constants
 USER_DATA_DIR = _get_user_data_dir()
-LOCAL_DIR = USER_DATA_DIR  # backward-compatible alias
+BIN_DIR = USER_DATA_DIR / "bin"
 SETTINGS_DIR = USER_DATA_DIR / "settings"
 CONNECTIONS_DIR = USER_DATA_DIR / "connections"
 CACHE_DIR = USER_DATA_DIR / "cache"
@@ -96,16 +94,16 @@ class Settings(BaseSettings):
 
   jira_client_id: str = ""
   jira_client_secret: str = ""
-  jira_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/jira/callback"
+  jira_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/jira/callback"
   jira_oauth_extra_scopes: str = ""
 
   github_client_id: str = ""
   github_client_secret: str = ""
-  github_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/github/callback"
+  github_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/github/callback"
 
   gitlab_client_id: str = ""
   gitlab_client_secret: str = ""
-  gitlab_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/gitlab/callback"
+  gitlab_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/gitlab/callback"
   gitlab_base_url: str = "https://gitlab.com"
   cors_origins_str: str = ""
 
@@ -156,6 +154,18 @@ class Settings(BaseSettings):
     return self.get_database_params()
 
   @property
+  def pmqa_frontend_url(self) -> str:
+    return self.fa_frontend_url
+
+  @property
+  def pmqa_backend_url(self) -> str:
+    return self.fa_backend_url
+
+  @property
+  def pmqa_port(self) -> int:
+    return self.fa_port
+
+  @property
   def cors_origins(self) -> list[str]:
     if self.cors_origins_str.strip() == "*":
       return ["*"]
@@ -164,8 +174,11 @@ class Settings(BaseSettings):
       self.backend_url.rstrip("/"),
       "http://localhost:5173",
       "http://127.0.0.1:5173",
-      "http://localhost:8000",
-      "http://127.0.0.1:8000",
+      "http://localhost:6728",
+      "http://127.0.0.1:6728",
+      "http://tauri.localhost",
+      "https://tauri.localhost",
+      "tauri://localhost",
     }
     if self.cors_origins_str:
       for o in self.cors_origins_str.split(","):
@@ -183,6 +196,7 @@ def get_settings() -> Settings:
 def ensure_local_dirs() -> None:
   for path in (
     USER_DATA_DIR,
+    BIN_DIR,
     SETTINGS_DIR,
     CONNECTIONS_DIR,
     CACHE_DIR,
@@ -201,3 +215,9 @@ def ensure_local_dirs() -> None:
     USER_DRAFTS_DIR / "Inventario",
   ):
     path.mkdir(parents=True, exist_ok=True)
+
+  try:
+    from app.features.transcription.ffmpeg_utils import ensure_ffmpeg_in_user_data
+    ensure_ffmpeg_in_user_data()
+  except Exception:
+    pass

@@ -1,12 +1,16 @@
 import json
 import pytest
+from unittest.mock import MagicMock, patch
 from app.core.secrets import (
     encrypt_secret,
     decrypt_secret,
     is_encrypted,
     encrypt_ai_settings,
     decrypt_ai_settings,
+    _get_master_secret,
+    _derive_fernet_key,
 )
+from cryptography.fernet import Fernet
 from app.core.storage import save_app_settings, load_app_settings, _CACHE_APP_SETTINGS
 
 
