@@ -112,7 +112,7 @@ def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any
   ]
   for msg in messages:
     role = msg.get("role", "user")
-    role_label = "👤 Usuario" if role == "user" else "🤖 Asistente QA"
+    role_label = "Usuario" if role == "user" else "Asistente QA"
     ts = msg.get("timestamp", "")
     lines.append(f"### {role_label} ({ts})")
     lines.append(msg.get("content", "").strip())
@@ -122,10 +122,7 @@ def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any
 
 
 def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
-  """
-  Persist a chat session and its generated artifacts into Documents/QA MGMT/Borradores/{Specification}/
-  and register it in the OS User Data Generated/_index.json.
-  """
+  """Persist a chat session and its generated artifacts into Documents/FuncAssist/Borradores/{Specification}/."""
   ensure_draft_dirs()
   session_id = session_data.get("id") or str(uuid.uuid4())
   title = session_data.get("name") or session_data.get("title") or "Borrador"
