@@ -298,38 +298,21 @@ class AgenticChatConfig:
     attached_docs: list[dict[str, Any]] | None = None
 
 
-def _build_chat_system_prompt(intent: str) -> str:
-    if intent == "generic_plan":
-        return (
-            "Eres un arquitecto de software y líder de aseguramiento de calidad (QA Lead). "
-            "Elabora un plan técnico exhaustivo, riguroso y bien estructurado (alcance, estrategia de pruebas, "
-            "casos de prueba, riesgos, mitigación, cronograma y recursos) basado en la consulta, contexto, "
-            "documentos e imágenes adjuntas.\n"
-            "FORMATO DE SALIDA OBLIGATORIO:\n"
-            "Escribe primero un breve saludo y resumen de 2 a 3 oraciones para el chat.\n"
-            "Luego entrega el plan completo delimitado exactamente con:\n"
-            '<artifact title="Plan de [Título Descriptivo]" extension="docx">\n'
-            "[Contenido completo del plan en Markdown profesional con tablas y listas]\n"
-            "</artifact>"
-        )
-    if intent == "generic_report":
-        return (
-            "Eres un analista de aseguramiento de calidad y redactor técnico senior. "
-            "Elabora un informe técnico o ejecutivo formal, detallado y riguroso basado en la consulta, "
-            "contexto, documentos e imágenes adjuntas (análisis de defectos, diagnóstico de situación, "
-            "evidencias visuales, conclusiones y recomendaciones).\n"
-            "FORMATO DE SALIDA OBLIGATORIO:\n"
-            "Escribe primero un breve mensaje introductorio de 2 a 3 oraciones para el chat.\n"
-            "Luego entrega el informe completo delimitado exactamente con:\n"
-            '<artifact title="Informe de [Título Descriptivo]" extension="docx">\n'
-            "[Contenido completo del informe en Markdown profesional con tablas de hallazgos y evidencias]\n"
-            "</artifact>"
-        )
+async def _build_chat_system_prompt(intent: str, feature: str | None = None) -> str:
+    target_feature = intent if intent and intent != "chat" else (feature or "chat")
+    try:
+        tmpl = await get_prompt(target_feature)
+        if tmpl and tmpl.get("system"):
+            return tmpl["system"]
+    except Exception:
+        pass
+
     return (
         "Eres un asistente experto en Aseguramiento de Calidad (QA), Gestión de Requerimientos y Arquitectura de Software. "
         "Responde a la consulta del usuario de forma conversacional, clara, didáctica y técnicamente precisa utilizando formato Markdown enriquecido. "
         "Utiliza el contexto de los documentos cargados, historial de chat y las imágenes adjuntas cuando estén presentes. "
-        "No uses etiquetas <artifact> a menos que se te solicite explícitamente generar un documento descargable."
+        "Si generas un artefacto o informe descargable, delimítalo exactamente con etiquetas <artifact title=\"...\" extension=\"docx\">...</artifact> "
+        "y escribe antes un mensaje ejecutivo breve en un bloque <chat>...</chat> para la conversación."
     )
 
 
@@ -381,7 +364,7 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
             if "chat_attachments" not in used_sources:
                 used_sources.append("chat_attachments")
 
-    sys_prompt = _build_chat_system_prompt(cfg.intent)
+    sys_prompt = await _build_chat_system_prompt(cfg.intent, cfg.feature)
 
     user_prompt_sections = []
     if cfg.chat_context:
