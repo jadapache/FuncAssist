@@ -47,6 +47,9 @@ export const featuresApi = {
   getAiPrompt: (feature: string) =>
     apiClient.get<AIPromptTemplate>(`/api/ai/prompts/${feature}`),
 
+  createAiPrompt: (payload: Partial<AIPromptTemplate> & { feature: string }) =>
+    apiClient.post<AIPromptTemplate>('/api/ai/prompts', payload),
+
   updateAiPrompt: (feature: string, payload: Partial<AIPromptTemplate>) =>
     apiClient.put<AIPromptTemplate>(`/api/ai/prompts/${feature}`, payload),
 
