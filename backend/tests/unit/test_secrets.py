@@ -8,7 +8,9 @@ from app.core.secrets import (
     encrypt_ai_settings,
     decrypt_ai_settings,
     _get_master_secret,
+    _derive_fernet_key,
 )
+from cryptography.fernet import Fernet
 from app.core.storage import save_app_settings, load_app_settings, _CACHE_APP_SETTINGS
 
 
@@ -106,3 +108,14 @@ def test_master_secret_fallback_to_fingerprint(tmp_path):
         secret = _get_master_secret()
         assert secret == "qa-mgmt-local-secret::test-fingerprint"
         assert not (tmp_path / "secret.key").exists()
+
+
+def test_derive_fernet_key_pbkdf2():
+    key1 = _derive_fernet_key("test-master-secret-123")
+    key2 = _derive_fernet_key("test-master-secret-123")
+    assert key1 == key2
+    assert len(key1) == 44
+    fernet = Fernet(key1)
+    token = fernet.encrypt(b"secure_data")
+    assert fernet.decrypt(token) == b"secure_data"
+
