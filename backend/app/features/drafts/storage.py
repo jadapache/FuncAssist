@@ -217,6 +217,7 @@ def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
   # 3. Save metadata.json in the draft subfolder
   meta_entry = {
     "id": session_id,
+    "user_id": session_data.get("user_id"),
     "title": title,
     "specification": spec,
     "last_interaction": last_interaction,
@@ -237,8 +238,12 @@ def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
   return meta_entry
 
 
-def list_generated_drafts(specification: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_generated_drafts(
+  specification: Optional[str] = None, user_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
   items = _load_index_with_fs_sync()
+  if user_id:
+    items = [i for i in items if not i.get("user_id") or i.get("user_id") == user_id]
   if specification:
     norm = normalize_specification(specification)
     items = [i for i in items if i.get("specification") == norm]
