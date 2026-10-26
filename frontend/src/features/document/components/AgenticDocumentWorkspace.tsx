@@ -33,7 +33,9 @@ import { useAgenticGeneration } from '../hooks/useAgenticGeneration'
 import { useToast } from '../../../context/ToastContext'
 import { PageHeader } from '../../../components/common'
 import { MarkdownMessage } from './MarkdownMessage'
+import { VoiceInput } from '../../transcription/components/VoiceInput'
 import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
+
 import { featuresApi } from '../../../api/modules/features'
 
 
@@ -322,7 +324,8 @@ export const AgenticDocumentWorkspace = ({
   }
 
   // Agentic generation cycle hook
-  const { isGenerating, streamingText, generationStatus, handleSendMessage } = useAgenticGeneration({
+  const { isGenerating, streamingText, generationStatus, runState, handleCancelRun, handleSendMessage } = useAgenticGeneration({
+
     config,
     templateContent,
     sources,
@@ -488,8 +491,13 @@ export const AgenticDocumentWorkspace = ({
                       </div>
                       <AgenticThinkingBubble
                         status={generationStatus}
-                        isProcessing={!streamingText}
+                        isProcessing={isGenerating}
+                        steps={runState.steps}
+                        sources={runState.sources}
+                        onCancel={handleCancelRun}
+                        isCancelled={runState.status === 'cancelled'}
                       />
+
                       {streamingText && (
                         <MarkdownMessage content={streamingText} />
                       )}
@@ -646,18 +654,28 @@ export const AgenticDocumentWorkspace = ({
                   </div>
                 )}
 
-                {/* Bottom Actions Row: Attachment (+) on left, Pills + Send on right */}
+                {/* Bottom Actions Row: Attachment (+) and Voice on left, Pills + Send on right */}
                 <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
-                  {/* Left: Attachment button (+) */}
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="h-7 w-7 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center transition shrink-0 cursor-pointer shadow-2xs"
-                    title="Adjuntar archivo de contexto"
-                  >
-                    {uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* Left: Attachment button (+) */}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className="h-7 w-7 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center transition shrink-0 cursor-pointer shadow-2xs"
+                      title="Adjuntar archivo de contexto"
+                    >
+                      {uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    </button>
+                    <VoiceInput
+                      disabled={isGenerating}
+                      onTranscriptionReady={(transcribedText) => {
+                        setDraft((prev) => (prev ? `${prev} ${transcribedText}` : transcribedText))
+                        textareaRef.current?.focus()
+                      }}
+                    />
+                  </div>
+
 
                   {/* Right: Sources Pills & Send Button */}
                   <div className="flex items-center gap-2 relative">
