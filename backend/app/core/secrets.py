@@ -6,6 +6,7 @@ Basado en cifrado simétrico Fernet (cryptography.fernet) para proteger credenci
 from __future__ import annotations
 
 import base64
+from functools import lru_cache
 import hashlib
 import os
 import secrets
@@ -24,6 +25,8 @@ except ImportError:  # pragma: no cover
 SECRET_PREFIX = "enc::"
 SERVICE_NAME = "funcassist"
 KEYRING_SECRET_KEY = "master-secret"
+PBKDF2_SALT = b"funcassist-qa-mgmt-pbkdf2-salt"
+PBKDF2_ITERATIONS = 100_000
 
 
 def _read_legacy_key_file() -> str | None:
@@ -69,10 +72,21 @@ def _get_master_secret() -> str:
     return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
 
 
+@lru_cache(maxsize=8)
+def _derive_fernet_key(secret: str) -> bytes:
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        secret.encode("utf-8"),
+        PBKDF2_SALT,
+        iterations=PBKDF2_ITERATIONS,
+        dklen=32,
+    )
+    return base64.urlsafe_b64encode(derived)
+
+
 def _get_fernet() -> Fernet:
     """Deriva una clave Fernet válida a partir del secreto maestro."""
-    secret_bytes = _get_master_secret().encode("utf-8")
-    key = base64.urlsafe_b64encode(hashlib.sha256(secret_bytes).digest())
+    key = _derive_fernet_key(_get_master_secret())
     return Fernet(key)
 
 
