@@ -19,26 +19,39 @@ SECRET_PREFIX = "enc::"
 
 
 
-from app.core.settings import SETTINGS_DIR
+_MASTER_SECRET_CACHE: str | None = None
+
 
 def _get_master_secret() -> str:
-    """Obtiene la clave maestra desde variables de entorno, archivo persistente o huella del sistema."""
+    """Obtiene la clave maestra desde variables de entorno, base de datos o huella del sistema."""
+    global _MASTER_SECRET_CACHE
+    if _MASTER_SECRET_CACHE:
+        return _MASTER_SECRET_CACHE
+
     secret = os.getenv("PMQA_SECRET_KEY") or os.getenv("SECRET_KEY")
     if secret:
+        _MASTER_SECRET_CACHE = secret
         return secret
 
-    key_file = SETTINGS_DIR / "secret.key"
     try:
-        if key_file.exists():
-            saved = key_file.read_text(encoding="utf-8").strip()
-            if saved:
-                return saved
-        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        new_secret = secrets.token_urlsafe(32)
-        key_file.write_text(new_secret, encoding="utf-8")
-        return new_secret
+        from app.db.database import get_sync_db
+        from app.db.models import SettingModel
+        from sqlalchemy import select
+        with get_sync_db() as db:
+            setting = db.scalar(select(SettingModel).where(SettingModel.key == "system:master_secret"))
+            if setting and setting.value:
+                _MASTER_SECRET_CACHE = setting.value
+                return setting.value
+            new_secret = secrets.token_urlsafe(32)
+            db.add(SettingModel(key="system:master_secret", value=new_secret))
+            db.commit()
+            _MASTER_SECRET_CACHE = new_secret
+            return new_secret
     except Exception:
-        return f"qa-mgmt-local-secret::{_machine_fingerprint()}"
+        pass
+
+    _MASTER_SECRET_CACHE = f"qa-mgmt-local-secret::{_machine_fingerprint()}"
+    return _MASTER_SECRET_CACHE
 
 
 def _get_fernet() -> Fernet:
