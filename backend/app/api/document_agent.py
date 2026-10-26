@@ -43,17 +43,31 @@ router = APIRouter(prefix="/doc-agent", tags=["document-agent"])
 
 
 def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
-    """Classifies user prompt intent into: generic_plan, generic_report, template_mutation, or chat."""
-    if mode and mode in {"plan", "generic_plan"}:
-        return "generic_plan"
-    if mode and mode in {"report", "generic_report"}:
-        return "generic_report"
-    if mode and mode in {"chat", "qa"}:
-        return "chat"
-    if mode and mode in {"template", "template_mutation"}:
-        return "template_mutation"
+    """Classifies user prompt intent into: generic_plan, generic_report, custom feature slug, template_mutation, or chat."""
+    if mode and mode not in {"auto", "default"}:
+        if mode in {"plan", "generic_plan"}:
+            return "generic_plan"
+        if mode in {"report", "informe", "generic_report"}:
+            return "generic_report"
+        if mode in {"chat", "qa"}:
+            return "chat"
+        if mode in {"template", "template_mutation"}:
+            return "template_mutation"
+        return mode
 
-    p_lower = prompt.strip().lower()
+    p_trimmed = prompt.strip()
+    if p_trimmed.startswith("/"):
+        first_token = p_trimmed.split()[0][1:].lower()
+        if first_token in {"plan", "generic_plan"}:
+            return "generic_plan"
+        if first_token in {"report", "informe", "generic_report"}:
+            return "generic_report"
+        if first_token in {"plantilla", "template", "template_mutation"}:
+            return "template_mutation"
+        if first_token:
+            return first_token
+
+    p_lower = p_trimmed.lower()
 
     # Conversational inquiries and questions should always route to conversational chat
     is_question = (
@@ -64,8 +78,7 @@ def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
         return "chat"
 
     if (
-        p_lower.startswith("/plan")
-        or "plan de prueba" in p_lower
+        "plan de prueba" in p_lower
         or "plan de implementaci" in p_lower
         or "plan de trabajo" in p_lower
         or "genera un plan" in p_lower
@@ -75,9 +88,7 @@ def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
         return "generic_plan"
 
     if (
-        p_lower.startswith("/informe")
-        or p_lower.startswith("/report")
-        or "informe" in p_lower
+        "informe" in p_lower
         or "reporte" in p_lower
         or "resumen ejecutivo" in p_lower
     ):
