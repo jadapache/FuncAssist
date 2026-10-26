@@ -24,26 +24,27 @@ class TemplateMetadataUpdate(BaseModel):
 @router.get("")
 @handle_grounded_errors
 async def get_templates() -> dict[str, Any]:
-    return {"templates": list_templates()}
+    return {"templates": await list_templates()}
 
 
 @router.get("/{template_id}/content")
 @handle_grounded_errors
 async def get_template_content_route(template_id: str) -> dict[str, Any]:
-    detail = get_template_detail(template_id)
+    detail = await get_template_detail(template_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Plantilla no encontrada")
     return detail
 
 
 @router.post("/upload")
+@handle_grounded_errors
 async def upload_template(
     file: UploadFile = File(...),
     title: str = Form(default=""),
     module: str = Form(default="general"),
 ) -> dict[str, Any]:
     content = await file.read()
-    item = save_template_file(
+    item = await save_template_file(
         filename=file.filename or "template",
         file_bytes=content,
         title=title,
@@ -55,7 +56,7 @@ async def upload_template(
 @router.put("/{template_id}")
 @handle_grounded_errors
 async def edit_template(template_id: str, body: TemplateMetadataUpdate = Body(...)) -> dict[str, Any]:
-    updated = update_template_metadata(
+    updated = await update_template_metadata(
         template_id,
         title=body.title,
         module=body.module,
@@ -70,7 +71,7 @@ async def edit_template(template_id: str, body: TemplateMetadataUpdate = Body(..
 @router.delete("/{template_id}")
 @handle_grounded_errors
 async def remove_template(template_id: str) -> dict[str, Any]:
-    success = delete_template(template_id)
+    success = await delete_template(template_id)
     if not success:
         raise HTTPException(status_code=404, detail="Plantilla no encontrada")
     return {"ok": True, "template_id": template_id}

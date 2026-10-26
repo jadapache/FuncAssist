@@ -35,7 +35,7 @@ router = APIRouter(prefix="/doc-agent", tags=["document-agent"])
 
 
 
-def _load_active_template_content(template_id: str | None = None) -> str:
+async def _load_active_template_content(template_id: str | None = None) -> str:
     """Load the active mejoras template content to inject into the AI prompt.
 
     Tries in order:
@@ -48,11 +48,11 @@ def _load_active_template_content(template_id: str | None = None) -> str:
         from app.core.template_storage import list_templates, get_template_detail
 
         if template_id:
-            detail = get_template_detail(template_id)
+            detail = await get_template_detail(template_id)
             if detail and detail.get("content", "").strip():
                 return detail["content"].strip()
 
-        templates = list_templates()
+        templates = await list_templates()
         # Prefer mejoras/funcional templates
         candidates = [
             t for t in templates
@@ -62,7 +62,7 @@ def _load_active_template_content(template_id: str | None = None) -> str:
             candidates = templates
 
         for tmpl in candidates:
-            detail = get_template_detail(tmpl["id"])
+            detail = await get_template_detail(tmpl["id"])
             if detail and detail.get("content", "").strip():
                 return detail["content"].strip()
     except Exception:
@@ -130,9 +130,9 @@ class ExportXlsxRequest(CamelModel):
 
 
 @router.get("/fixtures")
-def get_document_fixtures():
+async def get_document_fixtures():
     """Returns available corporate templates as evaluation fixtures for Univer."""
-    templates = list_templates()
+    templates = await list_templates()
     fixtures = []
     for t in templates:
         filename = t.get("filename", "")

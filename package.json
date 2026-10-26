@@ -7,14 +7,7 @@
   },
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": "cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 6728",
-    "dev:desktop": "tauri dev",
-    "build:desktop": "tauri build",
-    "tauri": "tauri",
-    "set-version": "node scripts/set-version.js",
+    "dev:backend": "cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
     "install:all": "npm --prefix frontend install && cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.11.5"
   }
 }
