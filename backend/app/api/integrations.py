@@ -51,7 +51,7 @@ async def auth_methods() -> dict[str, list[str]]:
 @router.get("/jira/callback")
 async def jira_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
   settings = get_settings()
-  frontend = settings.pmqa_frontend_url.rstrip("/")
+  frontend = settings.frontend_url.rstrip("/")
 
   if error:
     return RedirectResponse(f"{frontend}/integrations?jira=error&message={quote(error)}")
@@ -70,7 +70,7 @@ async def jira_oauth_callback(code: str | None = None, state: str | None = None,
 @router.get("/github/callback")
 async def github_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
   settings = get_settings()
-  frontend = settings.pmqa_frontend_url.rstrip("/")
+  frontend = settings.frontend_url.rstrip("/")
 
   if error:
     return RedirectResponse(f"{frontend}/integrations?github=error&message={quote(error)}")
@@ -89,7 +89,7 @@ async def github_oauth_callback(code: str | None = None, state: str | None = Non
 @router.get("/gitlab/callback")
 async def gitlab_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
   settings = get_settings()
-  frontend = settings.pmqa_frontend_url.rstrip("/")
+  frontend = settings.frontend_url.rstrip("/")
 
   if error:
     return RedirectResponse(f"{frontend}/integrations?gitlab=error&message={quote(error)}")

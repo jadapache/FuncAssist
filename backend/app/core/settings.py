@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
@@ -85,11 +86,11 @@ class Settings(BaseSettings):
     extra="ignore",
   )
 
-  fa_host: str = "127.0.0.1"
-  fa_port: int = 6728
-  fa_frontend_url: str = "http://127.0.0.1:5173"
-  fa_backend_url: str = "http://127.0.0.1:6728"
-  pmqa_secret_key: str | None = None
+  host: str = Field(default="127.0.0.1", validation_alias="HOST")
+  port: int = Field(default=8000, validation_alias="PORT")
+  frontend_url: str = Field(default="http://127.0.0.1:5173", validation_alias="FRONTEND_URL")
+  backend_url: str = Field(default="http://127.0.0.1:8000", validation_alias="BACKEND_URL")
+  secret_key: str | None = Field(default=None, validation_alias="SECRET_KEY")
 
   jira_client_id: str = ""
   jira_client_secret: str = ""
@@ -169,8 +170,8 @@ class Settings(BaseSettings):
     if self.cors_origins_str.strip() == "*":
       return ["*"]
     origins = {
-      self.fa_frontend_url.rstrip("/"),
-      self.fa_backend_url.rstrip("/"),
+      self.frontend_url.rstrip("/"),
+      self.backend_url.rstrip("/"),
       "http://localhost:5173",
       "http://127.0.0.1:5173",
       "http://localhost:6728",

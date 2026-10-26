@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
@@ -21,6 +22,16 @@ from app.api.middleware.error_handlers import handle_grounded_errors
 
 router = APIRouter(prefix="/ai", tags=["ai-templates"])
 
+
+class TemplateCreate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    feature: str
+    title: str | None = None
+    description: str | None = None
+    system: str | None = None
+    user_template: str | None = None
+    allowed_sources: list[str] | None = None
+    updated_by: str | None = "user"
 
 
 class TemplateUpdate(BaseModel):
@@ -55,6 +66,26 @@ class RubricUpdate(BaseModel):
 @handle_grounded_errors
 async def prompts() -> dict[str, Any]:
     return {"prompts": await list_prompts()}
+
+
+@router.post("/prompts")
+@handle_grounded_errors
+async def create_prompt(body: TemplateCreate = Body(...)) -> dict[str, Any]:
+    raw_feature = body.feature.strip().lower()
+    clean_feature = re.sub(r"[^a-z0-9_-]", "_", raw_feature).strip("_")
+    if not clean_feature:
+        raise HTTPException(status_code=400, detail="El identificador de la funcionalidad no es válido.")
+
+    dump = body.model_dump(exclude_none=True)
+    dump["feature"] = clean_feature
+    updated_by = dump.pop("updated_by", "user")
+
+    return await save_prompt(
+        clean_feature,
+        dump,
+        updated_by=updated_by,
+        change_summary=f"Created custom prompt for {clean_feature}",
+    )
 
 
 

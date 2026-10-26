@@ -14,19 +14,10 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 
 from app.core.secrets import decrypt_ai_settings, encrypt_ai_settings
-from app.core.security import machine_fingerprint as _machine_fingerprint
 from app.core.settings import get_settings
 from app.db.models import SettingModel
 
 logger = logging.getLogger(__name__)
-
-try:
-  import keyring
-except ImportError:  # pragma: no cover
-  keyring = None
-
-SERVICE_NAME = "funcassist"
-KEYRING_USERNAME = "encryption-key"
 
 # In-memory fallbacks when database is initializing or during tests
 _CACHE_APP_SETTINGS: dict[str, Any] = {}
@@ -40,21 +31,14 @@ def _derive_fernet_key(secret: str) -> bytes:
 
 def _resolve_secret() -> str:
   settings = get_settings()
-  if settings.pmqa_secret_key:
-    return settings.pmqa_secret_key
+  secret = settings.secret_key or os.getenv("SECRET_KEY")
+  if secret and secret.strip():
+    return secret.strip()
 
-  if keyring is not None:
-    try:
-      stored = keyring.get_password(SERVICE_NAME, KEYRING_USERNAME)
-      if stored:
-        return stored
-      generated = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
-      keyring.set_password(SERVICE_NAME, KEYRING_USERNAME, generated)
-      return generated
-    except Exception:
-      pass
-
-  return f"pmqa-local::{_machine_fingerprint()}"
+  raise RuntimeError(
+    "SECRET_KEY environment variable is required for application storage and encryption. "
+    "Please define SECRET_KEY in your .env or container environment."
+  )
 
 
 def _fernet() -> Fernet:
@@ -208,3 +192,50 @@ def save_app_settings(payload: dict[str, Any]) -> dict[str, Any]:
     logger.debug("Failed to persist app settings to PostgreSQL, kept in memory: %s", exc)
 
   return current
+
+
+def load_user_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
+  """Load AI settings for a specific user ID, falling back to global settings."""
+  if not user_id:
+    return load_app_settings().get("ai") or {}
+
+  key = f"user_ai:{user_id}"
+  try:
+    from app.db.database import get_sync_db
+    with get_sync_db() as db:
+      setting = db.scalar(select(SettingModel).where(SettingModel.key == key))
+      if setting and setting.value_json:
+        stored = json.loads(setting.value_json)
+        if isinstance(stored, dict):
+          return decrypt_ai_settings(stored)
+  except Exception as exc:
+    logger.debug("Could not read user AI settings from DB: %s", exc)
+
+  # Fallback to global AI settings
+  return load_app_settings().get("ai") or {}
+
+
+def save_user_ai_settings(user_id: str, ai_data: dict[str, Any]) -> dict[str, Any]:
+  """Save user-specific AI settings in PostgreSQL settings table with encryption."""
+  current = load_user_ai_settings(user_id)
+  current.update(ai_data)
+
+  to_store = encrypt_ai_settings(dict(current))
+  key = f"user_ai:{user_id}"
+
+  try:
+    from app.db.database import get_sync_db
+    value_json = json.dumps(to_store, ensure_ascii=False)
+    with get_sync_db() as db:
+      setting = db.scalar(select(SettingModel).where(SettingModel.key == key))
+      if setting:
+        setting.value_json = value_json
+      else:
+        setting = SettingModel(key=key, value_json=value_json)
+        db.add(setting)
+      db.commit()
+  except Exception as exc:
+    logger.debug("Failed to persist user AI settings to DB: %s", exc)
+
+  return current
+

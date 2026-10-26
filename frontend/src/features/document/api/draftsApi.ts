@@ -1,4 +1,5 @@
-import { API_BASE, handleResponse } from '../../../api/client'
+import { API_BASE, getAuthHeaders, handleResponse } from '../../../api/client'
+import type { ChatPersistMessage, DocumentArtifact } from '../hooks/useChatPersistence'
 
 export interface SaveDraftPayload {
   id: string
@@ -7,9 +8,9 @@ export interface SaveDraftPayload {
   specification?: string
   feature_slug?: string
   lastInteraction?: string
-  messages?: any[]
+  messages?: ChatPersistMessage[]
   documentContent?: string
-  artifacts?: any[]
+  artifacts?: DocumentArtifact[]
 }
 
 export interface DraftItem {
@@ -34,7 +35,7 @@ export const draftsApi = {
   saveDraft: async (payload: SaveDraftPayload) => {
     const res = await fetch(`${API_BASE}/api/drafts/save`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
     })
     return handleResponse<{ ok: boolean; draft: DraftItem; message: string }>(res)
@@ -42,18 +43,23 @@ export const draftsApi = {
 
   listDrafts: async (specification?: string) => {
     const query = specification ? `?specification=${encodeURIComponent(specification)}` : ''
-    const res = await fetch(`${API_BASE}/api/drafts/list${query}`)
+    const res = await fetch(`${API_BASE}/api/drafts/list${query}`, {
+      headers: { ...getAuthHeaders() },
+    })
     return handleResponse<{ ok: boolean; drafts: DraftItem[] }>(res)
   },
 
   getDraft: async (draftId: string) => {
-    const res = await fetch(`${API_BASE}/api/drafts/${draftId}`)
+    const res = await fetch(`${API_BASE}/api/drafts/${draftId}`, {
+      headers: { ...getAuthHeaders() },
+    })
     return handleResponse<{ ok: boolean; draft: DraftItem }>(res)
   },
 
   deleteDraft: async (draftId: string) => {
     const res = await fetch(`${API_BASE}/api/drafts/${draftId}`, {
       method: 'DELETE',
+      headers: { ...getAuthHeaders() },
     })
     return handleResponse<{ ok: boolean; message: string }>(res)
   },

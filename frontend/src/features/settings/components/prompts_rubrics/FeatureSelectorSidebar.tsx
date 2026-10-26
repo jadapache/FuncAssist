@@ -89,9 +89,16 @@ export const FeatureSelectorSidebar = ({
                 >
                   {f.title}
                 </span>
-                <code className="text-[10px] font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">
-                  {f.id}
-                </code>
+                <div className="flex items-center gap-1 shrink-0">
+                  {f.isCustom && (
+                    <span className="text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 px-1.5 py-0.5 rounded-md">
+                      Personalizado
+                    </span>
+                  )}
+                  <code className="text-[10px] font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                    {f.id}
+                  </code>
+                </div>
               </div>
 
               <p className="text-[11px] text-slate-500 line-clamp-1">{f.description}</p>

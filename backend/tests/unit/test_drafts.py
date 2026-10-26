@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 
 from app.main import app
-from app.core.settings import USER_DRAFTS_DIR, GENERATED_INDEX_FILE, USER_DOCUMENTS_DIR
+from app.core.settings import USER_DRAFTS_DIR, USER_DOCUMENTS_DIR
 from app.features.drafts.storage import (
   delete_generated_draft,
   get_generated_draft,
@@ -62,8 +62,7 @@ def test_draft_session_persistence_and_index():
   assert (folder_path / "Documento_Levantamiento.md").exists()
   assert (folder_path / "metadata.json").exists()
 
-  # Check index in Generated/_index.json
-  assert GENERATED_INDEX_FILE.exists()
+  # Check listing drafts from filesystem
   drafts = list_generated_drafts(specification="Levantamiento")
   assert any(d["id"] == session_id for d in drafts)
 

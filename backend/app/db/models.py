@@ -65,15 +65,52 @@ class SettingModel(Base):
     }
 
 
+class ChatSessionModel(Base):
+  __tablename__ = "chat_sessions"
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+  title: Mapped[str] = mapped_column(String, nullable=False, default="Nueva conversación")
+  feature_slug: Mapped[str] = mapped_column(String, nullable=False, default="general", index=True)
+  document_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
+  artifacts_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
+  active_artifact_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    try:
+      artifacts = json.loads(self.artifacts_json) if self.artifacts_json else []
+    except Exception:
+      artifacts = []
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "name": self.title,
+      "title": self.title,
+      "feature_slug": self.feature_slug,
+      "documentContent": self.document_content or "",
+      "artifacts": artifacts,
+      "activeArtifactId": self.active_artifact_id,
+      "lastInteraction": self.updated_at.isoformat() if self.updated_at else datetime.now(timezone.utc).isoformat(),
+      "created_at": self.created_at.isoformat() if self.created_at else datetime.now(timezone.utc).isoformat(),
+    }
+
+
 class ChatMessageModel(Base):
   __tablename__ = "chat_messages"
 
   id: Mapped[str] = mapped_column(String, primary_key=True)
   session_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
   role: Mapped[str] = mapped_column(String, nullable=False)
   content: Mapped[str] = mapped_column(Text, nullable=False)
   context_sources_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  attachments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
@@ -85,6 +122,12 @@ class ChatMessageModel(Base):
         sources = json.loads(self.context_sources_json)
       except Exception:
         sources = []
+    attachments = []
+    if self.attachments_json:
+      try:
+        attachments = json.loads(self.attachments_json)
+      except Exception:
+        attachments = []
     return {
       "id": self.id,
       "session_id": self.session_id,
@@ -92,6 +135,8 @@ class ChatMessageModel(Base):
       "role": self.role,
       "content": self.content,
       "context_sources": sources,
+      "attachments": attachments,
+      "timestamp": self.created_at.strftime("%H:%M") if self.created_at else "",
       "created_at": self.created_at.isoformat() if self.created_at else datetime.now(timezone.utc).isoformat(),
     }
 

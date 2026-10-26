@@ -1,5 +1,6 @@
 import {
   API_BASE,
+  getAuthHeaders,
   handleResponse,
   type AISettings,
   type ModelCatalogResponse,
@@ -12,35 +13,38 @@ export const aiSettingsApi = {
     if (provider && provider !== 'all') params.set('provider', provider)
     if (task_type && task_type !== 'all') params.set('task_type', task_type)
     const qs = params.toString() ? `?${params.toString()}` : ''
-    return fetch(`${API_BASE}/api/ai/models/catalog${qs}`).then((r) =>
-      handleResponse<ModelCatalogResponse>(r),
-    )
+    return fetch(`${API_BASE}/api/ai/models/catalog${qs}`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<ModelCatalogResponse>(r))
   },
 
   syncFrontierCatalog: (forceRemote: boolean = true) =>
     fetch(`${API_BASE}/api/ai/models/sync?force_remote=${forceRemote}`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ sync: Record<string, unknown>; catalog: ModelCatalogResponse }>(r)),
 
   getSyncStatus: () =>
-    fetch(`${API_BASE}/api/ai/models/sync-status`).then((r) =>
-      handleResponse<Record<string, unknown>>(r),
-    ),
+    fetch(`${API_BASE}/api/ai/models/sync-status`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
   getAiSettings: () =>
-    fetch(`${API_BASE}/api/ai/settings`).then((r) => handleResponse<AISettings>(r)),
+    fetch(`${API_BASE}/api/ai/settings`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<AISettings>(r)),
 
   updateAiSettings: (payload: Record<string, string>) =>
     fetch(`${API_BASE}/api/ai/settings`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<AISettings>(r)),
 
   testAiConnection: (payload: Record<string, string>) =>
     fetch(`${API_BASE}/api/ai/test-connection`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<{ ok: boolean; status?: string; message: string; response?: string }>(r)),
 
