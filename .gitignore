@@ -14,7 +14,6 @@ lib/
 lib64/
 parts/
 sdist/
-var/
 wheels/
 share/python-wheels/
 *.egg-info/
@@ -146,7 +145,3 @@ pm_qa_copilot/
 # AI Models & Downloads
 backend/app/ai/models/*
 !backend/app/ai/models/.gitkeep
-
-#Generated Signing Keys
-~/.tauri/qa_mgmt.key
-~/.tauri/qa_mgmt.key.pub
