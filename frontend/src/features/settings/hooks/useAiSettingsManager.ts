@@ -4,7 +4,16 @@ import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperMode
 import { useToast } from '../../../context/ToastContext'
 import { useBackgroundJobs } from '../../../context/BackgroundJobContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
-import { webLLMProvider } from '../../ai/providers/WebLLMProvider'
+
+// Lazy-load WebLLM provider to avoid bundling AI dependencies in initial load
+let webLLMProviderPromise: Promise<Awaited<typeof import('../../ai/providers/WebLLMProvider')>['webLLMProvider']> | null = null
+
+async function getWebLLMProvider() {
+  if (!webLLMProviderPromise) {
+    webLLMProviderPromise = import('../../ai/providers/WebLLMProvider').then(m => m.webLLMProvider)
+  }
+  return webLLMProviderPromise
+}
 
 export function useAiSettingsManager() {
   const { toast } = useToast()
@@ -468,13 +477,14 @@ export function useAiSettingsManager() {
 
     if (provider === 'builtin') {
       try {
-        const isCached = await webLLMProvider.isModelCached(model)
+        const provider = await getWebLLMProvider()
+        const isCached = await provider.isModelCached(model)
         if (!isCached) {
           toast.error(`El modelo ${model} no se encuentra descargado en la caché del navegador.`)
           return
         }
-        await webLLMProvider.initModel(model)
-        const answer = await webLLMProvider.complete([
+        await provider.initModel(model)
+        const answer = await provider.complete([
           { role: 'user', content: 'Responde únicamente con OK.' },
         ], { maxTokens: 10 })
         toast.success(`Prueba exitosa con WebLLM (${model}): ${answer}`)
