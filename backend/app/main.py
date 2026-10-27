@@ -23,12 +23,10 @@ async def lifespan(app: FastAPI):
   import asyncio
   from app.api.transcription_stream import set_main_loop
   from app.core.index_refresher import run_index_refresher
-  from app.core.migration import migrate_paths_if_needed
-
+  
   loop = asyncio.get_running_loop()
   set_main_loop(loop)
   ensure_local_dirs()
-  migrate_paths_if_needed()
   from app.context.knowledge_migration import migrate_knowledge_if_needed
   from app.db.database import init_db
 
