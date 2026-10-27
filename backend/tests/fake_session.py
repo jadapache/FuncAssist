@@ -255,6 +255,15 @@ class FakeSyncSession:
       obj_id = getattr(obj, "id", None) or getattr(obj, "key", None) or str(id(obj))
       self.storage.tables[t].pop(obj_id, None)
 
+  def get_bind(self) -> Any:
+    class FakeDialect:
+      name = "postgresql"
+
+    class FakeBind:
+      dialect = FakeDialect()
+
+    return FakeBind()
+
   def execute(self, stmt: Any) -> FakeResult:
     # Synchronous execution sharing evaluation logic
     return _eval_statement(stmt, self.storage)
