@@ -15,6 +15,7 @@ async def assemble_context(
   query: str,
   sources: Iterable[str],
   top_k: int = 8,
+  user_id: str | None = None,
 ) -> ContextBundle:
   requested = {source.strip().lower() for source in sources if source}
   chunks: list[ContextChunk] = []
@@ -23,11 +24,13 @@ async def assemble_context(
 
   if "jira" in requested:
     jira = registry.get("jira")
-    if not await jira.authenticate():
+    # Personal Jira scope: strictly require authenticated personal connection if user_id is provided
+    is_authed = await jira.authenticate(user_id=user_id) if hasattr(jira, "authenticate") else await jira.authenticate()
+    if not is_authed:
       missing.append("jira")
     else:
       try:
-        issues = await jira.get_issues(max_results=25)  # type: ignore[attr-defined]
+        issues = await jira.get_issues(max_results=25, user_id=user_id) if hasattr(jira, "get_issues") else await jira.get_issues(max_results=25)
         used.append("jira")
         for issue in issues:
           text = (
