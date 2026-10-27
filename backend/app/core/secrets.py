@@ -45,12 +45,25 @@ def _get_master_secret() -> str:
 
 
 @lru_cache(maxsize=8)
+def _get_pbkdf2_salt() -> bytes:
+    salt = os.getenv("PBKDF2_SALT")
+    if not salt:
+        try:
+            from app.core.settings import get_settings
+            salt = get_settings().pbkdf2_salt
+        except Exception:
+            pass
+    resolved = (salt).strip()
+    return resolved.encode("utf-8")
+
+
+@lru_cache(maxsize=8)
 def _derive_fernet_key(secret: str) -> bytes:
     derived = hashlib.pbkdf2_hmac(
         "sha256",
         secret.encode("utf-8"),
-        PBKDF2_SALT,
-        iterations=PBKDF2_ITERATIONS,
+        _get_pbkdf2_salt(),
+        iterations=100_000,
         dklen=32,
     )
     return base64.urlsafe_b64encode(derived)
@@ -134,3 +147,4 @@ def decrypt_ai_settings(ai_dict: Dict[str, Any]) -> Dict[str, Any]:
         if val and isinstance(val, str):
             result[field] = decrypt_secret(val)
     return result
+
