@@ -53,8 +53,8 @@ def _get_pbkdf2_salt() -> bytes:
             salt = get_settings().pbkdf2_salt
         except Exception:
             pass
-    resolved = (salt).strip()
-    return resolved.encode("utf-8")
+    if not salt or not isinstance(salt, str) or not salt.strip(): raise RuntimeError("PBKDF2_SALT environment variable is required")
+    return salt.strip().encode("utf-8")
 
 
 @lru_cache(maxsize=8)
