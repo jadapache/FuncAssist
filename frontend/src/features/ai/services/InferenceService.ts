@@ -1,5 +1,4 @@
 import { api, type AISettings } from '../../../api/client'
-import { webLLMProvider } from '../providers/WebLLMProvider'
 import type {
   ArtifactGenerationRequest,
   ArtifactGenerationResult,
@@ -9,6 +8,17 @@ import type {
 } from '../types/webLlm'
 
 export type StreamChunkCallback = (chunk: string, accumulated: string) => void
+
+// Lazy-loaded WebLLM provider to avoid loading heavy AI dependencies on initial app load
+let webLLMProvider: Awaited<typeof import('../providers/WebLLMProvider')>['webLLMProvider'] | null = null
+
+async function getWebLLMProvider() {
+  if (!webLLMProvider) {
+    const module = await import('../providers/WebLLMProvider')
+    webLLMProvider = module.webLLMProvider
+  }
+  return webLLMProvider
+}
 
 export class InferenceService {
   private static instance: InferenceService | null = null
@@ -125,14 +135,16 @@ export class InferenceService {
     onChunk?: StreamChunkCallback,
     options?: { maxTokens?: number; temperature?: number },
   ): Promise<string> {
-    if (webLLMProvider.getActiveModelId() !== modelId) {
-      await webLLMProvider.initModel(modelId)
+    const provider = await getWebLLMProvider()
+    
+    if (provider.getActiveModelId() !== modelId) {
+      await provider.initModel(modelId)
     }
 
     if (onChunk) {
-      return webLLMProvider.streamComplete(messages, onChunk, options)
+      return provider.streamComplete(messages, onChunk, options)
     }
-    return webLLMProvider.complete(messages, options)
+    return provider.complete(messages, options)
   }
 
   private async executeBackendPrompt(
