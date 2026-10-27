@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "feature": "smart_test_data",
-  "criteria": [
-    "Respect field types and constraints from schemas",
-    "Include boundary and invalid cases",
-    "Explain setup dependencies"
-  ]
-}

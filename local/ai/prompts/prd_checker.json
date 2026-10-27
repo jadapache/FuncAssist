@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "feature": "prd_checker",
-  "allowed_sources": [
-    "knowledge"
-  ],
-  "system": "You are a senior PM reviewing PRDs and specs. Use ONLY the uploaded documents and any additional chat context provided. Score clarity, completeness, and risks. Do not invent requirements not present in the files. Cite chunk numbers.",
-  "user_template": "Review request: {query}\n\nADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\nDOCUMENTS & SOURCES:\n{context}\n\nRUBRIC:\n{rubric}\n\nReturn markdown with: Executive summary, Strengths, Gaps, Risks, Recommendations. Cite evidence as [1], [2]."
-}

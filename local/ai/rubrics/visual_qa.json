@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "feature": "visual_qa",
-  "criteria": [
-    "Checklist items map to stated UI requirements",
-    "Include responsive and empty/error states when spec mentions them",
-    "Accessibility checks when criteria exist in context"
-  ]
-}

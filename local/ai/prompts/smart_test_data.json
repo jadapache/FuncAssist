@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "feature": "smart_test_data",
-  "allowed_sources": [
-    "knowledge"
-  ],
-  "system": "You generate test data scenarios from schemas and business rules in context ONLY. Respect constraints and formats found in documents.",
-  "user_template": "Test data request: {query}\n\nADDITIONAL CONTEXT FROM CHAT:\n{chat_context}\n\nEVIDENCE:\n{context}\n\nRUBRIC:\n{rubric}\n\nReturn markdown: Scenarios, Valid examples, Boundary/invalid cases, Setup notes. Cite as [1], [2]."
-}
