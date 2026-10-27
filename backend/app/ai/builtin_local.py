@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
@@ -9,55 +8,55 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import urllib.request
 
-from app.core.settings import BUILTIN_MODELS_DIR, ROOT_DIR, USER_DATA_DIR
+from app.core.settings import BUILTIN_MODELS_DIR
+from app.ai.builtin_seeds import DEFAULT_BUILTIN_MODELS
 
 logger = logging.getLogger(__name__)
 
-# Dedicated local JSON catalog path for built-in models
-BUILTIN_CATALOG_FILE = USER_DATA_DIR / "ai" / "builtin_models_catalog.json"
-FALLBACK_BUILTIN_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "builtin_models_catalog.json"
 
-# Cache directory for standalone built-in GGUF models (without Ollama)
 def get_builtin_cache_dir() -> Path:
+    """Returns and ensures the cache directory for standalone built-in GGUF models."""
     BUILTIN_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     return BUILTIN_MODELS_DIR
 
 
-def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str, Dict[str, Any]]:
-    """Loads built-in models directly from builtin_models_catalog.json file."""
-    target_file = BUILTIN_CATALOG_FILE
-    if not target_file.exists():
-        if FALLBACK_BUILTIN_CATALOG_FILE.exists():
-            try:
-                import shutil
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(FALLBACK_BUILTIN_CATALOG_FILE, target_file)
-            except Exception:
-                target_file = FALLBACK_BUILTIN_CATALOG_FILE
-        else:
-            logger.warning(f"Built-in catalog file not found at {BUILTIN_CATALOG_FILE}")
-            return {}
-
+def sync_builtin_models_catalog() -> int:
+    """Synchronizes built-in models catalog seed into the database repository."""
     try:
-        with open(target_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                result = {}
-                for item in data:
-                    if not isinstance(item, dict) or "id" not in item:
-                        continue
-                    if task_type is None or item.get("task_type") == task_type:
-                        result[item["id"]] = item
-                return result
-    except Exception as e:
-        logger.error(f"Error reading {target_file}: {e}")
-
-    return {}
+        from app.db.repositories.builtin_model_repository import BuiltinModelRepository
+        repo = BuiltinModelRepository()
+        return repo.bulk_upsert_sync(DEFAULT_BUILTIN_MODELS)
+    except Exception as exc:
+        logger.debug(f"sync_builtin_models_catalog error: {exc}")
+        return 0
 
 
+def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str, Dict[str, Any]]:
+    """Loads built-in models from the database repository with in-memory seed fallback."""
+    items: List[Dict[str, Any]] = []
+    try:
+        from app.db.repositories.builtin_model_repository import BuiltinModelRepository
+        repo = BuiltinModelRepository()
+        items = repo.list_sync(task_type=task_type)
+        if not items:
+            repo.bulk_upsert_sync(DEFAULT_BUILTIN_MODELS)
+            items = repo.list_sync(task_type=task_type)
+    except Exception as exc:
+        logger.debug(f"Built-in models database fallback: {exc}")
 
-# Dynamic catalog dictionary
-BUILTIN_LLM_CATALOG: Dict[str, Dict[str, Any]] = load_builtin_catalog()
+    if not items:
+        # Direct in-memory fallback from built-in seeds
+        items = [
+            m for m in DEFAULT_BUILTIN_MODELS
+            if task_type is None or m.get("task_type") == task_type
+        ]
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        if isinstance(item, dict) and "id" in item:
+            if task_type is None or item.get("task_type") == task_type:
+                result[item["id"]] = item
+    return result
 
 
 # --- Download Task Tracking & Cancellation State ---
@@ -139,8 +138,8 @@ def cancel_builtin_model_download(model_id: str) -> bool:
 
 
 def resolve_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
-    """Resolves model metadata by id or alias from the loaded local catalog."""
-    catalog = load_builtin_catalog()
+    """Resolves model metadata by id or alias from the repository or catalog."""
+    catalog = load_builtin_catalog(task_type=None)
     clean = model_id.strip().lower()
     if clean in catalog:
         return catalog[clean]
@@ -153,8 +152,8 @@ def resolve_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
 
 
 def get_builtin_models_info() -> List[Dict[str, Any]]:
-    """Inspects the local cache directory to list all built-in LLM models from local JSON catalog and their download status."""
-    catalog = load_builtin_catalog()
+    """Inspects the local cache directory to list all built-in LLM models and their download status."""
+    catalog = load_builtin_catalog(task_type="chat_writing")
     cache_dir = get_builtin_cache_dir()
     results: List[Dict[str, Any]] = []
 
@@ -185,11 +184,11 @@ def download_builtin_model_file(
 ) -> Path:
     """Downloads a built-in GGUF model file directly from Hugging Face into the cache directory with cancellation support."""
     meta = resolve_model_meta(model_id)
-    catalog = load_builtin_catalog()
+    catalog = load_builtin_catalog(task_type=None)
     if not meta:
         raise ValueError(
             f"Modelo built-in desconocido: '{model_id}'. "
-            f"Modelos disponibles en catálogo local: {list(catalog.keys())}"
+            f"Modelos disponibles en catálogo: {list(catalog.keys())}"
         )
 
     canonical_id = meta["id"]
@@ -301,7 +300,6 @@ def download_builtin_model_file(
         return target_file
 
     except Exception as exc:
-        # Clean up temporary download file if aborted or errored
         if tmp_file.exists():
             try:
                 tmp_file.unlink()

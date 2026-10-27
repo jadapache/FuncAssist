@@ -1,3 +1,4 @@
+from app.db.repositories.builtin_model_repository import BuiltinModelRepository
 from app.db.repositories.catalog_and_corporate_repository import (
   AIModelCatalogRepository,
   CorporateTemplateRepository,
@@ -22,4 +23,5 @@ __all__ = [
   "TranscriptionRepository",
   "CorporateTemplateRepository",
   "AIModelCatalogRepository",
+  "BuiltinModelRepository",
 ]

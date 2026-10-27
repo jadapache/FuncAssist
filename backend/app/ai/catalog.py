@@ -18,13 +18,12 @@ import shutil
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from app.core.settings import ROOT_DIR, USER_DATA_DIR
 from app.models import AIModelInfo, ModelCatalogResponse
+from app.ai.builtin_local import load_builtin_catalog
 
 logger = logging.getLogger(__name__)
 
 CATALOG_FILE = USER_DATA_DIR / "ai" / "models_catalog.json"
 FALLBACK_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "models_catalog.json"
-BUILTIN_CATALOG_FILE = USER_DATA_DIR / "ai" / "builtin_models_catalog.json"
-FALLBACK_BUILTIN_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "builtin_models_catalog.json"
 
 _catalog_cache: list[AIModelInfo] | None = None
 _catalog_cache_ts: float = 0.0
@@ -32,35 +31,8 @@ _CACHE_TTL_SECONDS = 300  # 5 minutos
 
 
 def _load_builtin_model_infos() -> list[AIModelInfo]:
-    """Load built-in models from builtin_models_catalog.json and map them to AIModelInfo."""
-    target_file = BUILTIN_CATALOG_FILE
-    if not target_file.exists():
-        if FALLBACK_BUILTIN_CATALOG_FILE.exists():
-            try:
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(FALLBACK_BUILTIN_CATALOG_FILE, target_file)
-            except Exception:
-                target_file = FALLBACK_BUILTIN_CATALOG_FILE
-        else:
-            return []
-    elif FALLBACK_BUILTIN_CATALOG_FILE.exists():
-        try:
-            fb_data = json.loads(FALLBACK_BUILTIN_CATALOG_FILE.read_text(encoding="utf-8"))
-            usr_data = json.loads(target_file.read_text(encoding="utf-8"))
-            usr_ids = {item["id"] for item in usr_data if isinstance(item, dict) and "id" in item}
-            missing = [item for item in fb_data if isinstance(item, dict) and item.get("id") not in usr_ids]
-            if missing:
-                usr_data.extend(missing)
-                target_file.write_text(json.dumps(usr_data, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception as exc:
-            logger.debug(f"Built-in catalog sync check skipped: {exc}")
-
-    try:
-        with open(target_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load built-in catalog from {target_file}: {e}")
-        return []
+    """Load built-in models from repository / seed catalog and map them to AIModelInfo."""
+    data = list(load_builtin_catalog(task_type=None).values())
 
     builtin_models: list[AIModelInfo] = []
     for item in data:
