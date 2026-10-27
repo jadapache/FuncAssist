@@ -5,6 +5,7 @@ Zero SQLite dependencies - operates strictly as an in-memory double of SQLAlchem
 
 from __future__ import annotations
 
+import copy
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, Generator, List, Optional, Type
 
@@ -14,6 +15,10 @@ from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 def _eval_clause(clause: Any, obj: Any) -> bool:
   if clause is None:
     return True
+
+  # Handle Grouping expressions (e.g. ~(Model.field.like(...)))
+  if hasattr(clause, "element"):
+    return _eval_clause(clause.element, obj)
 
   # BinaryExpression (e.g. Model.field == value)
   if hasattr(clause, "left") and hasattr(clause, "right"):
@@ -39,6 +44,9 @@ class FakeScalars:
     return list(self._items)
 
   def first(self) -> Any:
+    return self._items[0] if self._items else None
+
+  def one_or_none(self) -> Any:
     return self._items[0] if self._items else None
 
 
@@ -77,6 +85,13 @@ GLOBAL_FAKE_STORAGE = FakeStorage()
 class FakeAsyncSession:
   def __init__(self, storage: Optional[FakeStorage] = None):
     self.storage = storage or GLOBAL_FAKE_STORAGE
+    self._take_snapshot()
+
+  def _take_snapshot(self) -> None:
+    self._snapshot = {
+      model_cls: {k: copy.copy(v) for k, v in table_dict.items()}
+      for model_cls, table_dict in self.storage.tables.items()
+    }
 
   async def __aenter__(self):
     return self
@@ -92,10 +107,12 @@ class FakeAsyncSession:
     self.storage.tables[t][obj_id] = obj
 
   async def commit(self) -> None:
-    pass
+    self._take_snapshot()
 
   async def rollback(self) -> None:
-    pass
+    self.storage.tables.clear()
+    for model_cls, table_dict in self._snapshot.items():
+      self.storage.tables[model_cls] = {k: copy.copy(v) for k, v in table_dict.items()}
 
   async def refresh(self, obj: Any) -> None:
     pass
@@ -108,6 +125,14 @@ class FakeAsyncSession:
 
   async def execute(self, stmt: Any) -> FakeResult:
     return _eval_statement(stmt, self.storage)
+
+  async def scalars(self, stmt: Any) -> FakeScalars:
+    res = await self.execute(stmt)
+    return res.scalars()
+
+  async def scalar(self, stmt: Any) -> Any:
+    res = await self.execute(stmt)
+    return res.scalar()
 
 
 def _eval_statement(stmt: Any, storage: FakeStorage) -> FakeResult:
@@ -134,8 +159,8 @@ def _eval_statement(stmt: Any, storage: FakeStorage) -> FakeResult:
     return FakeResult([])
 
   first = desc[0]
-  target_type = first.get("type")
   expr = first.get("expr")
+  target_type = first.get("entity") or getattr(expr, "class_", None) or first.get("type")
 
   is_count = False
   if hasattr(expr, "name") and str(expr.name).lower() == "count":
@@ -153,7 +178,11 @@ def _eval_statement(stmt: Any, storage: FakeStorage) -> FakeResult:
     storage.tables[target_type] = {}
 
   all_objs = list(storage.tables[target_type].values())
-  filtered = [o for o in all_objs if _eval_clause(stmt.whereclause, o)]
+  col_key = getattr(expr, "key", None) if (expr is not target_type) and hasattr(expr, "class_") else None
+  if col_key:
+    filtered = [getattr(o, col_key, None) for o in all_objs if _eval_clause(stmt.whereclause, o)]
+  else:
+    filtered = [o for o in all_objs if _eval_clause(stmt.whereclause, o)]
 
   # Ordering
   order_clauses = getattr(stmt, "_order_by_clauses", ())
@@ -188,6 +217,13 @@ def _eval_statement(stmt: Any, storage: FakeStorage) -> FakeResult:
 class FakeSyncSession:
   def __init__(self, storage: Optional[FakeStorage] = None):
     self.storage = storage or GLOBAL_FAKE_STORAGE
+    self._take_snapshot()
+
+  def _take_snapshot(self) -> None:
+    self._snapshot = {
+      model_cls: {k: copy.copy(v) for k, v in table_dict.items()}
+      for model_cls, table_dict in self.storage.tables.items()
+    }
 
   def __enter__(self):
     return self
@@ -203,10 +239,12 @@ class FakeSyncSession:
     self.storage.tables[t][obj_id] = obj
 
   def commit(self) -> None:
-    pass
+    self._take_snapshot()
 
   def rollback(self) -> None:
-    pass
+    self.storage.tables.clear()
+    for model_cls, table_dict in self._snapshot.items():
+      self.storage.tables[model_cls] = {k: copy.copy(v) for k, v in table_dict.items()}
 
   def refresh(self, obj: Any) -> None:
     pass
@@ -221,11 +259,15 @@ class FakeSyncSession:
     # Synchronous execution sharing evaluation logic
     return _eval_statement(stmt, self.storage)
 
+  def scalars(self, stmt: Any) -> FakeScalars:
+    res = self.execute(stmt)
+    return res.scalars()
+
   def scalar(self, stmt: Any) -> Any:
     res = self.execute(stmt)
     return res.scalar()
 
-  def scalar_one_or_none(self) -> Any:
+  def scalar_one_or_none(self, stmt: Any) -> Any:
     res = self.execute(stmt)
     return res.scalar_one_or_none()
 
