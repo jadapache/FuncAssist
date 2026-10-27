@@ -18,9 +18,15 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
 
 
 def make_conn_cache_key(org_id: str, integration_id: str) -> str:
-  """Build isolated composite key for connection cache."""
+  """Build isolated composite key for organization connection cache."""
   resolved_org = (org_id or "default").strip()
-  return f"{resolved_org}:{integration_id.strip()}"
+  return f"org:{resolved_org}:{integration_id.strip()}"
+
+
+def make_user_conn_cache_key(user_id: str, provider: str) -> str:
+  """Build isolated composite key for user personal integration cache."""
+  resolved_user = (user_id or "").strip()
+  return f"user:{resolved_user}:{provider.strip()}"
 
 
 def clear_storage_caches() -> None:

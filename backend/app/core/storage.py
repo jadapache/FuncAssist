@@ -34,6 +34,14 @@ from app.core.storage_integrations import (
   save_connection,
 )
 
+# User Personal Integrations
+from app.core.storage_user_integrations import (
+  delete_user_integration,
+  load_user_integration,
+  save_user_integration,
+  user_integration_exists,
+)
+
 # Preferences
 from app.core.storage_preferences import (
   get_user_preferences,
@@ -57,8 +65,10 @@ from app.core.storage_settings import (
   set_setting,
 )
 from app.db.models import (
+  McpServerModel,
   OrganizationIntegrationModel,
   SettingModel,
+  UserIntegrationModel,
   UserPreferencesModel,
   UserProviderCredentialModel,
 )
@@ -95,6 +105,10 @@ __all__ = [
   "load_connection",
   "delete_connection",
   "connection_exists",
+  "save_user_integration",
+  "load_user_integration",
+  "delete_user_integration",
+  "user_integration_exists",
   "get_user_preferences",
   "save_user_preferences",
   "save_user_credential",
@@ -111,5 +125,7 @@ __all__ = [
   "SettingModel",
   "UserPreferencesModel",
   "UserProviderCredentialModel",
+  "UserIntegrationModel",
+  "McpServerModel",
   "OrganizationIntegrationModel",
 ]
