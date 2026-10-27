@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -61,6 +62,85 @@ class SettingModel(Base):
     return {
       "key": self.key,
       "value": parsed,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserPreferencesModel(Base):
+  __tablename__ = "user_preferences"
+
+  user_id: Mapped[str] = mapped_column(String, primary_key=True)
+  inference_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  inference_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  transcription_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  transcription_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  settings_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, default=dict)
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "user_id": self.user_id,
+      "inference_provider": self.inference_provider,
+      "inference_model": self.inference_model,
+      "transcription_provider": self.transcription_provider,
+      "transcription_model": self.transcription_model,
+      "settings_json": self.settings_json or {},
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserProviderCredentialModel(Base):
+  __tablename__ = "user_provider_credentials"
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+  provider: Mapped[str] = mapped_column(Text, nullable=False)
+  secret_ref: Mapped[str] = mapped_column(Text, nullable=False)
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "provider": self.provider,
+      "secret_ref": self.secret_ref,
+      "status": self.status,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class OrganizationIntegrationModel(Base):
+  __tablename__ = "organization_integrations"
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  organization_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
+  provider: Mapped[str] = mapped_column(Text, nullable=False)
+  client_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  client_secret_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+  created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "organization_id": self.organization_id,
+      "provider": self.provider,
+      "client_id": self.client_id,
+      "client_secret_ref": self.client_secret_ref,
+      "status": self.status,
+      "created_by": self.created_by,
       "updated_at": self.updated_at.isoformat() if self.updated_at else None,
     }
 
@@ -438,3 +518,5 @@ class AIModelCatalogModel(Base):
       "tier_type": self.tier_type,
       **parsed,
     }
+
+

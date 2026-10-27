@@ -56,18 +56,11 @@ def get_setting(
   target_user = user_id or ""
 
   def _read(session: Any) -> Any:
-    if target_user:
-      item = session.scalar(
-        select(SettingModel).where(SettingModel.key == key, SettingModel.user_id == target_user)
-      )
-      if item is not None and item.value_json is not None:
-        return deserialize_setting_val(key, item.value_json)
-
-    global_item = session.scalar(
-      select(SettingModel).where(SettingModel.key == key, SettingModel.user_id == "")
+    item = session.scalar(
+      select(SettingModel).where(SettingModel.key == key)
     )
-    if global_item is not None and global_item.value_json is not None:
-      return deserialize_setting_val(key, global_item.value_json)
+    if item is not None and item.value_json is not None:
+      return deserialize_setting_val(key, item.value_json)
     return None
 
   if db is not None:
@@ -101,12 +94,12 @@ def set_setting(
 
   def _persist(session: Any) -> None:
     item = session.scalar(
-      select(SettingModel).where(SettingModel.key == key, SettingModel.user_id == target_user)
+      select(SettingModel).where(SettingModel.key == key)
     )
     if item:
       item.value_json = serialized
     else:
-      item = SettingModel(key=key, user_id=target_user, value_json=serialized)
+      item = SettingModel(key=key, value_json=serialized)
       session.add(item)
 
   if db is not None:
@@ -131,23 +124,13 @@ def load_app_settings(user_id: Optional[str] = None) -> dict[str, Any]:
     from app.db.database import get_sync_db
     with get_sync_db() as db:
       global_rows = db.scalars(
-        select(SettingModel).where(SettingModel.user_id == "")
+        select(SettingModel)
       ).all()
 
       for row in global_rows:
         if row.key.startswith("conn:") or row.key.startswith("user_ai:"):
           continue
         res[row.key] = deserialize_setting_val(row.key, row.value_json)
-
-      # If user_id is given, overlay user settings & preferences
-      if user_id:
-        user_rows = db.scalars(
-          select(SettingModel).where(SettingModel.user_id == user_id)
-        ).all()
-        for row in user_rows:
-          if row.key.startswith("conn:") or row.key.startswith("user_ai:"):
-            continue
-          res[row.key] = deserialize_setting_val(row.key, row.value_json)
 
         prefs = db.scalar(
           select(UserPreferencesModel).where(UserPreferencesModel.user_id == user_id)
