@@ -26,13 +26,13 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Generator
 
-from app.core.settings import USER_DATA_DIR, ensure_local_dirs, get_settings
+from app.core.settings import KNOWLEDGE_DATA_DIR, ensure_local_dirs, get_settings
 
 logger = logging.getLogger(__name__)
 
-KNOWLEDGE_DIR = USER_DATA_DIR / "knowledge"
-KNOWLEDGE_DIR = USER_DATA_DIR / "knowledge"
-DOCUMENTS_DIR = KNOWLEDGE_DIR / "documents"
+KNOWLEDGE_DIR = KNOWLEDGE_DATA_DIR
+KNOWLEDGE_RAW_UPLOADS_DIR = KNOWLEDGE_DIR
+DOCUMENTS_DIR = KNOWLEDGE_RAW_UPLOADS_DIR
 
 CHUNK_SIZE = 900
 CHUNK_OVERLAP = 120
@@ -47,7 +47,7 @@ def get_knowledge_base_dir() -> Path:
 
 
 def get_knowledge_documents_dir() -> Path:
-  return DOCUMENTS_DIR
+  return KNOWLEDGE_RAW_UPLOADS_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,6 @@ def _db() -> Generator[Any, None, None]:
 def ensure_knowledge_dirs() -> None:
   ensure_local_dirs()
   KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
-  DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
   if is_postgres_configured():
     try:
       with _db():
