@@ -1,9 +1,10 @@
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.api.deps import get_optional_current_user
 from app.core.settings import get_settings
 from app.integrations.base import AuthMethod, IntegrationInfo, TestConnectionResult
 from app.integrations.registry import GIT_HOSTING_IDS, registry
@@ -106,18 +107,32 @@ async def gitlab_oauth_callback(code: str | None = None, state: str | None = Non
 
 
 @router.get("/{integration_id}", response_model=IntegrationInfo)
-async def get_integration(integration_id: str) -> IntegrationInfo:
+async def get_integration(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> IntegrationInfo:
   try:
-    return registry.get(integration_id).get_info()
+    integration = registry.get(integration_id)
+    user_id = current_user.get("id") if current_user else None
+    if integration_id == "jira" and hasattr(integration, "get_info"):
+      return integration.get_info(user_id=user_id)
+    return integration.get_info()
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/{integration_id}/oauth/start")
-async def start_oauth(integration_id: str) -> dict:
+async def start_oauth(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> dict:
   try:
     integration = registry.get(integration_id)
-    result = await integration.start_oauth()
+    user_id = current_user.get("id") if current_user else None
+    if integration_id == "jira":
+      result = await integration.start_oauth(user_id=user_id)
+    else:
+      result = await integration.start_oauth()
     return result.model_dump()
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -128,16 +143,21 @@ async def start_oauth(integration_id: str) -> dict:
 
 
 @router.post("/{integration_id}/pat", response_model=IntegrationInfo)
-async def connect_with_pat(integration_id: str, body: PatConnectRequest) -> IntegrationInfo:
+async def connect_with_pat(
+  integration_id: str,
+  body: PatConnectRequest,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> IntegrationInfo:
   try:
     integration = registry.get(integration_id)
+    user_id = current_user.get("id") if current_user else None
     info = await integration.connect_with_pat(
       body.token,
       email=body.email,
       base_url=body.base_url,
       selected_repos=body.selected_repos,
     )
-    if await integration.authenticate():
+    if await integration.authenticate(user_id=user_id if integration_id == "jira" else None):
       try:
         await sync_integration(integration_id)
       except Exception:
@@ -150,17 +170,31 @@ async def connect_with_pat(integration_id: str, body: PatConnectRequest) -> Inte
 
 
 @router.post("/{integration_id}/test", response_model=TestConnectionResult)
-async def test_integration(integration_id: str) -> TestConnectionResult:
+async def test_integration(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> TestConnectionResult:
   try:
-    return await registry.get(integration_id).test_connection()
+    integration = registry.get(integration_id)
+    user_id = current_user.get("id") if current_user else None
+    if integration_id == "jira":
+      return await integration.test_connection(user_id=user_id)
+    return await integration.test_connection()
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/{integration_id}/disconnect", response_model=IntegrationInfo)
-async def disconnect_integration(integration_id: str) -> IntegrationInfo:
+async def disconnect_integration(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> IntegrationInfo:
   try:
     integration = registry.get(integration_id)
+    user_id = current_user.get("id") if current_user else None
+    if integration_id == "jira":
+      await integration.disconnect(user_id=user_id)
+      return integration.get_info(user_id=user_id)
     await integration.disconnect()
     return integration.get_info()
   except KeyError as exc:
@@ -168,11 +202,15 @@ async def disconnect_integration(integration_id: str) -> IntegrationInfo:
 
 
 @router.get("/{integration_id}/projects")
-async def get_projects(integration_id: str) -> dict:
+async def get_projects(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> dict:
   if integration_id != "jira":
     raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira.")
   try:
-    projects = await registry.get("jira").get_projects()  # type: ignore[attr-defined]
+    user_id = current_user.get("id") if current_user else None
+    projects = await registry.get("jira").get_projects(user_id=user_id)  # type: ignore[attr-defined]
     return {"projects": projects}
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -181,11 +219,16 @@ async def get_projects(integration_id: str) -> dict:
 
 
 @router.put("/{integration_id}/projects", response_model=IntegrationInfo)
-async def update_projects(integration_id: str, body: SelectedProjectsRequest) -> IntegrationInfo:
+async def update_projects(
+  integration_id: str,
+  body: SelectedProjectsRequest,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> IntegrationInfo:
   if integration_id != "jira":
     raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira.")
   try:
-    info = await registry.get("jira").update_selected_projects(body.selected_projects)  # type: ignore[attr-defined]
+    user_id = current_user.get("id") if current_user else None
+    info = await registry.get("jira").update_selected_projects(body.selected_projects, user_id=user_id)  # type: ignore[attr-defined]
     try:
       await sync_integration(integration_id)
     except Exception:
@@ -198,21 +241,24 @@ async def update_projects(integration_id: str, body: SelectedProjectsRequest) ->
 
 
 @router.post("/jira/auto-select-project", response_model=IntegrationInfo)
-async def auto_select_jira_project() -> IntegrationInfo:
-  from app.core.storage import load_connection
+async def auto_select_jira_project(
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> IntegrationInfo:
+  from app.core.storage import load_connection, load_user_integration
 
   try:
     jira = registry.get("jira")
-    connection = load_connection("jira") or {}
+    user_id = current_user.get("id") if current_user else None
+    connection = (load_user_integration(user_id, "jira") if user_id else None) or load_connection("jira") or {}
     site_url = str(connection.get("site_url") or "")
     if not site_url:
       raise ValueError("Jira is not connected or site URL is missing.")
-    await jira.auto_select_projects_from_url(site_url)  # type: ignore[attr-defined]
+    await jira.auto_select_projects_from_url(site_url, user_id=user_id)  # type: ignore[attr-defined]
     try:
       await sync_integration("jira")
     except Exception:
       pass
-    return jira.get_info()
+    return jira.get_info(user_id=user_id)
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except ValueError as exc:
@@ -220,10 +266,16 @@ async def auto_select_jira_project() -> IntegrationInfo:
 
 
 @router.get("/{integration_id}/issues")
-async def get_issues(integration_id: str, jql: str | None = None, max_results: int = 50) -> dict:
+async def get_issues(
+  integration_id: str,
+  jql: str | None = None,
+  max_results: int = 50,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> dict:
   if integration_id == "jira":
     try:
-      issues = await registry.get("jira").get_issues(jql=jql, max_results=max_results)  # type: ignore[attr-defined]
+      user_id = current_user.get("id") if current_user else None
+      issues = await registry.get("jira").get_issues(jql=jql, max_results=max_results, user_id=user_id)  # type: ignore[attr-defined]
       return {"issues": issues}
     except KeyError as exc:
       raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -243,11 +295,15 @@ async def get_issues(integration_id: str, jql: str | None = None, max_results: i
 
 
 @router.get("/{integration_id}/sprints")
-async def get_sprints(integration_id: str) -> dict:
+async def get_sprints(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> dict:
   if integration_id != "jira":
     raise HTTPException(status_code=501, detail="Sprints endpoint is only available for Jira.")
   try:
-    sprints = await registry.get("jira").get_sprints()  # type: ignore[attr-defined]
+    user_id = current_user.get("id") if current_user else None
+    sprints = await registry.get("jira").get_sprints(user_id=user_id)  # type: ignore[attr-defined]
     return {"sprints": sprints}
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
