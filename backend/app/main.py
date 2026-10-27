@@ -54,7 +54,9 @@ def create_app() -> FastAPI:
   secret = settings.secret_key or os.getenv("SECRET_KEY")
   if not secret or not secret.strip():
     raise RuntimeError("SECRET_KEY environment variable is required to start the application")
-  settings = get_settings()
+  salt = settings.pbkdf2_salt or os.getenv("PBKDF2_SALT")
+  if not salt or not salt.strip():
+    raise RuntimeError("PBKDF2_SALT environment variable is required to start the application")
 
   app = FastAPI(
     title="FuncAssist",

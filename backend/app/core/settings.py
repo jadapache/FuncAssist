@@ -91,6 +91,7 @@ class Settings(BaseSettings):
   frontend_url: str = Field(default="http://127.0.0.1:5173", validation_alias="FRONTEND_URL")
   backend_url: str = Field(default="http://127.0.0.1:8000", validation_alias="BACKEND_URL")
   secret_key: str | None = Field(default=None, validation_alias="SECRET_KEY")
+  pbkdf2_salt: str | None = Field(default=None, validation_alias="PBKDF2_SALT")
 
   jira_client_id: str = ""
   jira_client_secret: str = ""
