@@ -7,8 +7,9 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -61,6 +62,183 @@ class SettingModel(Base):
     return {
       "key": self.key,
       "value": parsed,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserPreferencesModel(Base):
+  __tablename__ = "user_preferences"
+
+  user_id: Mapped[str] = mapped_column(String, primary_key=True)
+  inference_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  inference_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  transcription_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  transcription_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  settings_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, default=dict)
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "user_id": self.user_id,
+      "inference_provider": self.inference_provider,
+      "inference_model": self.inference_model,
+      "transcription_provider": self.transcription_provider,
+      "transcription_model": self.transcription_model,
+      "settings_json": self.settings_json or {},
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserProviderCredentialModel(Base):
+  __tablename__ = "user_provider_credentials"
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+  provider: Mapped[str] = mapped_column(Text, nullable=False)
+  secret_ref: Mapped[str] = mapped_column(Text, nullable=False)
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "provider": self.provider,
+      "secret_ref": self.secret_ref,
+      "status": self.status,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class OrganizationIntegrationModel(Base):
+  __tablename__ = "organization_integrations"
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  organization_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
+  provider: Mapped[str] = mapped_column(Text, nullable=False)
+  client_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  client_secret_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+  created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "organization_id": self.organization_id,
+      "provider": self.provider,
+      "client_id": self.client_id,
+      "client_secret_ref": self.client_secret_ref,
+      "status": self.status,
+      "created_by": self.created_by,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserIntegrationModel(Base):
+  __tablename__ = "user_integrations"
+  __table_args__ = (
+    UniqueConstraint("user_id", "provider", name="uq_user_integrations_user_provider"),
+  )
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+  provider: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+  external_account_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  external_account_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  access_token_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  refresh_token_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  expires_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+  scopes_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
+  connection_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="{}")
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="connected")
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    try:
+      scopes = json.loads(self.scopes_json) if self.scopes_json else []
+    except Exception:
+      scopes = []
+    try:
+      metadata = json.loads(self.connection_metadata_json) if self.connection_metadata_json else {}
+    except Exception:
+      metadata = {}
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "provider": self.provider,
+      "external_account_id": self.external_account_id,
+      "external_account_name": self.external_account_name,
+      "expires_at": self.expires_at,
+      "scopes": scopes,
+      "metadata": metadata,
+      "status": self.status,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class McpServerModel(Base):
+  __tablename__ = "mcp_servers"
+
+  id: Mapped[str] = mapped_column(String, primary_key=True)
+  organization_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
+  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+  name: Mapped[str] = mapped_column(String, nullable=False)
+  description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  endpoint_url: Mapped[str] = mapped_column(Text, nullable=False)
+  transport_type: Mapped[str] = mapped_column(String, nullable=False, default="sse")
+  auth_type: Mapped[str] = mapped_column(String, nullable=False, default="none")
+  auth_secret_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="configured")
+  allowed_tools_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
+  metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="{}")
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  def to_dict(self) -> Dict[str, Any]:
+    try:
+      allowed_tools = json.loads(self.allowed_tools_json) if self.allowed_tools_json else []
+    except Exception:
+      allowed_tools = []
+    try:
+      meta = json.loads(self.metadata_json) if self.metadata_json else {}
+    except Exception:
+      meta = {}
+    return {
+      "id": self.id,
+      "organization_id": self.organization_id,
+      "user_id": self.user_id,
+      "name": self.name,
+      "description": self.description or "",
+      "endpoint_url": self.endpoint_url,
+      "transport_type": self.transport_type,
+      "auth_type": self.auth_type,
+      "status": self.status,
+      "allowed_tools": allowed_tools,
+      "metadata": meta,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
       "updated_at": self.updated_at.isoformat() if self.updated_at else None,
     }
 
@@ -438,3 +616,5 @@ class AIModelCatalogModel(Base):
       "tier_type": self.tier_type,
       **parsed,
     }
+
+

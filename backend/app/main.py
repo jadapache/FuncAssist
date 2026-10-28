@@ -23,16 +23,18 @@ async def lifespan(app: FastAPI):
   import asyncio
   from app.api.transcription_stream import set_main_loop
   from app.core.index_refresher import run_index_refresher
-  from app.core.migration import migrate_paths_if_needed
-
+  
   loop = asyncio.get_running_loop()
   set_main_loop(loop)
   ensure_local_dirs()
-  migrate_paths_if_needed()
   from app.context.knowledge_migration import migrate_knowledge_if_needed
   from app.db.database import init_db
 
   await init_db()
+  from app.core.redis import close_redis_client, init_redis
+  await init_redis()
+  from app.core.integration_migration import migrate_integrations_schema_if_needed
+  migrate_integrations_schema_if_needed()
   migrate_knowledge_if_needed()
   ensure_knowledge_dirs()
   ensure_ai_files()
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
       await refresher_task
     except (asyncio.CancelledError, Exception):
       pass
+    await close_redis_client()
 
 
 def create_app() -> FastAPI:
@@ -54,7 +57,9 @@ def create_app() -> FastAPI:
   secret = settings.secret_key or os.getenv("SECRET_KEY")
   if not secret or not secret.strip():
     raise RuntimeError("SECRET_KEY environment variable is required to start the application")
-  settings = get_settings()
+  salt = settings.pbkdf2_salt or os.getenv("PBKDF2_SALT")
+  if not salt or not salt.strip():
+    raise RuntimeError("PBKDF2_SALT environment variable is required to start the application")
 
   app = FastAPI(
     title="FuncAssist",

@@ -15,25 +15,14 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 
 def _get_user_data_dir() -> Path:
   """
-  Returns the OS-standard user application data directory.
-  Precedence: DATA_DIR env var > platform default.
+  Returns the base storage directory for server-local cached data/models.
+  Precedence: DATA_DIR env var > project repo root / 'data'.
   """
   env_override = os.getenv("DATA_DIR")
   if env_override:
     return Path(env_override)
 
-  app_name = "funcassist"
-
-  if sys.platform == "win32":
-    local_app_data = os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
-    return Path(local_app_data) / app_name
-
-  if sys.platform == "darwin":
-    return Path.home() / "Library" / "Application Support" / app_name
-
-  # Linux and other Unix
-  xdg_data_home = os.getenv("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
-  return Path(xdg_data_home) / app_name
+  return ROOT_DIR / "data"
 
 
 def _get_user_documents_dir() -> Path:
@@ -55,8 +44,20 @@ def _get_user_documents_dir() -> Path:
   return Path.home() / "Documents" / folder_name
 
 
+def _get_knowledge_dir() -> Path:
+  """
+  Returns the storage directory for Knowledge Base documents / volume mount.
+  Precedence: KNOWLEDGE_DATA_DIR env var > KNOWLEDGE_STORAGE_PATH env var > ROOT_DIR / 'knowledge_data'.
+  """
+  env_override = os.getenv("KNOWLEDGE_DATA_DIR") or os.getenv("KNOWLEDGE_STORAGE_PATH")
+  if env_override and env_override.strip():
+    return Path(env_override.strip())
+  return ROOT_DIR / "knowledge_data"
+
+
 # Primary path constants
 USER_DATA_DIR = _get_user_data_dir()
+KNOWLEDGE_DATA_DIR = _get_knowledge_dir()
 BIN_DIR = USER_DATA_DIR / "bin"
 SETTINGS_DIR = USER_DATA_DIR / "settings"
 CONNECTIONS_DIR = USER_DATA_DIR / "connections"
@@ -91,6 +92,7 @@ class Settings(BaseSettings):
   frontend_url: str = Field(default="http://127.0.0.1:5173", validation_alias="FRONTEND_URL")
   backend_url: str = Field(default="http://127.0.0.1:8000", validation_alias="BACKEND_URL")
   secret_key: str | None = Field(default=None, validation_alias="SECRET_KEY")
+  pbkdf2_salt: str | None = Field(default=None, validation_alias="PBKDF2_SALT")
 
   jira_client_id: str = ""
   jira_client_secret: str = ""
@@ -109,6 +111,12 @@ class Settings(BaseSettings):
 
   # Database Connection
   database_url: str | None = None
+
+  # Redis Cache Connection
+  redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+
+  # Knowledge Base Volume Mount Directory
+  knowledge_data_dir: str | None = Field(default=None, validation_alias="KNOWLEDGE_DATA_DIR")
 
   def get_database_url(self, for_sqlalchemy: bool = False) -> str | None:
     """Return configured PostgreSQL connection URL.

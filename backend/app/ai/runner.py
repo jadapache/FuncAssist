@@ -39,6 +39,7 @@ async def _prepare_grounded_context(
     document_ids: list[str] | None,
     chat_context: str | None,
     template_content: str | None,
+    user_id: str | None = None,
 ) -> _GroundedPrep | dict:
     """Fase de preparación compartida entre run_grounded_feature y run_grounded_feature_stream.
 
@@ -58,7 +59,7 @@ async def _prepare_grounded_context(
             "citations": [],
         }
 
-    bundle = await assemble_context(query=query, sources=allowed)
+    bundle = await assemble_context(query=query, sources=allowed, user_id=user_id)
 
     upload_chunks: list[ContextChunk] = []
     if document_ids:
@@ -154,6 +155,7 @@ async def run_grounded_feature(
         document_ids=document_ids,
         chat_context=chat_context,
         template_content=template_content,
+        user_id=user_id,
     )
     if isinstance(prep, dict):  # refused
         return prep
@@ -225,6 +227,7 @@ async def run_grounded_feature_stream(
         document_ids=document_ids,
         chat_context=chat_context,
         template_content=template_content,
+        user_id=user_id,
     )
     if isinstance(prep, dict):  # refused
         reason = prep.get("reason", "Error desconocido al preparar contexto.")

@@ -1,19 +1,22 @@
-import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import {
   AlertCircle,
+  Calendar,
   Check,
   CheckCircle2,
+  FolderOpen,
+  Key,
   Pencil,
   Shield,
-  Sparkles,
   X,
 } from 'lucide-react'
 import { api } from '../../../api/client'
 import { PageHeader } from '../../../components/common'
+import { useAuth } from '../../../context/AuthContext'
 import { useUser, type UserRole } from '../../../context/UserContext'
 import { useToast } from '../../../context/ToastContext'
+import { ChangePasswordModal } from '../components/ChangePasswordModal'
 
 type OutletContext = {
   displayName: string
@@ -27,8 +30,24 @@ const roleLabels: Record<UserRole, string> = {
   qa: 'Tester',
 }
 
+const formatDate = (isoStr?: string) => {
+  if (!isoStr) return null
+  try {
+    const d = new Date(isoStr)
+    if (isNaN(d.getTime())) return null
+    return d.toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
+  } catch {
+    return null
+  }
+}
+
 export const ProfilePage = () => {
   const { displayName, setDisplayName } = useOutletContext<OutletContext>()
+  const { user: authUser } = useAuth()
   const { user, updateProfile } = useUser()
   const { toast } = useToast()
 
@@ -37,9 +56,14 @@ export const ProfilePage = () => {
   const [nameInput, setNameInput] = useState(user?.display_name || displayName || 'Usuario')
   const [savingName, setSavingName] = useState(false)
 
-  // Standup Rubric State
-  const [standupRubric, setStandupRubric] = useState('')
-  const [savingRubric, setSavingRubric] = useState(false)
+  // Document Storage Path State
+  const [docsPath, setDocsPath] = useState('')
+  const [isEditingDocsPath, setIsEditingDocsPath] = useState(false)
+  const [docsPathInput, setDocsPathInput] = useState('')
+  const [savingDocsPath, setSavingDocsPath] = useState(false)
+
+  // Password Change Modal State
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
 
   // Status & Feedback
   const [message, setMessage] = useState<string | null>(null)
@@ -48,7 +72,7 @@ export const ProfilePage = () => {
   const activeName = user?.display_name || nameInput
   const activeRole: UserRole = user?.user_role || 'admin'
   const activeRoleLabel = roleLabels[activeRole] || 'Usuario'
-  const isPmUser = activeRole === 'pm' || activeRole === 'admin'
+  const memberSince = formatDate(authUser?.created_at)
 
   const getInitials = (nameStr: string) => {
     const parts = nameStr.trim().split(/\s+/).filter(Boolean)
@@ -66,17 +90,19 @@ export const ProfilePage = () => {
   }, [user])
 
   useEffect(() => {
-    if (!isPmUser) return
-    const load = async () => {
+    const loadProfile = async () => {
       try {
-        const rubric = await api.getRubric('standup')
-        setStandupRubric(((rubric.criteria as string[]) || []).join('\n'))
+        const profile = await api.getUserProfile()
+        if (profile.documents_path) {
+          setDocsPath(profile.documents_path)
+          setDocsPathInput(profile.documents_path)
+        }
       } catch {
-        // ignore on boot
+        // Fallback default
       }
     }
-    void load()
-  }, [isPmUser])
+    void loadProfile()
+  }, [])
 
   const handleSaveName = async () => {
     if (!nameInput.trim()) {
@@ -106,27 +132,47 @@ export const ProfilePage = () => {
     }
   }
 
-  const handleRubricSubmit = async (event: FormEvent) => {
-    event.preventDefault()
+  const handleSaveDocsPath = async () => {
+    if (!docsPathInput.trim()) {
+      toast.warning('La ruta de documentos no puede estar vacía.')
+      return
+    }
+
+    setSavingDocsPath(true)
     setError(null)
     setMessage(null)
-    setSavingRubric(true)
+
     try {
-      const criteria = standupRubric
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-      await api.updateRubric('standup', criteria)
-      const successMsg = 'Rúbrica de evaluación Standup actualizada exitosamente.'
+      const res = await api.updateUserProfile({
+        documents_path: docsPathInput.trim(),
+      })
+      if (res.documents_path) {
+        setDocsPath(res.documents_path)
+        setDocsPathInput(res.documents_path)
+      }
+      setIsEditingDocsPath(false)
+      const successMsg = 'Ruta de almacenamiento de documentos y transcripciones actualizada.'
       setMessage(successMsg)
       toast.success(successMsg)
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Error al actualizar la rúbrica'
+      const errMsg = err instanceof Error ? err.message : 'Error al actualizar la ruta'
       setError(errMsg)
       toast.error(errMsg)
     } finally {
-      setSavingRubric(false)
+      setSavingDocsPath(false)
     }
+  }
+
+  const handlePasswordSubmit = async (password: string) => {
+    setError(null)
+    setMessage(null)
+
+    await api.updateProfile({
+      password,
+    })
+    const successMsg = 'Contraseña actualizada exitosamente.'
+    setMessage(successMsg)
+    toast.success(successMsg)
   }
 
   return (
@@ -134,7 +180,7 @@ export const ProfilePage = () => {
       <PageHeader
         eyebrow="CUENTA & PERFIL"
         title="Perfil de Usuario"
-        subtitle="Visualiza tu cuenta local y personaliza tu nombre de usuario."
+        subtitle="Visualiza tu cuenta, preferencias de almacenamiento y seguridad."
       />
 
       {/* Global Alerts */}
@@ -220,65 +266,116 @@ export const ProfilePage = () => {
               <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-xs font-semibold text-[#002777]">
                 <Shield className="h-3.5 w-3.5" /> {activeRoleLabel}
               </span>
+
+              <button
+                type="button"
+                onClick={() => setIsPasswordModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-[#002777] bg-white border border-blue-200 hover:bg-blue-50 transition cursor-pointer shadow-2xs"
+              >
+                <Key className="h-3.5 w-3.5 text-[#002777]" />
+                <span>Cambiar contraseña</span>
+              </button>
             </div>
 
-            <p className="text-sm text-slate-500">
-              Perfil local almacenado en <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-mono text-xs">app.json</code>
+            <p className="text-sm text-slate-500 flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5 text-slate-400" />
+              <span>
+                {memberSince ? `Se unió el ${memberSince}` : 'Cuenta de usuario'}
+              </span>
             </p>
           </div>
         </div>
       </div>
 
-      {/* Standup Rubric Form - Only visible to PM / Admin role */}
-      {isPmUser && (
-        <div className="max-w-2xl">
-          <form
-            onSubmit={(e) => void handleRubricSubmit(e)}
-            className="card space-y-5 border border-slate-200 bg-white p-6 md:p-8 shadow-sm rounded-2xl flex flex-col justify-between"
-          >
-            <div className="space-y-4">
-              <div className="flex items-center gap-2.5 border-b border-slate-100 pb-4">
-                <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">Rúbrica de Evaluación Standup</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Criterios utilizados para validar la completitud del resumen diario.
-                  </p>
-                </div>
-              </div>
+      {/* Storage Path Card */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8 shadow-sm">
+        <div className="flex items-center gap-2.5 border-b border-slate-100 pb-4 mb-5">
+          <div className="p-1.5 rounded-lg bg-blue-100 text-[#002777]">
+            <FolderOpen className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Ubicación de Documentos y Transcripciones</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Ruta en tu equipo donde se guardan los archivos TXT, JSON y documentos generados.
+            </p>
+          </div>
+        </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-800 block">
-                  Criterios (uno por línea)
-                </label>
-                <textarea
-                  value={standupRubric}
-                  onChange={(e) => setStandupRubric(e.target.value)}
-                  rows={7}
-                  placeholder="Un criterio por línea..."
-                  className="input-field font-mono text-xs leading-relaxed border border-slate-300 rounded-xl"
-                />
-                <p className="text-[11px] text-slate-400">
-                  El agente de IA evaluará las respuestas del standup comparándolas contra estas pautas.
-                </p>
+        <div className="space-y-3">
+          <label className="text-xs font-semibold text-slate-800 block">
+            Ruta en disco (Carpeta de Documentos)
+          </label>
+          {isEditingDocsPath ? (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <input
+                type="text"
+                value={docsPathInput}
+                onChange={(e) => setDocsPathInput(e.target.value)}
+                placeholder="C:\Users\tu_usuario\Documents\FuncAssist"
+                className="flex-1 px-3 py-2 text-sm font-mono text-slate-900 border border-blue-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 shadow-inner"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSaveDocsPath()
+                  if (e.key === 'Escape') {
+                    setDocsPathInput(docsPath)
+                    setIsEditingDocsPath(false)
+                  }
+                }}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleSaveDocsPath()}
+                  disabled={savingDocsPath || !docsPathInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50 cursor-pointer shadow-sm transition flex items-center gap-1.5"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>{savingDocsPath ? 'Guardando...' : 'Guardar'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocsPathInput(docsPath)
+                    setIsEditingDocsPath(false)
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 text-sm font-medium cursor-pointer transition flex items-center gap-1"
+                >
+                  <X className="h-4 w-4" />
+                  <span>Cancelar</span>
+                </button>
               </div>
             </div>
-
-            <div className="flex justify-end pt-4 border-t border-slate-100">
+          ) : (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+              <code className="text-xs font-mono text-slate-800 break-all select-all">
+                {docsPath || 'Cargando ruta...'}
+              </code>
               <button
-                type="submit"
-                disabled={savingRubric}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer text-sm"
+                type="button"
+                onClick={() => {
+                  setDocsPathInput(docsPath)
+                  setIsEditingDocsPath(true)
+                }}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-700 bg-white border border-blue-200 hover:bg-blue-50 transition cursor-pointer shadow-2xs"
               >
-                <Check className="h-4 w-4" />
-                <span>{savingRubric ? 'Guardando...' : 'Guardar Rúbrica'}</span>
+                <Pencil className="h-3.5 w-3.5" />
+                <span>Cambiar ruta</span>
               </button>
             </div>
-          </form>
+          )}
+          <p className="text-[11px] text-slate-400">
+            Esta preferencia se sincroniza con tu cuenta y es la ruta destino para las transcripciones y documentos generados.
+          </p>
         </div>
-      )}
+      </div>
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => setIsPasswordModalOpen(false)}
+        onSuccess={() => setIsPasswordModalOpen(false)}
+        onSubmitPassword={handlePasswordSubmit}
+      />
     </div>
   )
 }
