@@ -390,9 +390,13 @@ async def get_files_changed(
 
 
 @router.post("/{integration_id}/sync")
-async def sync_integration_data(integration_id: str) -> dict:
+async def sync_integration_data(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> dict:
   try:
-    return await sync_integration(integration_id)
+    user_id = str(current_user["id"]) if current_user and "id" in current_user else None
+    return await sync_integration(integration_id, user_id=user_id)
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except ValueError as exc:
@@ -400,8 +404,12 @@ async def sync_integration_data(integration_id: str) -> dict:
 
 
 @router.get("/{integration_id}/sync")
-async def get_sync_cache(integration_id: str) -> dict:
-  cached = load_sync_cache(integration_id)
+async def get_sync_cache(
+  integration_id: str,
+  current_user: dict | None = Depends(get_optional_current_user),
+) -> dict:
+  user_id = str(current_user["id"]) if current_user and "id" in current_user else None
+  cached = await load_sync_cache(integration_id, user_id=user_id)
   if not cached:
     raise HTTPException(status_code=404, detail="No sync cache yet. Connect and sync first.")
   return cached
