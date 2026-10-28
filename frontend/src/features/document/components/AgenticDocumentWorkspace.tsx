@@ -375,7 +375,15 @@ export const AgenticDocumentWorkspace = ({
   }
 
   // Agentic generation cycle hook
-  const { isGenerating, streamingText, generationStatus, runState, handleCancelRun, handleSendMessage } = useAgenticGeneration({
+  const {
+    isGenerating,
+    generatingConversationId,
+    streamingText,
+    generationStatus,
+    runState,
+    handleCancelRun,
+    handleSendMessage,
+  } = useAgenticGeneration({
 
     config,
     templateContent,
@@ -414,6 +422,8 @@ export const AgenticDocumentWorkspace = ({
     },
   })
 
+  const isCurrentChatGenerating = isGenerating && generatingConversationId === activeConversationId
+
   const handleSubmitForm = (e: FormEvent) => {
     e.preventDefault()
     if ((!draft.trim() && attachedImages.length === 0 && uploadedDocs.length === 0) || isGenerating) return
@@ -449,6 +459,7 @@ export const AgenticDocumentWorkspace = ({
         <ChatHistorySidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
+          generatingConversationId={generatingConversationId}
           isCollapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           onSelectConversation={handleSwitchConversation}
@@ -533,8 +544,8 @@ export const AgenticDocumentWorkspace = ({
                   </div>
                 ))}
 
-                {/* Live streaming assistant bubble while processing */}
-                {isGenerating && (
+                {/* Live streaming assistant bubble while processing in this specific conversation */}
+                {isCurrentChatGenerating && (
                   <div className="flex gap-3 justify-start animate-in fade-in duration-150">
                     <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
                       <div className="flex items-center gap-4 text-[10px] opacity-70 font-medium">
@@ -542,7 +553,7 @@ export const AgenticDocumentWorkspace = ({
                       </div>
                       <AgenticThinkingBubble
                         status={generationStatus}
-                        isProcessing={isGenerating}
+                        isProcessing={isCurrentChatGenerating}
                         steps={runState.steps}
                         sources={runState.sources}
                         onCancel={handleCancelRun}
@@ -832,12 +843,28 @@ export const AgenticDocumentWorkspace = ({
           isDirty={docHistory.isDirty}
           isSaving={isSaving}
           onRegenerate={() => {
-            const lastUserMsg = (activeConversation?.messages ?? [])
-              .filter((m) => m.role === 'user')
-              .pop()
-            if (lastUserMsg) {
-              handleSendMessage(lastUserMsg.content)
-            }
+            const userMsgs = (activeConversation?.messages ?? []).filter((m) => m.role === 'user')
+            const lastUserMsg = userMsgs[userMsgs.length - 1]
+            if (!lastUserMsg) return
+
+            const msgWithAttachments = (lastUserMsg.attachments && lastUserMsg.attachments.length > 0)
+              ? lastUserMsg
+              : [...userMsgs].reverse().find((m) => m.attachments && m.attachments.length > 0)
+
+            const attachedImages = (msgWithAttachments?.attachments || [])
+              .filter((att) => att.type === 'image' && att.dataUrl)
+              .map((att) => ({ name: att.name, dataUrl: att.dataUrl!, size: att.size }))
+
+            const attachedDocs: EphemeralAttachmentDoc[] = (msgWithAttachments?.attachments || [])
+              .filter((att) => att.type === 'file')
+              .map((att) => ({
+                id: att.id,
+                filename: att.name,
+                content: att.content || '',
+                char_count: att.size,
+              }))
+
+            void handleSendMessage(lastUserMsg.content, attachedImages, attachedDocs)
           }}
         />
       </div>
