@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,6 +12,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
+
+# Ensure environment variables from repo .env are loaded into os.environ
+load_dotenv(ROOT_DIR / ".env")
 
 
 def _get_user_data_dir() -> Path:
