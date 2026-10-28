@@ -38,8 +38,6 @@ async def lifespan(app: FastAPI):
   from app.db.database import init_db
 
   await init_db()
-  from app.core.integration_migration import migrate_integrations_schema_if_needed
-  migrate_integrations_schema_if_needed()
   migrate_knowledge_if_needed()
   ensure_knowledge_dirs()
   ensure_ai_files()
