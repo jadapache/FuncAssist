@@ -145,3 +145,7 @@ pm_qa_copilot/
 # AI Models & Downloads
 backend/app/ai/models/*
 !backend/app/ai/models/.gitkeep
+
+# Test and runtime outputs
+data/
+knowledge_data/
