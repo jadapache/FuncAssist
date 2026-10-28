@@ -1,11 +1,12 @@
 import asyncio
-from typing import Any
+from typing import Any, Optional
 import httpx
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import get_ai_settings, resolve_provider
+from app.api.deps import get_optional_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.features.transcription.whisper_local import (
     cancel_whisper_download,
@@ -33,6 +34,10 @@ class AITestConnectionRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
+    groq_api_key: str | None = None
+    openai_api_key: str | None = None
+    gemini_api_key: str | None = None
+    claude_api_key: str | None = None
     ollama_base_url: str | None = None
 
 
@@ -47,56 +52,70 @@ class OllamaPullRequest(BaseModel):
 OllamaPullRequest.model_rebuild()
 
 
+def _extract_candidate_api_key(body: AITestConnectionRequest) -> str | None:
+    return (
+        body.api_key
+        or body.groq_api_key
+        or body.openai_api_key
+        or body.gemini_api_key
+        or body.claude_api_key
+    )
+
+
+def _verify_builtin_model(model_name: str) -> dict[str, Any]:
+    meta = resolve_model_meta(model_name)
+    if not meta:
+        return {
+            "ok": False,
+            "message": f"Modelo integrado '{model_name}' no reconocido en el catálogo.",
+        }
+    cache_dir = get_builtin_cache_dir()
+    target_file = cache_dir / meta["filename"]
+    if not target_file.exists() or target_file.stat().st_size < 10 * 1024 * 1024:
+        return {
+            "ok": False,
+            "message": (
+                f"El modelo local '{meta['name']}' no está descargado todavía en disco. "
+                "Haz clic en el botón 'Descargar' en la sección de Modelos Integrados para instalarlo."
+            ),
+        }
+    disk_size = round(target_file.stat().st_size / (1024 * 1024), 1)
+    return {
+        "ok": True,
+        "message": f"Modelo integrado '{meta['name']}' verificado en disco ({disk_size} MB) y listo para uso local.",
+        "provider": "builtin",
+        "model": meta["id"],
+    }
+
+
 @router.post("/test-connection")
 @handle_grounded_errors
-async def test_ai_connection(body: AITestConnectionRequest = Body(...)) -> dict[str, Any]:
-    config = get_ai_settings()
+async def test_ai_connection(
+    body: AITestConnectionRequest = Body(...),
+    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+) -> dict[str, Any]:
+    user_id = current_user.get("id") if current_user else None
+    config = get_ai_settings(user_id=user_id)
     provider_name = (body.provider or config.get("provider") or "").lower()
     model_name = (body.model or config.get("model") or "").strip()
+
     if not provider_name:
-        return {
-            "ok": False,
-            "message": "No hay ningún proveedor de IA configurado en el sistema.",
-        }
+        return {"ok": False, "message": "No hay ningún proveedor de IA configurado en el sistema."}
     if not model_name:
-        return {
-            "ok": False,
-            "message": f"No hay un modelo especificado para el proveedor '{provider_name}'.",
-        }
-
+        return {"ok": False, "message": f"No hay un modelo especificado para el proveedor '{provider_name}'."}
     if provider_name == "builtin":
-        meta = resolve_model_meta(model_name)
-        if not meta:
-            return {
-                "ok": False,
-                "message": f"Modelo integrado '{model_name}' no reconocido en el catálogo.",
-            }
-        cache_dir = get_builtin_cache_dir()
-        target_file = cache_dir / meta["filename"]
-        if not target_file.exists() or target_file.stat().st_size < 10 * 1024 * 1024:
-            return {
-                "ok": False,
-                "message": (
-                    f"El modelo local '{meta['name']}' no está descargado todavía en disco. "
-                    "Haz clic en el botón 'Descargar' en la sección de Modelos Integrados para instalarlo."
-                ),
-            }
-        disk_size = round(target_file.stat().st_size / (1024 * 1024), 1)
-        return {
-            "ok": True,
-            "message": f"Modelo integrado '{meta['name']}' verificado en disco ({disk_size} MB) y listo para uso local.",
-            "provider": "builtin",
-            "model": meta["id"],
-        }
+        return _verify_builtin_model(model_name)
 
+    api_key = _extract_candidate_api_key(body)
     test_messages = [AIMessage(role="user", content="Hola, responde únicamente con la palabra 'OK'.")]
 
     try:
         p = resolve_provider(
             provider_name=provider_name,
             model_name=model_name,
-            api_key=body.api_key,
+            api_key=api_key,
             base_url=body.ollama_base_url,
+            user_id=user_id,
         )
         res = await p.complete(test_messages, model=model_name, max_tokens=100)
 
@@ -243,7 +262,6 @@ async def cancel_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
     }
 
 
-
 @router.post("/builtin/download/{model_id:path}")
 @handle_grounded_errors
 async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
@@ -261,7 +279,6 @@ async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Error descargando modelo built-in {model_id}: {exc}") from exc
 
 
-
 @router.delete("/builtin/{model_id:path}")
 @handle_grounded_errors
 async def delete_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
@@ -273,6 +290,3 @@ async def delete_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
         return {"ok": True, "message": f"Modelo {model_id} eliminado del disco con éxito."}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error eliminando modelo built-in {model_id}: {exc}") from exc
-
-
-
