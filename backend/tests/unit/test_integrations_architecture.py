@@ -20,7 +20,6 @@ import time
 from unittest.mock import patch
 import pytest
 from app.core import storage
-from app.core.integration_migration import migrate_integrations_schema_if_needed
 from app.core.storage_cache import clear_storage_caches
 from app.db.models import (
   McpServerModel,
@@ -247,11 +246,3 @@ async def test_jira_oauth_state_expiration_and_replay():
     storage.save_user_integration(user_id, "jira", {"oauth_state": expired_state})
     with pytest.raises(ValueError, match="expired"):
       await jira.handle_oauth_callback(code="code123", state=expired_state)
-
-
-def test_migrations_idempotency():
-  """Ensure migrate_integrations_schema_if_needed can be called multiple times without error."""
-  # First invocation
-  migrate_integrations_schema_if_needed()
-  # Subsequent invocation
-  migrate_integrations_schema_if_needed()

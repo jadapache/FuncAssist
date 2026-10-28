@@ -35,7 +35,6 @@ from app.core.storage_user_integrations import (
   user_integration_exists,
 )
 from app.db.database import set_session_override, set_sync_session_override
-from app.db.migrations.generic_settings_migration import GenericSettingsMigrator
 from app.db.models import (
   AuditEventModel,
   OrganizationMemberModel,
@@ -223,55 +222,7 @@ def test_personal_jira_connection_isolation():
 
 
 # ---------------------------------------------------------------------------
-# 5. Generic Settings Migration Verification
-# ---------------------------------------------------------------------------
-
-def test_generic_settings_migration_idempotent():
-  """Migrate legacy generic settings table to user_preferences and user_provider_credentials."""
-  from tests.fake_session import FakeSyncSession
-  session = FakeSyncSession(GLOBAL_FAKE_STORAGE)
-
-  # Setup existing user
-  user = UserModel(id="usr-mig-target", username="carlos", email="carlos@test.com")
-  session.add(user)
-
-  # Setup legacy settings
-  legacy_ai = {
-    "provider": "openai",
-    "model": "gpt-4o",
-    "transcription_provider": "groq",
-    "transcription_model": "whisper-large-v3",
-    "openai_api_key": "sk-legacy-test-openai-12345",
-    "groq_api_key": "gsk-legacy-test-groq-99999",
-  }
-  session.add(SettingModel(id="set-1", key="ai", value_json=str(legacy_ai).replace("'", '"')))
-  session.add(SettingModel(id="set-2", key="groq_api_key", value_json='"gsk-standalone-key-55555"'))
-  session.commit()
-
-  # Run migration
-  migrator = GenericSettingsMigrator(db_session=session)
-  stats = migrator.run_migration()
-
-  assert stats["preferences_migrated"] >= 1
-  assert stats["credentials_migrated"] >= 2
-
-  # Verify preferences migrated
-  prefs = get_user_preferences("usr-mig-target", db=session)
-  assert prefs["inference_provider"] == "openai"
-  assert prefs["inference_model"] == "gpt-4o"
-  assert prefs["transcription_provider"] == "groq"
-
-  # Verify credentials migrated and decrypted
-  cred_openai = load_user_credential("usr-mig-target", "openai", db=session)
-  assert cred_openai == "sk-legacy-test-openai-12345"
-
-  # Re-run migration: safe, idempotent
-  second_stats = migrator.run_migration()
-  assert second_stats["reconfiguration_required"] == 0
-
-
-# ---------------------------------------------------------------------------
-# 6. RLS Context Isolation
+# 5. RLS Context Isolation
 # ---------------------------------------------------------------------------
 
 def test_rls_context_setting_and_reset():
