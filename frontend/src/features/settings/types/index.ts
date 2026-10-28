@@ -145,3 +145,35 @@ export type AIRubric = {
   criteria: string[]
   [key: string]: unknown
 }
+
+
+export type UserPreferences = {
+  id: string
+  user_id: string
+  inference_provider: string | null
+  inference_model: string | null
+  transcription_provider: string | null
+  transcription_model: string | null
+  language: string
+  created_at: string
+  updated_at: string
+}
+
+export type ProviderCredentialInfo = {
+  id: string
+  provider: string
+  configured: boolean
+  is_valid: boolean
+  last_validated_at: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export type JiraConnectionStatus = {
+  connected: boolean
+  cloud_id?: string | null
+  site_url?: string | null
+  configured_at?: string | null
+  expires_at?: string | null
+  auth_mode?: string
+}
