@@ -6,7 +6,8 @@ Handles non-secret user settings (inference model, transcription model, UI setti
 from __future__ import annotations
 
 import logging
-from typing import Any
+import uuid
+from typing import Any, Optional
 
 from sqlalchemy import select
 
@@ -19,6 +20,7 @@ CORE_PREFERENCE_FIELDS = {
   "inference_model",
   "transcription_provider",
   "transcription_model",
+  "language",
 }
 
 
@@ -63,7 +65,11 @@ def save_user_preferences(
       select(UserPreferencesModel).where(UserPreferencesModel.user_id == user_id)
     )
     if not item:
-      item = UserPreferencesModel(user_id=user_id, settings_json={})
+      item = UserPreferencesModel(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        settings_json={},
+      )
       session.add(item)
 
     extra = dict(item.settings_json or {})
@@ -72,9 +78,11 @@ def save_user_preferences(
         item.inference_provider = v
       elif k in ("inference_model", "model"):
         item.inference_model = v
+      elif k in ("language", "lang"):
+        item.language = v
       elif k in CORE_PREFERENCE_FIELDS:
         setattr(item, k, v)
-      elif k != "user_id":
+      elif k not in ("user_id", "id"):
         extra[k] = v
     item.settings_json = extra
     res = item.to_dict()
@@ -93,4 +101,3 @@ def save_user_preferences(
   except Exception as exc:
     logger.error("Failed saving user_preferences for %s: %s", user_id, exc)
     raise
-

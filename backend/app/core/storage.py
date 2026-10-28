@@ -65,12 +65,17 @@ from app.core.storage_settings import (
   set_setting,
 )
 from app.db.models import (
+  AuditEventModel,
   McpServerModel,
   OrganizationIntegrationModel,
+  OrganizationMemberModel,
+  OrganizationModel,
   SettingModel,
   UserIntegrationModel,
+  UserJiraConnectionModel,
   UserPreferencesModel,
   UserProviderCredentialModel,
+  UserSecretModel,
 )
 
 # AI Settings
@@ -128,4 +133,9 @@ __all__ = [
   "UserIntegrationModel",
   "McpServerModel",
   "OrganizationIntegrationModel",
+  "OrganizationModel",
+  "OrganizationMemberModel",
+  "UserSecretModel",
+  "UserJiraConnectionModel",
+  "AuditEventModel",
 ]

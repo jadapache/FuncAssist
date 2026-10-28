@@ -49,12 +49,17 @@ def load_user_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
       if prefs.get(pk):
         ai_config[pk] = prefs[pk]
 
-  # 2. Encrypted credentials from user_provider_credentials
+  # 2. Encrypted credentials from user_provider_credentials (BYOK strictly per user)
   creds = load_all_user_credentials(user_id)
   ai_config.update(creds)
 
   global_ai = load_app_settings().get("ai") or {}
-  merged = dict(global_ai)
+  # Only inherit non-secret settings (model defaults, ollama url), never private keys
+  non_secret_global = {
+    k: v for k, v in global_ai.items()
+    if not k.endswith("_api_key") and k != "api_key"
+  }
+  merged = dict(non_secret_global)
   merged.update({k: v for k, v in ai_config.items() if v is not None})
   return merged
 
@@ -72,7 +77,7 @@ def _build_preference_payload(ai_data: dict[str, Any]) -> dict[str, Any]:
     pref_payload["transcription_provider"] = ai_data["transcription_provider"]
   if "transcription_model" in ai_data:
     pref_payload["transcription_model"] = ai_data["transcription_model"]
-  for k in ["voice_command_provider", "voice_command_model", "ollama_base_url"]:
+  for k in ["voice_command_provider", "voice_command_model", "ollama_base_url", "language"]:
     if k in ai_data:
       pref_payload[k] = ai_data[k]
   return pref_payload
@@ -99,24 +104,20 @@ def save_user_ai_settings(
   user_id: str,
   ai_data: dict[str, Any],
   db: Optional[Any] = None,
-) -> dict[str, Any]:
-  """Persist AI settings atomically across preferences and credentials."""
+) -> None:
+  """Save user-scoped AI preferences and encrypted provider credentials atomically."""
   if not user_id:
-    return ai_data
+    raise ValueError("user_id is required to save user AI settings.")
 
   if db is not None:
     _execute_save_ai_atomic(db, user_id, ai_data)
-    return load_user_ai_settings(user_id)
+    return
 
-  from app.db.database import get_sync_db
-  with get_sync_db() as session:
-    try:
+  try:
+    from app.db.database import get_sync_db
+    with get_sync_db() as session:
       _execute_save_ai_atomic(session, user_id, ai_data)
       session.commit()
-    except Exception as exc:
-      session.rollback()
-      logger.error("Failed atomic transaction saving AI settings for %s: %s", user_id, exc)
-      raise
-
-  return load_user_ai_settings(user_id)
-
+  except Exception as exc:
+    logger.error("Failed saving user AI settings for %s: %s", user_id, exc)
+    raise
