@@ -316,6 +316,7 @@ def ingest_document(
   stored_name = f"{doc_id}_{safe_name}"
 
   docs_dir = get_knowledge_documents_dir()
+  docs_dir.mkdir(parents=True, exist_ok=True)
   (docs_dir / stored_name).write_bytes(raw)
 
   pieces = chunk_text(text)
