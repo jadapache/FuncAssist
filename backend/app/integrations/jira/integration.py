@@ -11,7 +11,14 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.integration_config import get_jira_oauth_config
-from app.core.storage import delete_connection, load_connection, save_connection
+from app.core.storage import (
+  delete_connection,
+  delete_user_integration,
+  load_connection,
+  load_user_integration,
+  save_connection,
+  save_user_integration,
+)
 from app.integrations.base import (
   AuthMethod,
   AuthStartResponse,
@@ -140,8 +147,15 @@ class JiraIntegration(Integration):
       return bool(data.get("access_token") and data.get("cloud_id"))
     return False
 
-  def get_info(self) -> IntegrationInfo:
-    data = load_connection(self.id)
+  def _resolve_connection_data(self, user_id: str | None = None) -> dict[str, Any] | None:
+    if user_id:
+      personal = load_user_integration(user_id, self.id)
+      if personal:
+        return personal
+    return load_connection(self.id)
+
+  def get_info(self, user_id: str | None = None) -> IntegrationInfo:
+    data = self._resolve_connection_data(user_id)
     oauth_configured = self._oauth_configured()
 
     if not self._is_connected(data):
@@ -175,7 +189,7 @@ class JiraIntegration(Integration):
       oauth_configured=oauth_configured,
     )
 
-  async def start_oauth(self) -> AuthStartResponse:
+  async def start_oauth(self, user_id: str | None = None) -> AuthStartResponse:
     oauth = get_jira_oauth_config()
     if not oauth["configured"]:
       raise ValueError(
@@ -183,11 +197,22 @@ class JiraIntegration(Integration):
         "or set JIRA_CLIENT_ID and JIRA_CLIENT_SECRET in .env"
       )
 
-    state = secrets.token_urlsafe(24)
-    pending = load_connection(self.id) or {}
-    pending["oauth_state"] = state
-    pending["oauth_started_at"] = time.time()
-    save_connection(self.id, pending)
+    raw_state = secrets.token_urlsafe(24)
+    state = f"{user_id}::{int(time.time())}::{raw_state}" if user_id else raw_state
+    now = time.time()
+    if user_id:
+      save_user_integration(user_id, self.id, {
+        "oauth_state": state,
+        "oauth_user_id": user_id,
+        "oauth_started_at": now,
+        "status": "pending_oauth",
+      })
+    else:
+      pending = load_connection(self.id) or {}
+      pending["oauth_state"] = state
+      pending["oauth_user_id"] = user_id
+      pending["oauth_started_at"] = now
+      save_connection(self.id, pending)
 
     params = {
       "audience": "api.atlassian.com",
@@ -207,10 +232,33 @@ class JiraIntegration(Integration):
 
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
     oauth = get_jira_oauth_config()
-    pending = load_connection(self.id) or {}
+
+    user_id = None
+    if "::" in state:
+      try:
+        parts = state.split("::", 2)
+        user_id = parts[0]
+        state_ts = int(parts[1])
+        # Enforce 10-minute state expiration window
+        if time.time() - state_ts > 600:
+          raise ValueError("OAuth authorization request has expired. Please try connecting again.")
+      except ValueError:
+        raise
+      except Exception:
+        user_id = None
+
+    pending = (load_user_integration(user_id, self.id) if user_id else None) or load_connection(self.id) or {}
     expected = pending.get("oauth_state")
     if not expected or expected != state:
       raise ValueError("Invalid OAuth state. Restart the Jira connection flow.")
+
+    # Immediately consume the state to prevent replay attacks
+    if user_id:
+      pending["oauth_state"] = None
+      save_user_integration(user_id, self.id, pending)
+    else:
+      pending["oauth_state"] = None
+      save_connection(self.id, pending)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
       token_response = await client.post(
@@ -260,9 +308,20 @@ class JiraIntegration(Integration):
         {"id": r.get("id"), "name": r.get("name"), "url": r.get("url")} for r in resources
       ],
     }
-    save_connection(self.id, payload)
-    await self.auto_select_projects_from_url(site.get("url") or "")
-    return self.get_info()
+    user_id = pending.get("oauth_user_id")
+    if not user_id and "::" in state:
+      try:
+        user_id = state.split("::", 2)[0]
+      except Exception:
+        user_id = None
+
+    if user_id:
+      save_user_integration(user_id, self.id, payload)
+    else:
+      save_connection(self.id, payload)
+
+    await self.auto_select_projects_from_url(site.get("url") or "", user_id=user_id)
+    return self.get_info(user_id=user_id)
 
   async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
     email = kwargs.get("email") or kwargs.get("account_email")
@@ -294,24 +353,29 @@ class JiraIntegration(Integration):
     await self.auto_select_projects_from_url(base_url)
     return self.get_info()
 
-  async def disconnect(self) -> None:
+  async def disconnect(self, user_id: str | None = None) -> None:
+    if user_id:
+      delete_user_integration(user_id, self.id)
     delete_connection(self.id)
 
-  def selected_project_keys(self) -> list[str]:
-    data = load_connection(self.id) or {}
+  def selected_project_keys(self, user_id: str | None = None) -> list[str]:
+    data = self._resolve_connection_data(user_id) or {}
     return list(data.get("selected_project_keys") or [])
 
-  async def update_selected_projects(self, project_keys: list[str]) -> IntegrationInfo:
-    data = load_connection(self.id)
+  async def update_selected_projects(self, project_keys: list[str], user_id: str | None = None) -> IntegrationInfo:
+    data = self._resolve_connection_data(user_id)
     if not data or not self._is_connected(data):
       raise ValueError("Jira is not connected.")
     cleaned = [key.strip().upper() for key in project_keys if key and key.strip()]
     data["selected_project_keys"] = cleaned
-    save_connection(self.id, data)
-    return self.get_info()
+    if user_id:
+      save_user_integration(user_id, self.id, data)
+    else:
+      save_connection(self.id, data)
+    return self.get_info(user_id=user_id)
 
-  async def auto_select_projects_from_url(self, url: str) -> None:
-    if self.selected_project_keys():
+  async def auto_select_projects_from_url(self, url: str, user_id: str | None = None) -> None:
+    if self.selected_project_keys(user_id=user_id):
       return
 
     hint = infer_project_hint_from_url(url)
@@ -319,18 +383,21 @@ class JiraIntegration(Integration):
       return
 
     try:
-      body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50})
+      body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50}, user_id=user_id)
       projects = body.get("values", [])
       match = match_project_for_hint(projects, hint)
       if match and match.get("key"):
-        data = load_connection(self.id) or {}
+        data = self._resolve_connection_data(user_id) or {}
         data["selected_project_keys"] = [str(match["key"]).upper()]
-        save_connection(self.id, data)
+        if user_id:
+          save_user_integration(user_id, self.id, data)
+        else:
+          save_connection(self.id, data)
     except Exception:
       return
 
-  def _default_jql(self) -> str:
-    keys = self.selected_project_keys()
+  def _default_jql(self, user_id: str | None = None) -> str:
+    keys = self.selected_project_keys(user_id=user_id)
     if not keys:
       return "updated >= -14d ORDER BY updated DESC"
     if len(keys) == 1:
@@ -338,20 +405,20 @@ class JiraIntegration(Integration):
     joined = ", ".join(keys)
     return f"project in ({joined}) AND updated >= -14d ORDER BY updated DESC"
 
-  async def authenticate(self) -> bool:
-    data = load_connection(self.id)
+  async def authenticate(self, user_id: str | None = None) -> bool:
+    data = self._resolve_connection_data(user_id)
     if not data:
       return False
     if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
       return bool(data.get("pat_token") and data.get("account_email") and data.get("site_url"))
     if data.get("auth_method") == AuthMethod.OAUTH.value:
       if data.get("refresh_token") or data.get("access_token"):
-        await self._ensure_fresh_oauth_token(data)
+        await self._ensure_fresh_oauth_token(data, user_id=user_id)
         return True
     return False
 
-  async def test_connection(self) -> TestConnectionResult:
-    data = load_connection(self.id)
+  async def test_connection(self, user_id: str | None = None) -> TestConnectionResult:
+    data = self._resolve_connection_data(user_id)
     if not data:
       return TestConnectionResult(ok=False, message="Jira is not connected.")
 
@@ -371,7 +438,7 @@ class JiraIntegration(Integration):
           details={"account": me.get("displayName"), "email": data.get("account_email")},
         )
 
-      data = await self._ensure_fresh_oauth_token(data)
+      data = await self._ensure_fresh_oauth_token(data, user_id=user_id)
       cloud_id = data["cloud_id"]
       headers = {
         "Authorization": f"Bearer {data['access_token']}",
@@ -396,7 +463,7 @@ class JiraIntegration(Integration):
     except Exception as exc:
       return TestConnectionResult(ok=False, message=str(exc))
 
-  async def _ensure_fresh_oauth_token(self, data: dict[str, Any]) -> dict[str, Any]:
+  async def _ensure_fresh_oauth_token(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
     expires_at = float(data.get("expires_at") or 0)
     if time.time() < expires_at and data.get("access_token"):
       return data
@@ -423,14 +490,17 @@ class JiraIntegration(Integration):
     if tokens.get("refresh_token"):
       data["refresh_token"] = tokens["refresh_token"]
     data["expires_at"] = time.time() + int(tokens.get("expires_in", 3600)) - 60
-    save_connection(self.id, data)
+    if user_id:
+      save_user_integration(user_id, self.id, data)
+    else:
+      save_connection(self.id, data)
     return data
 
-  async def _jira_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-    if not await self.authenticate():
+  async def _jira_get(self, path: str, params: dict[str, Any] | None = None, user_id: str | None = None) -> Any:
+    if not await self.authenticate(user_id=user_id):
       raise ValueError("Jira is not connected.")
 
-    data = load_connection(self.id)
+    data = self._resolve_connection_data(user_id)
     assert data is not None
     params = params or {}
 
@@ -445,7 +515,7 @@ class JiraIntegration(Integration):
         response.raise_for_status()
         return response.json()
 
-    data = await self._ensure_fresh_oauth_token(data)
+    data = await self._ensure_fresh_oauth_token(data, user_id=user_id)
     headers = {
       "Authorization": f"Bearer {data['access_token']}",
       "Accept": "application/json",
@@ -459,9 +529,9 @@ class JiraIntegration(Integration):
       response.raise_for_status()
       return response.json()
 
-  async def get_projects(self) -> list[dict[str, Any]]:
-    body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50})
-    selected = set(self.selected_project_keys())
+  async def get_projects(self, user_id: str | None = None) -> list[dict[str, Any]]:
+    body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50}, user_id=user_id)
+    selected = set(self.selected_project_keys(user_id=user_id))
     return [
       {
         "id": project.get("id"),
@@ -478,8 +548,9 @@ class JiraIntegration(Integration):
     *,
     jql: str | None = None,
     max_results: int = 50,
+    user_id: str | None = None,
   ) -> list[dict[str, Any]]:
-    query = jql or self._default_jql()
+    query = jql or self._default_jql(user_id=user_id)
     body = await self._jira_get(
       "/rest/api/3/search",
       {
@@ -487,6 +558,7 @@ class JiraIntegration(Integration):
         "maxResults": max_results,
         "fields": "summary,status,assignee,updated,priority,issuetype,description,labels",
       },
+      user_id=user_id,
     )
     issues = body.get("issues", [])
     normalized: list[dict[str, Any]] = []
@@ -516,12 +588,13 @@ class JiraIntegration(Integration):
       )
     return normalized
 
-  async def get_sprints(self, *, max_results: int = 20) -> list[dict[str, Any]]:
+  async def get_sprints(self, *, max_results: int = 20, user_id: str | None = None) -> list[dict[str, Any]]:
     """Best-effort active/recent sprints via boards API."""
     try:
       boards = await self._jira_get(
         "/rest/agile/1.0/board",
         {"maxResults": 10},
+        user_id=user_id,
       )
     except Exception:
       return []
@@ -535,6 +608,7 @@ class JiraIntegration(Integration):
         body = await self._jira_get(
           f"/rest/agile/1.0/board/{board_id}/sprint",
           {"state": "active,future", "maxResults": max_results},
+          user_id=user_id,
         )
       except Exception:
         continue

@@ -29,6 +29,6 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 RUN mkdir -p local/connections local/cache local/settings local/knowledge local/ai/logs
 
 WORKDIR /app/backend
-EXPOSE 6728
+EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-6728}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

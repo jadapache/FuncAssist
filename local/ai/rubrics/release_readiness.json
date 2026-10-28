@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "feature": "release_readiness",
-  "criteria": [
-    "Verdict tied to open blockers in Jira/GitHub/GitLab",
-    "Separate ship blockers from follow-ups",
-    "Cite evidence for each risk"
-  ]
-}

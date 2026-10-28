@@ -17,9 +17,12 @@ _last_frontier_sync_ts: float = 0.0
 
 
 async def _refresh_builtin_model_catalog() -> None:
-  """Verify that builtin models catalog reflects actual files on disk."""
+  """Sync builtin models catalog into PostgreSQL repository and verify disk cache."""
   try:
-    from app.ai.builtin_local import get_builtin_cache_dir, load_builtin_catalog
+    from app.ai.builtin_local import get_builtin_cache_dir, load_builtin_catalog, sync_builtin_models_catalog
+
+    # Sync builtin definitions into repository
+    sync_builtin_models_catalog()
 
     catalog = load_builtin_catalog(task_type=None)
     cache_dir = get_builtin_cache_dir()

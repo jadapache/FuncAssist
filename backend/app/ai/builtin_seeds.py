@@ -1,4 +1,11 @@
-[
+"""Default factory seeds for Built-in AI models (GGUF chat & ONNX Whisper).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+DEFAULT_BUILTIN_MODELS: list[dict[str, Any]] = [
   {
     "id": "qwen2.5:1.5b",
     "name": "Qwen 2.5 1.5B (Ultra Ligero)",
@@ -7,8 +14,9 @@
     "tokens": "32.768 tokens",
     "description": "Modelo ultra rápido y liviano para análisis ágil en cualquier CPU o laptop sin GPU dedicada.",
     "task_type": "chat_writing",
+    "provider": "builtin",
     "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-    "aliases": ["qwen:1.5b", "qwen1.5b"]
+    "aliases": ["qwen:1.5b", "qwen1.5b"],
   },
   {
     "id": "qwen2.5:3b",
@@ -18,8 +26,9 @@
     "tokens": "32.768 tokens",
     "description": "Modelo insignia equilibrado de alta fidelidad para redacción de historias de usuario y análisis QA.",
     "task_type": "chat_writing",
+    "provider": "builtin",
     "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-    "aliases": ["qwen3.5:2b", "qwen:3b", "qwen3b"]
+    "aliases": ["qwen3.5:2b", "qwen:3b", "qwen3b"],
   },
   {
     "id": "llama3.2:1b",
@@ -29,8 +38,9 @@
     "tokens": "131.072 tokens",
     "description": "Modelo ligero de Meta de última generación, bajo consumo de memoria y respuesta instantánea.",
     "task_type": "chat_writing",
+    "provider": "builtin",
     "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-    "aliases": ["llama:1b", "llama1b"]
+    "aliases": ["llama:1b", "llama1b"],
   },
   {
     "id": "llama3.2:3b",
@@ -40,8 +50,9 @@
     "tokens": "131.072 tokens",
     "description": "Alta precisión en razonamiento, casos de prueba y análisis estructurado en español e inglés.",
     "task_type": "chat_writing",
+    "provider": "builtin",
     "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-    "aliases": ["llama:3b", "llama3b"]
+    "aliases": ["llama:3b", "llama3b"],
   },
   {
     "id": "deepseek-r1:1.5b",
@@ -51,8 +62,9 @@
     "tokens": "65.536 tokens",
     "description": "Modelo de razonamiento estructurado (Chain-of-Thought) para lógica de validación QA profunda.",
     "task_type": "chat_writing",
+    "provider": "builtin",
     "url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-    "aliases": ["deepseek-r1:8b", "deepseek:1.5b"]
+    "aliases": ["deepseek-r1:8b", "deepseek:1.5b"],
   },
   {
     "id": "gemma-2-2b",
@@ -62,8 +74,9 @@
     "tokens": "8.192 tokens",
     "description": "Modelo de Google optimizado para seguimiento de instrucciones y redacción técnica concisa.",
     "task_type": "chat_writing",
+    "provider": "builtin",
     "url": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
-    "aliases": ["gemma3:1b", "gemma:2b"]
+    "aliases": ["gemma3:1b", "gemma:2b"],
   },
   {
     "id": "whisper-tiny",
@@ -75,7 +88,7 @@
     "task_type": "transcription",
     "provider": "onnx",
     "engine": "onnxruntime-web",
-    "aliases": ["whisper-tiny", "tiny"]
+    "aliases": ["whisper-tiny", "tiny"],
   },
   {
     "id": "whisper-base",
@@ -87,7 +100,7 @@
     "task_type": "transcription",
     "provider": "onnx",
     "engine": "onnxruntime-web",
-    "aliases": ["whisper-base", "base"]
+    "aliases": ["whisper-base", "base"],
   },
   {
     "id": "whisper-small",
@@ -99,7 +112,7 @@
     "task_type": "transcription",
     "provider": "onnx",
     "engine": "onnxruntime-web",
-    "aliases": ["whisper-small", "small"]
+    "aliases": ["whisper-small", "small"],
   },
   {
     "id": "whisper-large-v3-turbo",
@@ -111,6 +124,7 @@
     "task_type": "transcription",
     "provider": "onnx",
     "engine": "onnxruntime-web",
-    "aliases": ["whisper-large-v3-turbo", "large-v3-turbo", "large"]
-  }
+    "aliases": ["whisper-large-v3-turbo", "large-v3-turbo", "large"],
+  },
 ]
+
