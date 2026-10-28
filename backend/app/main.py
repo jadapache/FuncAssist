@@ -31,6 +31,8 @@ async def lifespan(app: FastAPI):
   from app.db.database import init_db
 
   await init_db()
+  from app.core.redis import close_redis_client, init_redis
+  await init_redis()
   from app.core.integration_migration import migrate_integrations_schema_if_needed
   migrate_integrations_schema_if_needed()
   migrate_knowledge_if_needed()
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
       await refresher_task
     except (asyncio.CancelledError, Exception):
       pass
+    await close_redis_client()
 
 
 def create_app() -> FastAPI:
