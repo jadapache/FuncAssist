@@ -44,6 +44,7 @@ interface UseAgenticGenerationOptions {
 
 export interface GenerationResult {
   isGenerating: boolean
+  generatingConversationId: string | null
   streamingText: string
   generationStatus: string
   liveThinkingSteps: unknown[]
@@ -209,6 +210,7 @@ function resolveAssistantBubbleText(
 
 export function useAgenticGeneration(opts: UseAgenticGenerationOptions): GenerationResult {
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null)
   const [streamingText, setStreamingText] = useState('')
   const [generationStatus, setGenerationStatus] = useState('Pensando...')
   const { runState, executeRun, cancelRun } = useAgentRun()
@@ -259,6 +261,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         name: doc.filename,
         type: 'file',
         size: doc.char_count,
+        content: doc.content,
       }))
 
       const imgAttachments: ChatAttachment[] = (attachedImages || []).map((img, idx) => ({
@@ -293,6 +296,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       }
 
       const targetConvId = targetConv.id
+      setGeneratingConversationId(targetConvId)
       const currentMsgs = targetConv?.messages ?? []
       const updatedMsgs = [...currentMsgs, userMessage]
       onUpdateConversation({ messages: updatedMsgs }, targetConvId)
@@ -564,6 +568,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         onError?.(displayMsg, isAuthError, errorCategory)
       } finally {
         setIsGenerating(false)
+        setGeneratingConversationId(null)
         setStreamingText('')
         onScrollToBottom()
       }
@@ -595,6 +600,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
 
   return {
     isGenerating,
+    generatingConversationId,
     streamingText,
     generationStatus: runState.activeStatusText || generationStatus,
     liveThinkingSteps: runState.steps,
