@@ -1,7 +1,13 @@
 import os
+import sys
+
+if sys.platform == "win32":
+  import asyncio
+  asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -10,6 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.ai.templates import ensure_ai_files
+from app.api.me import router as me_router
 from app.api.router import api_router
 from app.api.settings import health_router
 from app.context.knowledge import ensure_knowledge_dirs
@@ -78,6 +85,7 @@ def create_app() -> FastAPI:
   )
 
   app.include_router(health_router)
+  app.include_router(me_router, prefix="/v1/me")
   app.include_router(api_router)
 
   if FRONTEND_DIST.is_dir() and (FRONTEND_DIST / "index.html").exists():
