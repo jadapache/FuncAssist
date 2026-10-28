@@ -1,9 +1,11 @@
 import {
   API_BASE,
+  getAuthHeaders,
   handleResponse,
   type IntegrationInfo,
   type TestConnectionResult,
 } from '../../../api/client'
+import type { JiraConnectionStatus } from '../../settings/types'
 
 export const integrationsApi = {
   getIntegrations: () =>
@@ -93,4 +95,22 @@ export const integrationsApi = {
 
   getSyncCache: (id: string) =>
     fetch(`${API_BASE}/api/integrations/${id}/sync`).then((r) => handleResponse<Record<string, unknown>>(r)),
+
+  getJiraStatus: () =>
+    fetch(`${API_BASE}/v1/me/integrations/jira/status`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<JiraConnectionStatus>(r)),
+
+  connectJiraOAuth: (payload: { code: string; state: string; redirect_uri?: string }) =>
+    fetch(`${API_BASE}/v1/me/integrations/jira/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<JiraConnectionStatus>(r)),
+
+  disconnectJiraOAuth: () =>
+    fetch(`${API_BASE}/v1/me/integrations/jira`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<{ ok: boolean; disconnected: boolean }>(r)),
 }
