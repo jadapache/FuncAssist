@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Cpu, Database, FileText, Layers, ShieldCheck } from 'lucide-react'
-import { AiModelsPanel } from '../../../features/settings/components/AiModelsPanel'
-import { IntegrationsPanel } from '../../../features/settings/components/IntegrationsPanel'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Database, FileText, Layers, ShieldCheck } from 'lucide-react'
+import { SourceCodeIntegrationsPanel } from '../../../features/settings/components/SourceCodeIntegrationsPanel'
 import { KnowledgeBaseSection } from '../../../features/settings/components/KnowledgeBaseSection'
 import { TemplatesPanel } from '../../../features/settings/components/TemplatesPanel'
 import { UserApprovalsPanel } from '../../../features/settings/components/UserApprovalsPanel'
@@ -13,6 +12,7 @@ import { PageHeader } from '../../../components/common'
 import { useUser } from '../../../context/UserContext'
 
 export const SettingsPage = () => {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useUser()
   const role = user?.user_role || 'funcional'
@@ -22,7 +22,6 @@ export const SettingsPage = () => {
     const t = new URLSearchParams(window.location.search).get('tab')
     if (
       t === 'integrations' ||
-      t === 'ai_models' ||
       t === 'templates' ||
       t === 'knowledge' ||
       t === 'approvals'
@@ -30,19 +29,17 @@ export const SettingsPage = () => {
       return t as TabType
     }
     if (
-      window.location.search.includes('jira=') ||
       window.location.search.includes('github=') ||
       window.location.search.includes('gitlab=')
     ) {
       return 'integrations'
     }
-    return 'ai_models'
+    return 'knowledge'
   })
 
   const integrationsManager = useIntegrationsManager({ enabled: activeTab === 'integrations' })
   const userApprovalsManager = useUserApprovalsManager({ enabled: isAdmin && activeTab === 'approvals' })
 
-  const [aiModelsMounted, setAiModelsMounted] = useState(activeTab === 'ai_models')
   const [templatesMounted, setTemplatesMounted] = useState(activeTab === 'templates')
   const [knowledgeMounted, setKnowledgeMounted] = useState(activeTab === 'knowledge')
   const [integrationsMounted, setIntegrationsMounted] = useState(activeTab === 'integrations')
@@ -50,36 +47,40 @@ export const SettingsPage = () => {
 
   useEffect(() => {
     const tab = searchParams.get('tab')
+    if (tab === 'ai_models') {
+      navigate('/profile?tab=ai_providers', { replace: true })
+      return
+    }
+
     let next: TabType | null = null
     if (
       tab === 'integrations' ||
-      tab === 'ai_models' ||
       tab === 'templates' ||
       tab === 'knowledge' ||
       tab === 'approvals'
     ) {
       next = tab as TabType
-    } else if (searchParams.get('jira') || searchParams.get('github') || searchParams.get('gitlab')) {
+    } else if (searchParams.get('github') || searchParams.get('gitlab')) {
       next = 'integrations'
     }
+
     if (next) {
       setActiveTab(next)
-      if (next === 'ai_models') setAiModelsMounted(true)
       if (next === 'templates') setTemplatesMounted(true)
       if (next === 'knowledge') setKnowledgeMounted(true)
       if (next === 'integrations') setIntegrationsMounted(true)
       if (next === 'approvals') setApprovalsMounted(true)
     }
-  }, [searchParams])
+  }, [navigate, searchParams])
 
   const canSeeIntegrations = ['admin', 'pm', 'funcional', 'qa'].includes(role)
 
   const TABS: SettingsTabItem[] = [
     {
-      id: 'ai_models',
-      label: 'Modelos de IA',
-      subtitle: 'Configuración de modelos locales y APIs',
-      icon: Cpu,
+      id: 'knowledge',
+      label: 'Base de Conocimiento',
+      subtitle: 'Almacenamiento PostgreSQL RAG (Full-Text & Vector)',
+      icon: Database,
     },
     {
       id: 'templates',
@@ -87,18 +88,12 @@ export const SettingsPage = () => {
       subtitle: 'Plantillas corporativas (.doc, .docx, .xlsx)',
       icon: FileText,
     },
-    {
-      id: 'knowledge',
-      label: 'Base de Conocimiento',
-      subtitle: 'Almacenamiento PostgreSQL RAG (Full-Text & Vector)',
-      icon: Database,
-    },
     ...(canSeeIntegrations
       ? [
         {
           id: 'integrations' as TabType,
-          label: 'Integraciones',
-          subtitle: 'Jira Software, GitHub, GitLab',
+          label: 'Integraciones RAG',
+          subtitle: 'GitHub, GitLab (Contexto de código)',
           icon: Layers,
           badgeCount: integrationsManager.connectedCount,
         },
@@ -122,7 +117,7 @@ export const SettingsPage = () => {
       <PageHeader
         eyebrow="SISTEMA & PREFERENCIAS"
         title="Configuración del Sistema"
-        subtitle="Administra los modelos de IA, base de conocimiento, plantillas, integraciones y accesos de usuario."
+        subtitle="Administra la base de conocimiento, plantillas, integraciones de código fuente y accesos de usuario."
       />
 
       {/* Nav Tabs Bar */}
@@ -137,7 +132,6 @@ export const SettingsPage = () => {
               onClick={() => {
                 setActiveTab(t.id)
                 setSearchParams({ tab: t.id }, { replace: true })
-                if (t.id === 'ai_models') setAiModelsMounted(true)
                 if (t.id === 'templates') setTemplatesMounted(true)
                 if (t.id === 'knowledge') setKnowledgeMounted(true)
                 if (t.id === 'integrations') setIntegrationsMounted(true)
@@ -148,15 +142,13 @@ export const SettingsPage = () => {
                 isActive
                   ? 'bg-white text-[#002777] shadow-md ring-1 ring-black/5 font-bold'
                   : 'text-slate-600 hover:bg-white/60 hover:text-slate-900 font-medium',
-              ].join(' ')
-              }
+              ].join(' ')}
             >
               <div
                 className={[
                   'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
                   isActive ? 'bg-[#002777] text-white' : 'bg-slate-200/80 text-slate-600',
-                ].join(' ')
-                }
+                ].join(' ')}
               >
                 <Icon className="h-5 w-5" />
               </div>
@@ -177,19 +169,16 @@ export const SettingsPage = () => {
       </nav>
 
       {/* Tab Panels - lazy mount to avoid re-fetching on tab switch */}
-      <div className={activeTab === 'ai_models' ? 'block' : 'hidden'}>
-        {aiModelsMounted && <AiModelsPanel />}
+      <div className={activeTab === 'knowledge' ? 'block' : 'hidden'}>
+        {knowledgeMounted && <KnowledgeBaseSection />}
       </div>
       <div className={activeTab === 'templates' ? 'block' : 'hidden'}>
         {templatesMounted && <TemplatesPanel />}
       </div>
-      <div className={activeTab === 'knowledge' ? 'block' : 'hidden'}>
-        {knowledgeMounted && <KnowledgeBaseSection />}
-      </div>
       {canSeeIntegrations && (
         <div className={activeTab === 'integrations' ? 'block' : 'hidden'}>
           {integrationsMounted && (
-            <IntegrationsPanel integrationsManager={integrationsManager} />
+            <SourceCodeIntegrationsPanel integrationsManager={integrationsManager} />
           )}
         </div>
       )}
