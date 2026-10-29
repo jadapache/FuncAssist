@@ -4,9 +4,10 @@ from pathlib import Path
 import logging
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from app.api.deps import get_current_user
 from app.context.knowledge import (
   delete_document,
   get_db_status,
@@ -23,7 +24,11 @@ from app.context.service import assemble_context
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+router = APIRouter(
+  prefix="/knowledge",
+  tags=["knowledge"],
+  dependencies=[Depends(get_current_user)],
+)
 
 
 class RetrieveRequest(BaseModel):

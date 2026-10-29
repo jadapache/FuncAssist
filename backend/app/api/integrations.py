@@ -10,7 +10,11 @@ from app.integrations.base import AuthMethod, IntegrationInfo, TestConnectionRes
 from app.integrations.registry import GIT_HOSTING_IDS, registry
 from app.integrations.sync import load_sync_cache, sync_integration
 
-router = APIRouter(prefix="/integrations", tags=["integrations"])
+router = APIRouter(
+  prefix="/integrations",
+  tags=["integrations"],
+  dependencies=[Depends(get_current_user)],
+)
 
 
 def _require_git_hosting(integration_id: str):

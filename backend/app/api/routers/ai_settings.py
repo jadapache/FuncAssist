@@ -50,7 +50,10 @@ async def ai_models_catalog(
 
 @router.post("/models/sync")
 @handle_grounded_errors
-async def sync_ai_models_catalog(force_remote: bool = True) -> dict[str, Any]:
+async def sync_ai_models_catalog(
+    force_remote: bool = True,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Manually trigger background synchronization of frontier models from LiteLLM."""
     sync_result = await sync_frontier_models_catalog(force_remote=force_remote)
     catalog = await get_model_catalog(refresh=True)
@@ -62,7 +65,9 @@ async def sync_ai_models_catalog(force_remote: bool = True) -> dict[str, Any]:
 
 @router.get("/models/sync-status")
 @handle_grounded_errors
-async def get_ai_models_sync_status() -> dict[str, Any]:
+async def get_ai_models_sync_status(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Retrieve last frontier models synchronization status."""
     return get_frontier_sync_status()
 

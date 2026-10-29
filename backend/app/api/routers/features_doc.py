@@ -1,13 +1,18 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 
+from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.features.inventario.service import generate_inventario_report
 from app.features.levantamiento.service import generate_levantamiento_report
 from app.features.mejoras.service import generate_mejoras_report
 
-router = APIRouter(prefix="/features", tags=["doc-features"])
+router = APIRouter(
+    prefix="/features",
+    tags=["doc-features"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class FeatureWorkspaceRequest(BaseModel):

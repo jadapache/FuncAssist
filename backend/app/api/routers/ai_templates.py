@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.ai.logging import list_logs
@@ -17,10 +17,15 @@ from app.ai.templates import (
     save_prompt,
     save_rubric,
 )
+from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
 
 
-router = APIRouter(prefix="/ai", tags=["ai-templates"])
+router = APIRouter(
+    prefix="/ai",
+    tags=["ai-templates"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class TemplateCreate(BaseModel):

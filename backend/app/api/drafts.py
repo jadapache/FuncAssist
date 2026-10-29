@@ -16,7 +16,11 @@ from app.features.drafts.storage import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/drafts", tags=["drafts"])
+router = APIRouter(
+  prefix="/drafts",
+  tags=["drafts"],
+  dependencies=[Depends(get_current_user)],
+)
 
 
 class SaveDraftRequest(BaseModel):

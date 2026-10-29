@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.api.deps import (
   get_chat_repository,
+  get_current_admin_user,
   get_current_user,
   get_prd_repository,
   get_standup_repository,
@@ -57,7 +58,9 @@ class SettingSetRequest(BaseModel):
 
 # --- Users Endpoints ---
 @router.get("/users")
-async def get_users() -> dict[str, Any]:
+async def get_users(
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
   try:
     async with get_db() as db:
       stmt = select(UserModel).where(UserModel.status == "approved")
@@ -78,28 +81,23 @@ async def get_users() -> dict[str, Any]:
   except Exception:
     pass
 
-  settings = load_app_settings()
-  return {
-    "users": [
-      {
-        "id": "local",
-        "username": settings.get("display_name", "Usuario"),
-        "display_name": settings.get("display_name", "Usuario"),
-        "role": settings.get("user_role", "admin"),
-      }
-    ]
-  }
+  return {"users": []}
 
 
 # --- Settings Endpoints ---
 @router.get("/db/settings")
-async def get_db_settings() -> dict[str, Any]:
+async def get_db_settings(
+  _admin: dict[str, Any] = Depends(get_current_admin_user),
+) -> dict[str, Any]:
   all_settings = load_app_settings()
   return {"settings": all_settings}
 
 
 @router.post("/db/settings")
-async def set_db_setting(body: SettingSetRequest) -> dict[str, Any]:
+async def set_db_setting(
+  body: SettingSetRequest,
+  _admin: dict[str, Any] = Depends(get_current_admin_user),
+) -> dict[str, Any]:
   settings = load_app_settings()
   settings[body.key] = body.value
   save_app_settings(settings)
@@ -188,6 +186,7 @@ async def post_chat_message(
 @router.delete("/chat/history/{session_id}")
 async def delete_chat_messages(
   session_id: str,
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
   await repo.clear_session(session_id)

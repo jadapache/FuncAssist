@@ -1,7 +1,8 @@
 from typing import Any
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.core.template_storage import (
     delete_template,
@@ -11,7 +12,11 @@ from app.core.template_storage import (
     update_template_metadata,
 )
 
-router = APIRouter(prefix="/templates", tags=["templates"])
+router = APIRouter(
+    prefix="/templates",
+    tags=["templates"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class TemplateMetadataUpdate(BaseModel):
