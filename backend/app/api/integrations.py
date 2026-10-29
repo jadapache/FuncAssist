@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_current_user
 from app.core.settings import get_settings
 from app.integrations.base import AuthMethod, IntegrationInfo, TestConnectionResult
 from app.integrations.registry import GIT_HOSTING_IDS, registry
@@ -109,11 +109,11 @@ async def gitlab_oauth_callback(code: str | None = None, state: str | None = Non
 @router.get("/{integration_id}", response_model=IntegrationInfo)
 async def get_integration(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
   try:
     integration = registry.get(integration_id)
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     if integration_id == "jira" and hasattr(integration, "get_info"):
       return integration.get_info(user_id=user_id)
     return integration.get_info()
@@ -124,11 +124,11 @@ async def get_integration(
 @router.post("/{integration_id}/oauth/start")
 async def start_oauth(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> dict:
   try:
     integration = registry.get(integration_id)
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     if integration_id == "jira":
       result = await integration.start_oauth(user_id=user_id)
     else:
@@ -146,11 +146,11 @@ async def start_oauth(
 async def connect_with_pat(
   integration_id: str,
   body: PatConnectRequest,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
   try:
     integration = registry.get(integration_id)
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     info = await integration.connect_with_pat(
       body.token,
       email=body.email,
@@ -172,11 +172,11 @@ async def connect_with_pat(
 @router.post("/{integration_id}/test", response_model=TestConnectionResult)
 async def test_integration(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> TestConnectionResult:
   try:
     integration = registry.get(integration_id)
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     if integration_id == "jira":
       return await integration.test_connection(user_id=user_id)
     return await integration.test_connection()
@@ -187,11 +187,11 @@ async def test_integration(
 @router.post("/{integration_id}/disconnect", response_model=IntegrationInfo)
 async def disconnect_integration(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
   try:
     integration = registry.get(integration_id)
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     if integration_id == "jira":
       await integration.disconnect(user_id=user_id)
       return integration.get_info(user_id=user_id)
@@ -204,12 +204,12 @@ async def disconnect_integration(
 @router.get("/{integration_id}/projects")
 async def get_projects(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> dict:
   if integration_id != "jira":
     raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira.")
   try:
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     projects = await registry.get("jira").get_projects(user_id=user_id)  # type: ignore[attr-defined]
     return {"projects": projects}
   except KeyError as exc:
@@ -222,12 +222,12 @@ async def get_projects(
 async def update_projects(
   integration_id: str,
   body: SelectedProjectsRequest,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
   if integration_id != "jira":
     raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira.")
   try:
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     info = await registry.get("jira").update_selected_projects(body.selected_projects, user_id=user_id)  # type: ignore[attr-defined]
     try:
       await sync_integration(integration_id)
@@ -242,14 +242,14 @@ async def update_projects(
 
 @router.post("/jira/auto-select-project", response_model=IntegrationInfo)
 async def auto_select_jira_project(
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
-  from app.core.storage import load_connection, load_user_integration
+  from app.core.storage import load_user_integration
 
   try:
     jira = registry.get("jira")
-    user_id = current_user.get("id") if current_user else None
-    connection = (load_user_integration(user_id, "jira") if user_id else None) or load_connection("jira") or {}
+    user_id = current_user["id"]
+    connection = load_user_integration(user_id, "jira") or {}
     site_url = str(connection.get("site_url") or "")
     if not site_url:
       raise ValueError("Jira is not connected or site URL is missing.")
@@ -270,11 +270,11 @@ async def get_issues(
   integration_id: str,
   jql: str | None = None,
   max_results: int = 50,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> dict:
   if integration_id == "jira":
     try:
-      user_id = current_user.get("id") if current_user else None
+      user_id = current_user["id"]
       issues = await registry.get("jira").get_issues(jql=jql, max_results=max_results, user_id=user_id)  # type: ignore[attr-defined]
       return {"issues": issues}
     except KeyError as exc:
@@ -297,12 +297,12 @@ async def get_issues(
 @router.get("/{integration_id}/sprints")
 async def get_sprints(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> dict:
   if integration_id != "jira":
     raise HTTPException(status_code=501, detail="Sprints endpoint is only available for Jira.")
   try:
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     sprints = await registry.get("jira").get_sprints(user_id=user_id)  # type: ignore[attr-defined]
     return {"sprints": sprints}
   except KeyError as exc:
