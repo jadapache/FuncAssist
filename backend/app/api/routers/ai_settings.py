@@ -39,6 +39,11 @@ async def ai_models_catalog(
     provider: str = "all",
     task_type: str = "all",
 ) -> dict[str, Any]:
+    if refresh:
+        try:
+            await sync_frontier_models_catalog(force_remote=False)
+        except Exception:
+            pass
     catalog = await get_model_catalog(refresh=refresh, provider=provider, task_type=task_type)
     return catalog.model_dump()
 
