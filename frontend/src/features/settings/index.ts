@@ -9,6 +9,11 @@ export { AiModelsPanel } from './components/AiModelsPanel'
 export { IntegrationsPanel } from './components/IntegrationsPanel'
 export { TemplatesPanel } from './components/TemplatesPanel'
 export { KnowledgeBaseSection } from './components/KnowledgeBaseSection'
+export { ProviderCredentialCard } from './components/ProviderCredentialCard'
+export { AIProviderSettings } from './components/AIProviderSettings'
+export { JiraIntegrationCard } from './components/JiraIntegrationCard'
+export { MCPServersSection } from './components/MCPServersSection'
+
 
 // Hooks
 export { useCorporateTemplate } from './hooks/useCorporateTemplate'

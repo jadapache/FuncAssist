@@ -5,7 +5,12 @@ import {
   type AISettings,
   type ModelCatalogResponse,
 } from '../../../api/client'
-import type { UserPreferences, ProviderCredentialInfo } from '../types'
+import type {
+  UserPreferences,
+  ProviderCredentialInfo,
+  McpServerInfo,
+  McpServerPayload,
+} from '../types'
 
 export const aiSettingsApi = {
   getModelCatalog: (refresh?: boolean, provider?: string, task_type?: string) => {
@@ -165,11 +170,43 @@ export const aiSettingsApi = {
     fetch(`${API_BASE}/api/me/provider-credentials/${encodeURIComponent(provider)}/validate`, {
       method: 'POST',
       headers: { ...getAuthHeaders() },
-    }).then((r) => handleResponse<{ ok: boolean; valid: boolean; provider: string }>(r)),
+    }).then((r) => handleResponse<{ ok: boolean; valid?: boolean; provider: string; status?: string }>(r)),
 
   deleteProviderCredential: (provider: string) =>
     fetch(`${API_BASE}/api/me/provider-credentials/${encodeURIComponent(provider)}`, {
       method: 'DELETE',
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; provider: string }>(r)),
+
+  listMcpServers: () =>
+    fetch(`${API_BASE}/api/me/mcp-servers`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<McpServerInfo[]>(r)),
+
+  createMcpServer: (payload: McpServerPayload) =>
+    fetch(`${API_BASE}/api/me/mcp-servers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<McpServerInfo>(r)),
+
+  updateMcpServer: (id: string, payload: Partial<McpServerPayload & { status?: string }>) =>
+    fetch(`${API_BASE}/api/me/mcp-servers/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<McpServerInfo>(r)),
+
+  deleteMcpServer: (id: string) =>
+    fetch(`${API_BASE}/api/me/mcp-servers/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<{ ok: boolean; deleted_id: string }>(r)),
+
+  testMcpServer: (id: string) =>
+    fetch(`${API_BASE}/api/me/mcp-servers/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<{ ok: boolean; status: string; endpoint_url: string }>(r)),
 }
+

@@ -214,6 +214,7 @@ async def set_my_provider_credential(
 
 
 @router.post("/provider-credentials/{provider}/test")
+@router.post("/provider-credentials/{provider}/validate")
 async def test_my_provider_credential(
   provider: str,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -297,18 +298,22 @@ async def my_jira_callback(
   settings = get_settings()
   frontend = settings.frontend_url.rstrip("/")
 
+  # Determine target page from state or default to profile (user settings)
+  target_path = "/profile"
+
   if error:
-    return RedirectResponse(f"{frontend}/integrations?jira=error&message={quote(error)}")
+    return RedirectResponse(f"{frontend}{target_path}?jira=error&message={quote(error)}")
   if not code or not state:
-    return RedirectResponse(f"{frontend}/integrations?jira=error&message=missing_code")
+    return RedirectResponse(f"{frontend}{target_path}?jira=error&message=missing_code")
 
   try:
     jira_integration = registry.get("jira")
     await jira_integration.handle_oauth_callback(code, state)
-    return RedirectResponse(f"{frontend}/integrations?jira=connected")
+    return RedirectResponse(f"{frontend}{target_path}?jira=connected")
   except Exception as exc:
     logger.warning("Jira OAuth callback failed: %s", exc)
-    return RedirectResponse(f"{frontend}/integrations?jira=error&message={quote(str(exc))}")
+    return RedirectResponse(f"{frontend}{target_path}?jira=error&message={quote(str(exc))}")
+
 
 
 @router.get("/integrations/jira", response_model=JiraConnectionInfo)
@@ -434,6 +439,62 @@ async def create_my_mcp_server(
     )
 
 
+@router.patch("/mcp-servers/{server_id}", response_model=McpServerInfo)
+async def update_my_mcp_server(
+  server_id: str,
+  body: McpServerUpdate,
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> McpServerInfo:
+  """Update an existing MCP server configuration for the authenticated user."""
+  user_id = current_user["id"]
+  async with get_db() as db:
+    stmt = select(McpServerModel).where(
+      McpServerModel.id == server_id,
+      McpServerModel.user_id == user_id,
+    )
+    res = await db.execute(stmt)
+    server = res.scalar_one_or_none()
+    if not server:
+      raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
+
+    if body.endpoint_url is not None:
+      if not validate_mcp_endpoint_url(body.endpoint_url, resolve_dns=False):
+        raise HTTPException(
+          status_code=status.HTTP_400_BAD_REQUEST,
+          detail="URL de servidor MCP no permitida o insegura.",
+        )
+      server.endpoint_url = body.endpoint_url.strip()
+
+    if body.name is not None:
+      server.name = body.name.strip()
+    if body.description is not None:
+      server.description = body.description.strip()
+    if body.transport_type is not None:
+      server.transport_type = body.transport_type
+    if body.auth_type is not None:
+      server.auth_type = body.auth_type
+    if body.status is not None:
+      server.status = body.status
+    if body.allowed_tools is not None:
+      server.allowed_tools_json = json.dumps(body.allowed_tools)
+
+    await db.commit()
+    await db.refresh(server)
+
+    return McpServerInfo(
+      id=server.id,
+      name=server.name,
+      description=server.description or "",
+      endpoint_url=server.endpoint_url,
+      transport_type=server.transport_type,
+      auth_type=server.auth_type,
+      status=server.status,
+      allowed_tools=json.loads(server.allowed_tools_json) if server.allowed_tools_json else [],
+      created_at=server.created_at.isoformat() if server.created_at else None,
+      updated_at=server.updated_at.isoformat() if server.updated_at else None,
+    )
+
+
 @router.delete("/mcp-servers/{server_id}")
 async def delete_my_mcp_server(
   server_id: str,
@@ -482,4 +543,5 @@ async def test_my_mcp_server(
     "status": "connected" if is_valid else "error",
     "endpoint_url": server.endpoint_url,
   }
+
 
