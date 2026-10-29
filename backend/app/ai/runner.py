@@ -9,6 +9,11 @@ from app.ai.artifacts import artifacts_to_dict, extract_artifacts
 from app.ai.logging import log_ai_call
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import resolve_provider
+from app.ai.section_generator import (
+    create_document_plan,
+    is_section_generation_candidate,
+    stream_sections,
+)
 from app.ai.request_types import (
     DocumentFeatureRequest,
     GroundedFeatureRequest,
@@ -161,7 +166,7 @@ async def run_grounded_feature(
         return prep
 
     provider = resolve_provider(user_id=user_id)
-    completion = await provider.complete(prep.messages, max_tokens=4096)
+    completion = await provider.complete(prep.messages)
 
     citations = [
         {
@@ -236,7 +241,7 @@ async def run_grounded_feature_stream(
     provider = resolve_provider(user_id=user_id)
     accumulated_text: list[str] = []
 
-    async for chunk in provider.complete_stream(prep.messages, max_tokens=8192):
+    async for chunk in provider.complete_stream(prep.messages):
         accumulated_text.append(chunk)
         yield chunk
 
@@ -301,6 +306,7 @@ class AgenticChatConfig:
     template_content: str | None = None
     images: list[dict[str, str]] | None = None
     attached_docs: list[dict[str, Any]] | None = None
+    current_document: str | None = None
     user_id: str | None = None
 
 
@@ -379,6 +385,8 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
         user_prompt_sections.append(f"DOCUMENTOS Y CONTEXTO DISPONIBLE:\n{bundle_text}")
     if cfg.template_content and cfg.intent == "template_mutation":
         user_prompt_sections.append(f"PLANTILLA CORPORATIVA:\n{cfg.template_content}")
+    if cfg.current_document and cfg.current_document.strip():
+        user_prompt_sections.append(f"DOCUMENTO ACTUAL EN EDICIÓN:\n{cfg.current_document}")
     user_prompt_sections.append(f"SOLICITUD DEL USUARIO:\n{cfg.query}")
 
     full_user_text = "\n\n".join(user_prompt_sections)
@@ -388,9 +396,37 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
     provider = resolve_provider(user_id=cfg.user_id)
     accumulated_text: list[str] = []
 
-    async for chunk in provider.complete_stream(messages, max_tokens=8192):
-        accumulated_text.append(chunk)
-        yield chunk
+    has_attachments = bool(cfg.attached_docs or cfg.images or cfg.document_ids)
+    use_sections = is_section_generation_candidate(cfg.intent, cfg.query, has_attachments=has_attachments)
+    plan = None
+    if use_sections:
+        plan = await create_document_plan(provider, cfg.query, full_user_text)
+
+    try:
+        if plan:
+            async for chunk in stream_sections(provider, plan, full_user_text, sys_prompt):
+                accumulated_text.append(chunk)
+                yield chunk
+        else:
+            async for chunk in provider.complete_stream(messages):
+                accumulated_text.append(chunk)
+                yield chunk
+    except Exception as exc:
+        err_str = str(exc)
+        if ("OTPM" in err_str or "output tokens per minute" in err_str or "reduce max_tokens" in err_str) and getattr(provider, "id", "") == "groq":
+            current_m = getattr(provider, "default_model", "")
+            if "llama-3.3-70b-versatile" not in current_m:
+                fallback_provider = resolve_provider(provider_name="groq", model_name="llama-3.3-70b-versatile", user_id=cfg.user_id)
+                if plan:
+                    async for chunk in stream_sections(fallback_provider, plan, full_user_text, sys_prompt):
+                        accumulated_text.append(chunk)
+                        yield chunk
+                else:
+                    async for chunk in fallback_provider.complete_stream(messages):
+                        accumulated_text.append(chunk)
+                        yield chunk
+                return
+        raise
 
     full_output = "".join(accumulated_text)
     log_ai_call({

@@ -138,7 +138,29 @@ class TestSectionGenerator:
         assert is_section_generation_candidate("chat", "elabora un plan de pruebas para la API") is True
         assert is_section_generation_candidate("chat", "genera un informe detallado de rendimiento") is True
         assert is_section_generation_candidate("chat", "/plan pruebas de carga") is True
+        assert is_section_generation_candidate("chat", "/tecnico_validacion") is True
+        assert is_section_generation_candidate("tecnico_validacion", "/tecnico_validacion") is True
+        assert is_section_generation_candidate("chat", "validación y auditoría de requerimientos") is True
+        assert is_section_generation_candidate("chat", "procesar archivo", has_attachments=True) is True
         assert is_section_generation_candidate("chat", "explícame qué es una prueba unitaria") is False
+
+    def test_clean_and_parse_plan_json_with_intro_commentary(self):
+        raw = """Aquí tienes la estructura requerida:
+        ```json
+        {
+          "title": "Auditoría de Validación Técnica",
+          "extension": "docx",
+          "chat_intro": "He organizado la auditoría.",
+          "sections": [
+            {"title": "1. Hallazgos", "instructions": "Detallar"}
+          ]
+        }
+        ```
+        Espero sea de ayuda."""
+        plan = _parse_plan_json(raw)
+        assert plan is not None
+        assert plan.title == "Auditoría de Validación Técnica"
+        assert len(plan.sections) == 1
 
     def test_clean_and_parse_plan_json(self):
         json_str = """```json

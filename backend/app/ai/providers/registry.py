@@ -87,6 +87,32 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
   ),
 }
 
+KNOWN_MODEL_MAX_OUTPUT: tuple[tuple[str, int], ...] = (
+  ("gpt-4o", 16384),
+  ("gpt-4.1", 16384),
+  ("o1", 65536),
+  ("o3", 65536),
+  ("claude-3-7", 16384),
+  ("claude-3-5", 8192),
+  ("gemini-2", 8192),
+  ("gemini-1.5", 8192),
+  ("gemini", 8192),
+  ("deepseek", 8192),
+  ("llama-3.3", 8192),
+  ("llama-3.1", 8192),
+  ("qwen3.8-27b", 950),
+  ("qwen/qwen3.8-27b", 950),
+  ("qwen2.5", 8192),
+)
+
+
+def _get_known_family_limit(model_name: str) -> int | None:
+  lower = model_name.lower()
+  for prefix, limit in KNOWN_MODEL_MAX_OUTPUT:
+    if prefix in lower:
+      return limit
+  return None
+
 
 def find_provider_spec(identifier: str) -> ProviderSpec | None:
   """Lookup provider spec by id or alias."""
@@ -120,7 +146,6 @@ def resolve_model_max_tokens(
   spec = find_provider_spec(prov_clean)
   model_clean = (model_name or (spec.default_model if spec else "")).strip()
 
-  # Check catalog metadata for model limit
   model_limit = None
   try:
     from app.ai.catalog import load_local_catalog
@@ -138,14 +163,23 @@ def resolve_model_max_tokens(
   except Exception:
     pass
 
-  default_limit = (spec.default_max_tokens if spec else None) or (8192 if is_stream else 4096)
+  if model_limit is None:
+    model_limit = _get_known_family_limit(model_clean)
 
-  if model_limit is not None:
-    if requested_max is not None:
-      return max(1, min(requested_max, model_limit))
-    return max(1, model_limit)
+  if spec and spec.default_max_tokens:
+    if not is_stream:
+      if model_limit is not None:
+        model_limit = min(model_limit, spec.default_max_tokens)
+      else:
+        model_limit = spec.default_max_tokens
+    elif model_limit is None:
+      model_limit = spec.default_max_tokens
+
+  default_limit = model_limit or (8192 if is_stream else 4096)
 
   if requested_max is not None:
+    if model_limit is not None:
+      return max(1, min(requested_max, model_limit))
     return max(1, requested_max)
 
   return max(1, default_limit)

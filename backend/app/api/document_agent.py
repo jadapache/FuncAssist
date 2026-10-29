@@ -449,9 +449,10 @@ async def handle_agentic_prompt(
         sources=sources_to_use,
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
-        template_content=_load_active_template_content(req.template_id),
+        template_content=await _load_active_template_content(req.template_id),
         images=req.images,
         attached_docs=req.attached_docs,
+        current_document=req.current_document,
         user_id=user_id,
     )
 
