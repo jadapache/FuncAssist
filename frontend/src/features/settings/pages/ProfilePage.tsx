@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import {
+  Activity,
   AlertCircle,
+  Brain,
   Calendar,
   Check,
   CheckCircle2,
@@ -10,13 +12,16 @@ import {
   Key,
   Layers,
   Pencil,
+  Plug,
   Server,
   Shield,
   User as UserIcon,
   X,
+  Zap,
 } from 'lucide-react'
 import { api } from '../../../api/client'
 import { PageHeader } from '../../../components/common'
+import { StatCard } from '../../../components/ui/StatCard'
 import { useAuth } from '../../../context/AuthContext'
 import { useUser, type UserRole } from '../../../context/UserContext'
 import { useToast } from '../../../context/ToastContext'
@@ -24,7 +29,12 @@ import { ChangePasswordModal } from '../components/ChangePasswordModal'
 import { AIProviderSettings } from '../components/AIProviderSettings'
 import { JiraIntegrationCard } from '../components/JiraIntegrationCard'
 import { MCPServersSection } from '../components/MCPServersSection'
+import {
+  SystemConfigProgressBadge,
+  type ConfigProgressItem,
+} from '../components/SystemConfigProgressBadge'
 import type { JiraConnectionStatus, McpServerInfo, McpServerPayload } from '../types'
+import type { IntegrationInfo } from '../../../types'
 
 type OutletContext = {
   displayName: string
@@ -94,6 +104,11 @@ export const ProfilePage = () => {
   // MCP Servers State
   const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([])
   const [loadingMcp, setLoadingMcp] = useState(false)
+
+  // System Health & Integrations State
+  const [backendOk, setBackendOk] = useState<boolean | null>(null)
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null)
+  const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
 
   // Status & Feedback
   const [message, setMessage] = useState<string | null>(null)
@@ -172,11 +187,69 @@ export const ProfilePage = () => {
     }
   }
 
+  const loadSystemStatus = async () => {
+    try {
+      await api.health()
+      setBackendOk(true)
+    } catch {
+      setBackendOk(false)
+    }
+    try {
+      const [items, ai] = await Promise.all([api.getIntegrations(), api.getAiSettings()])
+      setIntegrations(items)
+      setAiConfigured(Boolean(ai.provider || ai.model))
+    } catch {
+      setIntegrations([])
+      setAiConfigured(false)
+    }
+  }
+
   useEffect(() => {
     void loadProfile()
     void loadJira()
     void loadMcpServers()
+    void loadSystemStatus()
   }, [])
+
+  const connectedIntegrationsCount = integrations.filter((item) => item.status === 'connected').length
+  const totalIntegrations = integrations.length
+
+  const configItems: ConfigProgressItem[] = useMemo(() => [
+    {
+      id: 'ai_model',
+      label: 'Modelo (Inferencia/Transcripción)',
+      description: aiConfigured ? 'Proveedor de IA o modelo configurado' : 'Requiere seleccionar modelo o proveedor',
+      done: Boolean(aiConfigured),
+      tabTarget: 'ai_providers',
+    },
+    {
+      id: 'jira',
+      label: 'Integración Jira',
+      description: jiraStatus?.connected ? 'Jira Software conectado' : 'Conecta Jira Software',
+      done: Boolean(jiraStatus?.connected || integrations.find((i) => i.id === 'jira')?.status === 'connected'),
+      tabTarget: 'integrations',
+    },
+    {
+      id: 'mcp',
+      label: 'Servidores MCP',
+      description: mcpServers.length > 0 ? `${mcpServers.length} servidor(es) configurado(s)` : 'Sin servidores MCP registrados',
+      done: mcpServers.length > 0,
+      tabTarget: 'mcp',
+    },
+    {
+      id: 'backend',
+      label: 'Conexión Backend',
+      description: backendOk ? 'FastAPI respondiendo' : 'Servidor FastAPI desconectado',
+      done: Boolean(backendOk),
+    },
+  ], [aiConfigured, jiraStatus, integrations, mcpServers, backendOk])
+
+  const readinessScore = useMemo(() => {
+    const total = configItems.length
+    if (total === 0) return 0
+    const completed = configItems.filter((item) => item.done).length
+    return Math.round((completed / total) * 100)
+  }, [configItems])
 
   const handleSaveName = async () => {
     if (!nameInput.trim()) {
@@ -358,7 +431,19 @@ export const ProfilePage = () => {
       <PageHeader
         eyebrow="CUENTA & PREFERENCIAS"
         title="Perfil de Usuario"
-        subtitle="Administra tu cuenta, modelos de IA, claves BYOK, integraciones y servidores MCP."
+        subtitle={
+          <div className="flex flex-wrap items-center gap-3">
+            <span>Administra tu cuenta, modelos de IA, claves BYOK, integraciones y servidores MCP.</span>
+            <SystemConfigProgressBadge
+              items={configItems}
+              progressPercentage={readinessScore}
+              onNavigateTab={(tab) => {
+                setActiveTab(tab)
+                setSearchParams({ tab }, { replace: true })
+              }}
+            />
+          </div>
+        }
       />
 
       {/* Global Alerts */}
@@ -375,6 +460,43 @@ export const ProfilePage = () => {
           <span>{error}</span>
         </div>
       ) : null}
+
+      {/* Stats Cards transferred from Dashboard */}
+      <section aria-label="Métricas del sistema" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Backend"
+          value={backendOk === null ? '…' : backendOk ? 'En línea' : 'Desconectado'}
+          icon={Activity}
+          accent={backendOk ? 'emerald' : 'amber'}
+          trend={backendOk ? 'API respondiendo' : 'Inicia el servidor FastAPI'}
+          loading={backendOk === null}
+        />
+        <StatCard
+          label="Integraciones"
+          value={totalIntegrations ? `${connectedIntegrationsCount} / ${totalIntegrations}` : `${connectedIntegrationsCount}`}
+          icon={Plug}
+          accent="cyan"
+          trend={connectedIntegrationsCount === totalIntegrations && totalIntegrations > 0 ? 'Todas las fuentes vinculadas' : 'Conecta Jira, GitHub y GitLab'}
+          to="/profile?tab=integrations"
+        />
+        <StatCard
+          label="Proveedor de IA"
+          value={aiConfigured === null ? '…' : aiConfigured ? 'Configurado' : 'Requiere config.'}
+          icon={Brain}
+          accent={aiConfigured ? 'primary' : 'amber'}
+          trend={aiConfigured ? 'Listo para ejecuciones' : 'Añade la clave en Configuración'}
+          loading={aiConfigured === null}
+          to="/profile?tab=ai_providers"
+        />
+        <StatCard
+          label="Búsqueda RAG"
+          value="BM25"
+          icon={Zap}
+          accent="primary"
+          trend="Contexto en vivo y documentos"
+          to="/knowledge"
+        />
+      </section>
 
       {/* Profile Navigation Tabs */}
       <nav className="flex flex-wrap gap-2 rounded-2xl border border-[var(--color-border)] bg-slate-100/70 p-1.5 shadow-sm">
