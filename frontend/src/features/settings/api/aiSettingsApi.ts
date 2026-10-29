@@ -55,64 +55,79 @@ export const aiSettingsApi = {
     }).then((r) => handleResponse<{ ok: boolean; status?: string; message: string; response?: string }>(r)),
 
   listOllamaModels: (baseUrl?: string) =>
-    fetch(`${API_BASE}/api/ai/ollama/models${baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : ''}`).then(
+    fetch(`${API_BASE}/api/ai/ollama/models${baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : ''}`, {
+      headers: { ...getAuthHeaders() },
+    }).then(
       (r) => handleResponse<{ online: boolean; models: string[]; error?: string }>(r),
     ),
 
   pullOllamaModel: (name: string, baseUrl?: string) =>
     fetch(`${API_BASE}/api/ai/ollama/pull`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ name, base_url: baseUrl }),
     }).then((r) => handleResponse<{ status: string; model: string }>(r)),
 
   deleteOllamaModel: (name: string, baseUrl?: string) =>
     fetch(`${API_BASE}/api/ai/ollama/${encodeURIComponent(name)}${baseUrl ? `?base_url=${encodeURIComponent(baseUrl)}` : ''}`, {
       method: 'DELETE',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; message: string; model: string }>(r)),
 
   getPrompt: (feature: string) =>
-    fetch(`${API_BASE}/api/ai/prompts/${feature}`).then((r) => handleResponse<Record<string, unknown>>(r)),
+    fetch(`${API_BASE}/api/ai/prompts/${feature}`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
   updatePrompt: (feature: string, payload: Record<string, unknown>) =>
     fetch(`${API_BASE}/api/ai/prompts/${feature}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
   getRubric: (feature: string) =>
-    fetch(`${API_BASE}/api/ai/rubrics/${feature}`).then((r) => handleResponse<Record<string, unknown>>(r)),
+    fetch(`${API_BASE}/api/ai/rubrics/${feature}`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
   updateRubric: (feature: string, criteria: string[]) =>
     fetch(`${API_BASE}/api/ai/rubrics/${feature}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ criteria }),
     }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
   listWhisperModels: () =>
-    fetch(`${API_BASE}/api/ai/whisper/models`).then((r) =>
+    fetch(`${API_BASE}/api/ai/whisper/models`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) =>
       handleResponse<{ ok: boolean; models: Array<{ id: string; name: string; size: string; accuracy: string; description: string; is_downloaded: boolean; disk_size_mb: number }> }>(r),
     ),
 
   downloadWhisperModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/whisper/download/${modelId}`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; model_id: string; file_path: string; message: string }>(r)),
 
   deleteWhisperModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/whisper/${modelId}`, {
       method: 'DELETE',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; message: string }>(r)),
 
   listBuiltinModels: () =>
-    fetch(`${API_BASE}/api/ai/builtin/models`).then((r) =>
+    fetch(`${API_BASE}/api/ai/builtin/models`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) =>
       handleResponse<{ ok: boolean; models: Array<{ id: string; name: string; size: string; tokens?: string; description: string; filename?: string; is_downloaded: boolean; disk_size_mb: number; file_path: string | null }> }>(r),
     ),
 
   getBuiltinDownloadTasks: () =>
-    fetch(`${API_BASE}/api/ai/builtin/tasks`).then((r) =>
+    fetch(`${API_BASE}/api/ai/builtin/tasks`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) =>
       handleResponse<{
         ok: boolean
         tasks: Array<{
@@ -130,16 +145,19 @@ export const aiSettingsApi = {
   downloadBuiltinModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/builtin/download/${encodeURIComponent(modelId)}`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; model_id: string; file_path: string; message: string }>(r)),
 
   cancelBuiltinModelDownload: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/builtin/cancel/${encodeURIComponent(modelId)}`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; model_id: string; message: string }>(r)),
 
   deleteBuiltinModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/builtin/${encodeURIComponent(modelId)}`, {
       method: 'DELETE',
+      headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; message: string }>(r)),
 
   getUserPreferences: () =>

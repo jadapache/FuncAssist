@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Mic, Square } from 'lucide-react'
-import { API_BASE } from '../../../api/client'
+import { API_BASE, getAuthHeaders } from '../../../api/client'
 
 export interface VoiceInputProps {
   onTranscriptionReady: (text: string) => void
@@ -158,6 +158,7 @@ async function uploadAudioSnippet(
 
     const res = await fetch(`${API_BASE}/api/transcription/dictate`, {
       method: 'POST',
+      headers: { ...getAuthHeaders() },
       body: formData,
     })
 
