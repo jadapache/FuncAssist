@@ -650,13 +650,13 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
         except Exception as db_err:
             logger.debug(f"Failed to persist frontier models catalog into DB: {db_err}")
 
-        # Support test mocking if CATALOG_FILE was explicitly redirected to a temporary test directory
-        if target_file and target_file != (USER_DATA_DIR / "ai" / "models_catalog.json"):
+        # Also persist to local catalog cache file on disk
+        if target_file:
             try:
                 target_file.parent.mkdir(parents=True, exist_ok=True)
                 target_file.write_text(json.dumps(validated_list, indent=2, ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as file_err:
+                logger.debug(f"Failed to write catalog file to {target_file}: {file_err}")
 
         # Invalidate catalog memory cache in catalog module
         try:
