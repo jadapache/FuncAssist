@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_chat_repository, get_optional_current_user
+from app.api.deps import get_chat_repository, get_current_user
 from app.db.repositories import ChatRepository
 from app.features.drafts.storage import (
   delete_generated_draft,
@@ -35,15 +35,14 @@ class SaveDraftRequest(BaseModel):
 @router.post("/save")
 async def save_draft(
   body: SaveDraftRequest,
-  current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: Dict[str, Any] = Depends(get_current_user),
   chat_repo: ChatRepository = Depends(get_chat_repository),
 ) -> Dict[str, Any]:
   """Save conversation and its artifacts to PostgreSQL entity and Documents/QA MGMT/Borradores."""
   try:
     payload = body.model_dump()
-    user_id = current_user.get("id") if current_user else None
-    if user_id:
-      payload["user_id"] = user_id
+    user_id = current_user["id"]
+    payload["user_id"] = user_id
 
     # 1. Save session and artifacts to PostgreSQL
     await chat_repo.save_session(payload)
@@ -72,10 +71,10 @@ async def save_draft(
 @router.get("/list")
 async def list_drafts(
   specification: Optional[str] = None,
-  current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
   """List all saved drafts filtered by user and optionally specification."""
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   items = list_generated_drafts(specification=specification, user_id=user_id)
   return {"ok": True, "drafts": items}
 
@@ -92,11 +91,11 @@ async def get_draft(draft_id: str) -> Dict[str, Any]:
 @router.delete("/{draft_id}")
 async def delete_draft(
   draft_id: str,
-  current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: Dict[str, Any] = Depends(get_current_user),
   chat_repo: ChatRepository = Depends(get_chat_repository),
 ) -> Dict[str, Any]:
   """Delete a draft session from database and disk."""
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   await chat_repo.delete_session(draft_id, user_id=user_id)
   deleted = delete_generated_draft(draft_id)
   return {"ok": True, "message": "Borrador eliminado con éxito."}

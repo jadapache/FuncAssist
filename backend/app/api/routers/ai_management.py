@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import get_ai_settings, resolve_provider
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.features.transcription.whisper_local import (
     cancel_whisper_download,
@@ -92,9 +92,9 @@ def _verify_builtin_model(model_name: str) -> dict[str, Any]:
 @handle_grounded_errors
 async def test_ai_connection(
     body: AITestConnectionRequest = Body(...),
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     config = get_ai_settings(user_id=user_id)
     provider_name = (body.provider or config.get("provider") or "").lower()
     model_name = (body.model or config.get("model") or "").strip()

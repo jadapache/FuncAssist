@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user, get_optional_current_user
+from app.api.deps import get_current_user
 from app.core.rls_context import set_rls_context
 from app.core.settings import get_settings
 from app.core.storage_credentials import (

@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.api.deps import (
   get_chat_repository,
-  get_optional_current_user,
+  get_current_user,
   get_prd_repository,
   get_standup_repository,
   get_test_plan_repository,
@@ -111,10 +111,10 @@ async def set_db_setting(body: SettingSetRequest) -> dict[str, Any]:
 async def get_chat_sessions(
   feature_slug: Optional[str] = None,
   limit: int = 50,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   sessions = await repo.get_user_sessions(user_id=user_id, feature_slug=feature_slug, limit=limit)
   return {"sessions": sessions}
 
@@ -122,12 +122,11 @@ async def get_chat_sessions(
 @router.post("/chat/sessions")
 async def save_chat_session(
   body: ChatSessionSaveRequest,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
   data = body.model_dump(exclude_none=True)
-  if current_user:
-    data["user_id"] = current_user["id"]
+  data["user_id"] = current_user["id"]
   session = await repo.save_session(data)
   return {"ok": True, "session": session}
 
@@ -135,10 +134,10 @@ async def save_chat_session(
 @router.get("/chat/sessions/{session_id}")
 async def get_chat_session(
   session_id: str,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   session = await repo.get_session(session_id, user_id=user_id)
   return {"session": session}
 
@@ -146,10 +145,10 @@ async def get_chat_session(
 @router.delete("/chat/sessions/{session_id}")
 async def delete_chat_session(
   session_id: str,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   await repo.delete_session(session_id, user_id=user_id)
   return {"ok": True, "session_id": session_id}
 
@@ -159,10 +158,10 @@ async def delete_chat_session(
 async def get_chat_messages(
   session_id: str,
   limit: int = 100,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   history = await repo.get_session_messages(session_id, limit=limit, user_id=user_id)
   return {"session_id": session_id, "messages": history}
 
@@ -171,10 +170,10 @@ async def get_chat_messages(
 async def post_chat_message(
   session_id: str,
   body: ChatMessageCreate,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: ChatRepository = Depends(get_chat_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   message = await repo.save_message(
     session_id=session_id,
     role=body.role,
@@ -199,10 +198,10 @@ async def delete_chat_messages(
 @router.get("/history/standups")
 async def get_standup_history(
   limit: int = 20,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: StandupRepository = Depends(get_standup_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   items = await repo.get_all_standups(limit=limit, user_id=user_id)
   return {"standups": items}
 
@@ -210,10 +209,10 @@ async def get_standup_history(
 @router.get("/history/prd-reviews")
 async def get_prd_history(
   limit: int = 20,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: PRDRepository = Depends(get_prd_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   items = await repo.get_all_prd_reviews(limit=limit, user_id=user_id)
   return {"prd_reviews": items}
 
@@ -221,9 +220,9 @@ async def get_prd_history(
 @router.get("/history/test-plans")
 async def get_test_plan_history(
   limit: int = 20,
-  current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+  current_user: dict[str, Any] = Depends(get_current_user),
   repo: TestPlanRepository = Depends(get_test_plan_repository),
 ) -> dict[str, Any]:
-  user_id = current_user.get("id") if current_user else None
+  user_id = current_user["id"]
   items = await repo.get_all_test_plans(limit=limit, user_id=user_id)
   return {"test_plans": items}

@@ -58,7 +58,13 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de autorización inválido o expirado.",
         )
-    user = await user_repo.get_by_username(payload["username"])
+    try:
+        user = await user_repo.get_by_username(payload["username"])
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Error al conectar con la base de datos de usuarios.",
+        ) from exc
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado.")
     if user.get("status") != "approved":
@@ -68,22 +74,6 @@ async def get_current_user(
         )
     return {k: v for k, v in user.items() if k not in ("password_hash", "password_salt")}
 
-
-async def get_optional_current_user(
-    authorization: str | None = Header(default=None),
-    user_repo: IUserRepository = Depends(get_user_repository),
-) -> Optional[dict[str, Any]]:
-    """Dependency to optionally retrieve current user from Bearer JWT token if provided."""
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    token = authorization.split(" ")[1].strip()
-    payload = decode_access_token(token)
-    if not payload or "username" not in payload:
-        return None
-    user = await user_repo.get_by_username(payload["username"])
-    if not user or user.get("status") != "approved":
-        return None
-    return {k: v for k, v in user.items() if k not in ("password_hash", "password_salt")}
 
 
 async def get_current_admin_user(

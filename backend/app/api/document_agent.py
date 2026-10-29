@@ -12,7 +12,7 @@ import logging
 import uuid
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_current_user
 from app.db.repositories import ChatRepository
 from app.context.knowledge import extract_text
 from app.services.event_serializer import AgentRunEmitter, run_registry
@@ -282,7 +282,7 @@ def validate_operation(payload: Dict[str, Any]):
 @router.post("/agentic-prompt", response_model=AgenticPromptResponse)
 async def handle_agentic_prompt(
     req: AgenticPromptRequest,
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     chat_repo: ChatRepository = Depends(ChatRepository),
 ):
     """
@@ -290,7 +290,7 @@ async def handle_agentic_prompt(
     Translates raw user prompt + RAG/Document context into structured canonical operations.
     Supports insertions, image attachments, corrections, and modifications.
     """
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
     active_doc_state = req.doc_state
@@ -518,14 +518,14 @@ async def handle_agentic_prompt(
 @router.post("/agentic-prompt-stream")
 async def handle_agentic_prompt_stream(
     req: AgenticPromptRequest,
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     chat_repo: ChatRepository = Depends(ChatRepository),
 ):
     """
     Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
     Streams token events live as text is produced by the LLM.
     """
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
 
