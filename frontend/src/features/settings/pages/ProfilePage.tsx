@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import {
-  Activity,
   AlertCircle,
   Brain,
   Calendar,
@@ -27,7 +26,7 @@ import { useUser, type UserRole } from '../../../context/UserContext'
 import { useToast } from '../../../context/ToastContext'
 import { ChangePasswordModal } from '../components/ChangePasswordModal'
 import { AIProviderSettings } from '../components/AIProviderSettings'
-import { JiraIntegrationCard } from '../components/JiraIntegrationCard'
+import { IntegrationsPanel } from '../components/IntegrationsPanel'
 import { MCPServersSection } from '../components/MCPServersSection'
 import {
   SystemConfigProgressBadge,
@@ -99,15 +98,14 @@ export const ProfilePage = () => {
 
   // Jira Integration State
   const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null)
-  const [loadingJira, setLoadingJira] = useState(false)
 
   // MCP Servers State
   const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([])
   const [loadingMcp, setLoadingMcp] = useState(false)
 
   // System Health & Integrations State
-  const [backendOk, setBackendOk] = useState<boolean | null>(null)
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null)
+  const [configuredAiLabel, setConfiguredAiLabel] = useState<string | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
 
   // Status & Feedback
@@ -164,14 +162,11 @@ export const ProfilePage = () => {
   }
 
   const loadJira = async () => {
-    setLoadingJira(true)
     try {
       const st = await api.getJiraStatus()
       setJiraStatus(st)
     } catch {
       // Fallback
-    } finally {
-      setLoadingJira(false)
     }
   }
 
@@ -189,15 +184,18 @@ export const ProfilePage = () => {
 
   const loadSystemStatus = async () => {
     try {
-      await api.health()
-      setBackendOk(true)
-    } catch {
-      setBackendOk(false)
-    }
-    try {
-      const [items, ai] = await Promise.all([api.getIntegrations(), api.getAiSettings()])
+      const [items, ai, userPrefs] = await Promise.all([
+        api.getIntegrations().catch(() => []),
+        api.getAiSettings().catch(() => null),
+        api.getUserPreferences().catch(() => null),
+      ])
       setIntegrations(items)
-      setAiConfigured(Boolean(ai.provider || ai.model))
+      const activeProvider = userPrefs?.inference_provider || ai?.provider
+      const activeModel = userPrefs?.inference_model || ai?.model
+      const activeTransProvider = userPrefs?.transcription_provider || ai?.transcription_provider
+      const activeTransModel = userPrefs?.transcription_model || ai?.transcription_model
+      setAiConfigured(Boolean(activeProvider || activeModel || activeTransProvider || activeTransModel))
+      setConfiguredAiLabel(activeModel || activeProvider || null)
     } catch {
       setIntegrations([])
       setAiConfigured(false)
@@ -218,7 +216,9 @@ export const ProfilePage = () => {
     {
       id: 'ai_model',
       label: 'Modelo (Inferencia/Transcripción)',
-      description: aiConfigured ? 'Proveedor de IA o modelo configurado' : 'Requiere seleccionar modelo o proveedor',
+      description: aiConfigured
+        ? (configuredAiLabel ? `Configurado: ${configuredAiLabel}` : 'Modelo de IA configurado')
+        : 'Requiere seleccionar modelo o proveedor',
       done: Boolean(aiConfigured),
       tabTarget: 'ai_providers',
     },
@@ -236,13 +236,7 @@ export const ProfilePage = () => {
       done: mcpServers.length > 0,
       tabTarget: 'mcp',
     },
-    {
-      id: 'backend',
-      label: 'Conexión Backend',
-      description: backendOk ? 'FastAPI respondiendo' : 'Servidor FastAPI desconectado',
-      done: Boolean(backendOk),
-    },
-  ], [aiConfigured, jiraStatus, integrations, mcpServers, backendOk])
+  ], [aiConfigured, configuredAiLabel, jiraStatus, integrations, mcpServers])
 
   const readinessScore = useMemo(() => {
     const total = configItems.length
@@ -322,40 +316,6 @@ export const ProfilePage = () => {
     toast.success(successMsg)
   }
 
-  // Jira Actions
-  const handleConnectJiraOAuth = async () => {
-    try {
-      const res = await api.startUserJiraOAuth()
-      if (res.authorization_url) {
-        window.location.href = res.authorization_url
-      } else {
-        toast.error('No se pudo generar la URL de autorización de Atlassian.')
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al iniciar conexión OAuth con Jira.')
-    }
-  }
-
-  const handleConnectJiraPat = async (token: string, email?: string, url?: string) => {
-    try {
-      await api.connectUserJiraPat({ token, email, jira_url: url })
-      toast.success('Jira conectado con éxito mediante Personal Access Token.')
-      await loadJira()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al conectar Jira con PAT.')
-    }
-  }
-
-  const handleDisconnectJira = async () => {
-    try {
-      await api.disconnectJiraOAuth()
-      toast.success('Jira Software desconectado de tu perfil.')
-      await loadJira()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al desconectar Jira.')
-    }
-  }
-
   // MCP Actions
   const handleAddMcpServer = async (payload: McpServerPayload) => {
     try {
@@ -433,7 +393,7 @@ export const ProfilePage = () => {
         title="Perfil de Usuario"
         subtitle={
           <div className="flex flex-wrap items-center gap-3">
-            <span>Administra tu cuenta, modelos de IA, claves BYOK, integraciones y servidores MCP.</span>
+            <span>Administra tu cuenta, modelos de IA, integraciones y servidores MCP.</span>
             <SystemConfigProgressBadge
               items={configItems}
               progressPercentage={readinessScore}
@@ -461,22 +421,14 @@ export const ProfilePage = () => {
         </div>
       ) : null}
 
-      {/* Stats Cards transferred from Dashboard */}
-      <section aria-label="Métricas del sistema" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Backend"
-          value={backendOk === null ? '…' : backendOk ? 'En línea' : 'Desconectado'}
-          icon={Activity}
-          accent={backendOk ? 'emerald' : 'amber'}
-          trend={backendOk ? 'API respondiendo' : 'Inicia el servidor FastAPI'}
-          loading={backendOk === null}
-        />
+      {/* Stats Cards */}
+      <section aria-label="Métricas del sistema" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard
           label="Integraciones"
           value={totalIntegrations ? `${connectedIntegrationsCount} / ${totalIntegrations}` : `${connectedIntegrationsCount}`}
           icon={Plug}
           accent="cyan"
-          trend={connectedIntegrationsCount === totalIntegrations && totalIntegrations > 0 ? 'Todas las fuentes vinculadas' : 'Conecta Jira, GitHub y GitLab'}
+          trend={connectedIntegrationsCount === totalIntegrations && totalIntegrations > 0 ? 'Todas las fuentes vinculadas' : 'Conecta tus herramientas de trabajo'}
           to="/profile?tab=integrations"
         />
         <StatCard
@@ -484,7 +436,7 @@ export const ProfilePage = () => {
           value={aiConfigured === null ? '…' : aiConfigured ? 'Configurado' : 'Requiere config.'}
           icon={Brain}
           accent={aiConfigured ? 'primary' : 'amber'}
-          trend={aiConfigured ? 'Listo para ejecuciones' : 'Añade la clave en Configuración'}
+          trend={aiConfigured ? 'Listo para ejecuciones' : 'Selecciona tu modelo en Perfil'}
           loading={aiConfigured === null}
           to="/profile?tab=ai_providers"
         />
@@ -715,20 +667,12 @@ export const ProfilePage = () => {
       )}
 
       {/* Tab 2: Modelos y Proveedores de IA */}
-      {activeTab === 'ai_providers' && <AIProviderSettings />}
+      {activeTab === 'ai_providers' && <AIProviderSettings onSaved={() => void loadSystemStatus()} />}
 
-      {/* Tab 3: Integraciones Personales (Jira) */}
+      {/* Tab 3: Integraciones */}
       {activeTab === 'integrations' && (
         <div className="space-y-6">
-          <JiraIntegrationCard
-            status={jiraStatus}
-            loading={loadingJira}
-            onRefresh={loadJira}
-            onConnectOAuth={handleConnectJiraOAuth}
-            onConnectPat={handleConnectJiraPat}
-            onDisconnect={handleDisconnectJira}
-            isAdmin={activeRole === 'admin'}
-          />
+          <IntegrationsPanel />
         </div>
       )}
 
