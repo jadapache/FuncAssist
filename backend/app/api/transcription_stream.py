@@ -6,12 +6,18 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from app.api.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/transcription", tags=["transcription-streaming"])
+router = APIRouter(
+  prefix="/transcription",
+  tags=["transcription-streaming"],
+  dependencies=[Depends(get_current_user)],
+)
 
 # Global store: transcription_id -> Set of subscriber asyncio.Queue
 _PROGRESS_SUBSCRIBERS: Dict[str, set[asyncio.Queue]] = {}

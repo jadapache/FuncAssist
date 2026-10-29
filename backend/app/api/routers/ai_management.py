@@ -27,7 +27,11 @@ from app.ai.builtin_local import (
     resolve_model_meta,
 )
 
-router = APIRouter(prefix="/ai", tags=["ai-management"])
+router = APIRouter(
+    prefix="/ai",
+    tags=["ai-management"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class AITestConnectionRequest(BaseModel):

@@ -1,3 +1,4 @@
+
 import os
 import sys
 
@@ -30,7 +31,7 @@ async def lifespan(app: FastAPI):
   import asyncio
   from app.api.transcription_stream import set_main_loop
   from app.core.index_refresher import run_index_refresher
-  
+
   loop = asyncio.get_running_loop()
   set_main_loop(loop)
   ensure_local_dirs()
@@ -64,21 +65,25 @@ def create_app() -> FastAPI:
   secret = settings.secret_key or os.getenv("SECRET_KEY")
   if not secret or not secret.strip():
     raise RuntimeError("SECRET_KEY environment variable is required to start the application")
+
   salt = settings.pbkdf2_salt or os.getenv("PBKDF2_SALT")
   if not salt or not salt.strip():
     raise RuntimeError("PBKDF2_SALT environment variable is required to start the application")
 
   app = FastAPI(
-    title="FuncAssist",
-    description="Local Functional Analysis & Requirements Assistant with grounded AI.",
+    title="FuncAssist API",
+    description="FuncAssist - Functional Analysis & Requirements Assistant.",
     version="0.2.0",
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    swagger_ui_parameters={"persistAuthorization": True},
   )
 
   app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?$|^tauri://.*$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,7 +98,7 @@ def create_app() -> FastAPI:
     if assets_dir.is_dir():
       app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    @app.get("/{full_path:path}")
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str = ""):
       candidate = FRONTEND_DIST / full_path
       if full_path and candidate.is_file():

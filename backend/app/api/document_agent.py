@@ -49,7 +49,11 @@ from app.services.rubric_evaluator import RubricEvaluator
 from app.services.template_renderer.docx_engine import DocxTemplateRenderer
 from app.services.template_renderer.xlsx_engine import XlsxTemplateRenderer
 
-router = APIRouter(prefix="/doc-agent", tags=["document-agent"])
+router = APIRouter(
+    prefix="/doc-agent",
+    tags=["document-agent"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:

@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.api.deps import get_current_user
 
 from app.api import (
   auth,
@@ -46,5 +47,8 @@ api_router.include_router(templates.router)
 
 
 @api_router.post("/runs/{run_id}/cancel")
-async def cancel_run_alias(run_id: str):
+async def cancel_run_alias(
+    run_id: str,
+    current_user: dict = Depends(get_current_user),
+):
     return await document_agent.cancel_agent_run(run_id)

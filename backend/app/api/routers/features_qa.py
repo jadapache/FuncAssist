@@ -3,11 +3,15 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.ai.runner import run_grounded_feature
-from app.api.deps import get_test_plan_repository
+from app.api.deps import get_current_user, get_test_plan_repository
 from app.api.middleware.error_handlers import handle_grounded_errors
 from app.db.repositories import TestPlanRepository
 
-router = APIRouter(prefix="/features", tags=["qa-features"])
+router = APIRouter(
+    prefix="/features",
+    tags=["qa-features"],
+    dependencies=[Depends(get_current_user)],
+)
 
 QA_FEATURE_KEYS = {
     "regression",
