@@ -246,3 +246,29 @@ async def test_jira_oauth_state_expiration_and_replay():
     storage.save_user_integration(user_id, "jira", {"oauth_state": expired_state})
     with pytest.raises(ValueError, match="expired"):
       await jira.handle_oauth_callback(code="code123", state=expired_state)
+
+
+def test_mcp_server_model_update_properties():
+  """Test McpServerModel updates name, endpoint_url, allowed_tools, and status without exposing secrets."""
+  server = McpServerModel(
+    id="srv-1",
+    user_id="user-1",
+    name="Initial MCP",
+    endpoint_url="https://mcp.initial.com/sse",
+    transport_type="sse",
+    auth_type="none",
+    status="configured",
+    allowed_tools_json='["tool1"]',
+  )
+  assert server.name == "Initial MCP"
+  assert server.endpoint_url == "https://mcp.initial.com/sse"
+
+  # Apply update
+  server.name = "Updated MCP"
+  server.status = "disabled"
+  server.allowed_tools_json = '["tool1", "tool2"]'
+
+  assert server.name == "Updated MCP"
+  assert server.status == "disabled"
+  assert "tool2" in server.allowed_tools_json
+

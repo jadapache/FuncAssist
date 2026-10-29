@@ -101,6 +101,20 @@ export const integrationsApi = {
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<JiraConnectionStatus>(r)),
 
+  startUserJiraOAuth: () =>
+    fetch(`${API_BASE}/api/me/integrations/jira/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ auth_method: 'oauth' }),
+    }).then((r) => handleResponse<{ authorization_url: string; state: string; auth_method: string }>(r)),
+
+  connectUserJiraPat: (payload: { token: string; email?: string; jira_url?: string }) =>
+    fetch(`${API_BASE}/api/me/integrations/jira/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ auth_method: 'pat', ...payload }),
+    }).then((r) => handleResponse<{ ok: boolean; status: string }>(r)),
+
   connectJiraOAuth: (payload: { code: string; state: string; redirect_uri?: string }) =>
     fetch(`${API_BASE}/api/me/integrations/jira/connect`, {
       method: 'POST',
@@ -114,3 +128,4 @@ export const integrationsApi = {
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; disconnected: boolean }>(r)),
 }
+

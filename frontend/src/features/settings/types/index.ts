@@ -160,20 +160,51 @@ export type UserPreferences = {
 }
 
 export type ProviderCredentialInfo = {
-  id: string
+  id?: string
   provider: string
-  configured: boolean
-  is_valid: boolean
+  status?: string
+  is_configured?: boolean
+  configured?: boolean
+  is_valid?: boolean
   last_validated_at: string | null
+  validation_error?: string | null
   created_at?: string
   updated_at?: string
 }
 
 export type JiraConnectionStatus = {
   connected: boolean
+  account_email?: string | null
   cloud_id?: string | null
+  jira_url?: string | null
   site_url?: string | null
+  scopes?: string[]
+  expires_at?: number | null
+  status?: string
   configured_at?: string | null
-  expires_at?: string | null
   auth_mode?: string
 }
+
+export type McpServerInfo = {
+  id: string
+  name: string
+  description: string
+  endpoint_url: string
+  transport_type: string
+  auth_type: string
+  status: string
+  allowed_tools: string[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type McpServerPayload = {
+  name: string
+  endpoint_url: string
+  description?: string
+  transport_type?: string
+  auth_type?: string
+  auth_secret?: string
+  allowed_tools?: string[]
+}
+
