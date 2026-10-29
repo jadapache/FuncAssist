@@ -138,37 +138,37 @@ export const aiSettingsApi = {
     }).then((r) => handleResponse<{ ok: boolean; message: string }>(r)),
 
   getUserPreferences: () =>
-    fetch(`${API_BASE}/v1/me/preferences`, {
+    fetch(`${API_BASE}/api/me/preferences`, {
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<UserPreferences>(r)),
 
   updateUserPreferences: (prefs: Partial<UserPreferences>) =>
-    fetch(`${API_BASE}/v1/me/preferences`, {
+    fetch(`${API_BASE}/api/me/preferences`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(prefs),
     }).then((r) => handleResponse<UserPreferences>(r)),
 
   listProviderCredentials: () =>
-    fetch(`${API_BASE}/v1/me/provider-credentials`, {
+    fetch(`${API_BASE}/api/me/provider-credentials`, {
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<ProviderCredentialInfo[]>(r)),
 
   setProviderCredential: (provider: string, apiKey: string) =>
-    fetch(`${API_BASE}/v1/me/provider-credentials/${encodeURIComponent(provider)}`, {
+    fetch(`${API_BASE}/api/me/provider-credentials/${encodeURIComponent(provider)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ api_key: apiKey }),
     }).then((r) => handleResponse<ProviderCredentialInfo>(r)),
 
   validateProviderCredential: (provider: string) =>
-    fetch(`${API_BASE}/v1/me/provider-credentials/${encodeURIComponent(provider)}/validate`, {
+    fetch(`${API_BASE}/api/me/provider-credentials/${encodeURIComponent(provider)}/validate`, {
       method: 'POST',
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; valid: boolean; provider: string }>(r)),
 
   deleteProviderCredential: (provider: string) =>
-    fetch(`${API_BASE}/v1/me/provider-credentials/${encodeURIComponent(provider)}`, {
+    fetch(`${API_BASE}/api/me/provider-credentials/${encodeURIComponent(provider)}`, {
       method: 'DELETE',
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; provider: string }>(r)),

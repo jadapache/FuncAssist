@@ -24,7 +24,7 @@ from app.db.repositories import (
   TestPlanRepository,
 )
 
-router = APIRouter(tags=["db-history"])
+router = APIRouter()
 
 
 class UserCreate(BaseModel):
@@ -56,8 +56,7 @@ class SettingSetRequest(BaseModel):
   value: Any
 
 
-# --- Users Endpoints ---
-@router.get("/users")
+@router.get("/users", tags=["user"])
 async def get_users(
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -85,7 +84,7 @@ async def get_users(
 
 
 # --- Settings Endpoints ---
-@router.get("/db/settings")
+@router.get("/db/settings", tags=["settings"])
 async def get_db_settings(
   _admin: dict[str, Any] = Depends(get_current_admin_user),
 ) -> dict[str, Any]:
@@ -93,7 +92,7 @@ async def get_db_settings(
   return {"settings": all_settings}
 
 
-@router.post("/db/settings")
+@router.post("/db/settings", tags=["settings"])
 async def set_db_setting(
   body: SettingSetRequest,
   _admin: dict[str, Any] = Depends(get_current_admin_user),
@@ -105,7 +104,7 @@ async def set_db_setting(
 
 
 # --- Chat Sessions Endpoints ---
-@router.get("/chat/sessions")
+@router.get("/chat/sessions", tags=["chat"])
 async def get_chat_sessions(
   feature_slug: Optional[str] = None,
   limit: int = 50,
@@ -117,7 +116,7 @@ async def get_chat_sessions(
   return {"sessions": sessions}
 
 
-@router.post("/chat/sessions")
+@router.post("/chat/sessions", tags=["chat"])
 async def save_chat_session(
   body: ChatSessionSaveRequest,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -129,7 +128,7 @@ async def save_chat_session(
   return {"ok": True, "session": session}
 
 
-@router.get("/chat/sessions/{session_id}")
+@router.get("/chat/sessions/{session_id}", tags=["chat"])
 async def get_chat_session(
   session_id: str,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -140,7 +139,7 @@ async def get_chat_session(
   return {"session": session}
 
 
-@router.delete("/chat/sessions/{session_id}")
+@router.delete("/chat/sessions/{session_id}", tags=["chat"])
 async def delete_chat_session(
   session_id: str,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -152,7 +151,7 @@ async def delete_chat_session(
 
 
 # --- Chat History Endpoints ---
-@router.get("/chat/history/{session_id}")
+@router.get("/chat/history/{session_id}", tags=["chat"])
 async def get_chat_messages(
   session_id: str,
   limit: int = 100,
@@ -164,7 +163,7 @@ async def get_chat_messages(
   return {"session_id": session_id, "messages": history}
 
 
-@router.post("/chat/history/{session_id}")
+@router.post("/chat/history/{session_id}", tags=["chat"])
 async def post_chat_message(
   session_id: str,
   body: ChatMessageCreate,
@@ -183,7 +182,7 @@ async def post_chat_message(
   return {"message": message}
 
 
-@router.delete("/chat/history/{session_id}")
+@router.delete("/chat/history/{session_id}", tags=["chat"])
 async def delete_chat_messages(
   session_id: str,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -194,7 +193,7 @@ async def delete_chat_messages(
 
 
 # --- Feature History Endpoints ---
-@router.get("/history/standups")
+@router.get("/history/standups", tags=["history"])
 async def get_standup_history(
   limit: int = 20,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -205,7 +204,7 @@ async def get_standup_history(
   return {"standups": items}
 
 
-@router.get("/history/prd-reviews")
+@router.get("/history/prd-reviews", tags=["history"])
 async def get_prd_history(
   limit: int = 20,
   current_user: dict[str, Any] = Depends(get_current_user),
@@ -216,7 +215,7 @@ async def get_prd_history(
   return {"prd_reviews": items}
 
 
-@router.get("/history/test-plans")
+@router.get("/history/test-plans", tags=["history"])
 async def get_test_plan_history(
   limit: int = 20,
   current_user: dict[str, Any] = Depends(get_current_user),

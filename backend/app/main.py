@@ -60,6 +60,29 @@ async def lifespan(app: FastAPI):
     await close_redis_client()
 
 
+TAGS_METADATA = [
+    {"name": "auth", "description": "Autenticación de usuarios y solicitudes de acceso."},
+    {"name": "user", "description": "Perfil de usuario y administración de usuarios."},
+    {"name": "me-configuration", "description": "Preferencias de usuario, credenciales BYOK e integraciones personales."},
+    {"name": "chat", "description": "Sesiones de chat y mensajes interactivos."},
+    {"name": "document-agent", "description": "Agente conversacional y generación de documentos."},
+    {"name": "pm-features", "description": "Herramientas de IA para Product Managers (Standup, PRD, etc.)."},
+    {"name": "qa-features", "description": "Herramientas de IA para Aseguramiento de Calidad (QA)."},
+    {"name": "doc-features", "description": "Generación de documentos funcionales (Mejoras, Inventario, Levantamiento)."},
+    {"name": "drafts", "description": "Gestión de borradores de documentos."},
+    {"name": "history", "description": "Historial de generación de artefactos y documentos."},
+    {"name": "knowledge", "description": "Base de conocimientos y recuperación RAG."},
+    {"name": "transcription", "description": "Transcripción de audio y progreso en tiempo real."},
+    {"name": "integrations", "description": "Integraciones externas (Jira, GitHub, GitLab)."},
+    {"name": "ai-settings", "description": "Catálogo de modelos y configuración de enrutamiento IA."},
+    {"name": "ai-management", "description": "Gestión de modelos locales (Ollama, Whisper, Built-in)."},
+    {"name": "ai-templates", "description": "Plantillas de prompts, rúbricas y logs de IA."},
+    {"name": "templates", "description": "Gestión de plantillas de documentos."},
+    {"name": "settings", "description": "Configuraciones globales del sistema y base de datos."},
+    {"name": "health", "description": "Monitoreo y estado de salud de la aplicación."},
+]
+
+
 def create_app() -> FastAPI:
   settings = get_settings()
   secret = settings.secret_key or os.getenv("SECRET_KEY")
@@ -77,6 +100,7 @@ def create_app() -> FastAPI:
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
+    openapi_tags=TAGS_METADATA,
     swagger_ui_parameters={"persistAuthorization": True},
   )
 
@@ -90,7 +114,7 @@ def create_app() -> FastAPI:
   )
 
   app.include_router(health_router)
-  app.include_router(me_router, prefix="/v1/me")
+  app.include_router(me_router, prefix="/v1/me", include_in_schema=False)
   app.include_router(api_router)
 
   if FRONTEND_DIST.is_dir() and (FRONTEND_DIST / "index.html").exists():

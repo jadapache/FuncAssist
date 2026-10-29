@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
   prefix="/transcription",
-  tags=["transcription-streaming"],
+  tags=["transcription"],
   dependencies=[Depends(get_current_user)],
 )
 
