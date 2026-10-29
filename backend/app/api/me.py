@@ -6,6 +6,7 @@ No plain secrets, ciphertexts, or internal keys are ever returned to the client.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import Any, List, Optional
@@ -14,6 +15,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import get_current_user
 from app.core.rls_context import set_rls_context
@@ -31,7 +33,9 @@ from app.core.storage_user_integrations import (
   load_user_integration,
   save_user_integration,
 )
-from app.db.models import AuditEventModel
+from app.db.database import get_db
+from app.db.models import AuditEventModel, McpServerModel
+from app.integrations.executor import validate_mcp_endpoint_url
 from app.integrations.registry import registry
 
 logger = logging.getLogger(__name__)
@@ -92,6 +96,40 @@ class JiraConnectionInfo(BaseModel):
   scopes: List[str] = Field(default_factory=list)
   expires_at: Optional[float] = None
   status: str = "disconnected"
+
+
+class McpServerCreate(BaseModel):
+  name: str = Field(min_length=1, max_length=100)
+  endpoint_url: str = Field(min_length=1)
+  description: Optional[str] = None
+  transport_type: str = "sse"
+  auth_type: str = "none"
+  auth_secret: Optional[str] = None
+  allowed_tools: List[str] = Field(default_factory=list)
+
+
+class McpServerUpdate(BaseModel):
+  name: Optional[str] = None
+  endpoint_url: Optional[str] = None
+  description: Optional[str] = None
+  transport_type: Optional[str] = None
+  auth_type: Optional[str] = None
+  auth_secret: Optional[str] = None
+  allowed_tools: Optional[List[str]] = None
+  status: Optional[str] = None
+
+
+class McpServerInfo(BaseModel):
+  id: str
+  name: str
+  description: str = ""
+  endpoint_url: str
+  transport_type: str = "sse"
+  auth_type: str = "none"
+  status: str = "configured"
+  allowed_tools: List[str] = Field(default_factory=list)
+  created_at: Optional[str] = None
+  updated_at: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +312,7 @@ async def my_jira_callback(
 
 
 @router.get("/integrations/jira", response_model=JiraConnectionInfo)
+@router.get("/integrations/jira/status", response_model=JiraConnectionInfo)
 async def get_my_jira_status(
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> JiraConnectionInfo:
@@ -318,4 +357,129 @@ async def disconnect_my_jira(
 
   deleted = delete_user_integration(user_id, "jira")
   return {"ok": True, "status": "disconnected"}
+
+
+# ---------------------------------------------------------------------------
+# 4. MCP Servers Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/mcp-servers", response_model=List[McpServerInfo])
+async def list_my_mcp_servers(
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> List[McpServerInfo]:
+  """List MCP servers configured for the authenticated user."""
+  user_id = current_user["id"]
+  async with get_db() as db:
+    stmt = select(McpServerModel).where(McpServerModel.user_id == user_id)
+    res = await db.execute(stmt)
+    servers = res.scalars().all()
+    return [
+      McpServerInfo(
+        id=s.id,
+        name=s.name,
+        description=s.description or "",
+        endpoint_url=s.endpoint_url,
+        transport_type=s.transport_type,
+        auth_type=s.auth_type,
+        status=s.status,
+        allowed_tools=json.loads(s.allowed_tools_json) if s.allowed_tools_json else [],
+        created_at=s.created_at.isoformat() if s.created_at else None,
+        updated_at=s.updated_at.isoformat() if s.updated_at else None,
+      )
+      for s in servers
+    ]
+
+
+@router.post("/mcp-servers", response_model=McpServerInfo)
+async def create_my_mcp_server(
+  body: McpServerCreate,
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> McpServerInfo:
+  """Register an external MCP server for the authenticated user."""
+  user_id = current_user["id"]
+  if not validate_mcp_endpoint_url(body.endpoint_url, resolve_dns=False):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="URL de servidor MCP no permitida o insegura.",
+    )
+
+  server_id = str(uuid.uuid4())
+  async with get_db() as db:
+    model = McpServerModel(
+      id=server_id,
+      user_id=user_id,
+      name=body.name.strip(),
+      description=body.description.strip() if body.description else None,
+      endpoint_url=body.endpoint_url.strip(),
+      transport_type=body.transport_type,
+      auth_type=body.auth_type,
+      status="configured",
+      allowed_tools_json=json.dumps(body.allowed_tools),
+    )
+    db.add(model)
+    await db.commit()
+    await db.refresh(model)
+
+    return McpServerInfo(
+      id=model.id,
+      name=model.name,
+      description=model.description or "",
+      endpoint_url=model.endpoint_url,
+      transport_type=model.transport_type,
+      auth_type=model.auth_type,
+      status=model.status,
+      allowed_tools=body.allowed_tools,
+      created_at=model.created_at.isoformat() if model.created_at else None,
+      updated_at=model.updated_at.isoformat() if model.updated_at else None,
+    )
+
+
+@router.delete("/mcp-servers/{server_id}")
+async def delete_my_mcp_server(
+  server_id: str,
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+  """Remove an MCP server configuration for the authenticated user."""
+  user_id = current_user["id"]
+  async with get_db() as db:
+    stmt = select(McpServerModel).where(
+      McpServerModel.id == server_id,
+      McpServerModel.user_id == user_id,
+    )
+    res = await db.execute(stmt)
+    server = res.scalar_one_or_none()
+    if not server:
+      raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
+    await db.delete(server)
+    await db.commit()
+
+  return {"ok": True, "deleted_id": server_id}
+
+
+@router.post("/mcp-servers/{server_id}/test")
+async def test_my_mcp_server(
+  server_id: str,
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+  """Test connection and validate reachability of user's MCP server."""
+  user_id = current_user["id"]
+  async with get_db() as db:
+    stmt = select(McpServerModel).where(
+      McpServerModel.id == server_id,
+      McpServerModel.user_id == user_id,
+    )
+    res = await db.execute(stmt)
+    server = res.scalar_one_or_none()
+    if not server:
+      raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
+
+    is_valid = validate_mcp_endpoint_url(server.endpoint_url, resolve_dns=False)
+    server.status = "connected" if is_valid else "error"
+    await db.commit()
+
+  return {
+    "ok": is_valid,
+    "status": "connected" if is_valid else "error",
+    "endpoint_url": server.endpoint_url,
+  }
 
