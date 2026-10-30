@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import logging
+import os
 import re
 import uuid
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user
@@ -26,14 +27,19 @@ from app.features.levantamiento.docx_builder import create_levantamiento_docx
 from app.features.transcription.service import transcription_service
 from app.features.transcription.summarizer import summarize_transcript
 from app.features.transcription.storage import (
+  SUPPORTED_FORMATS,
+  allocate_transcription_folder,
   delete_transcription_record,
+  get_media_destination,
   get_media_entry,
   get_transcription_record,
   list_transcriptions,
   register_local_media_path,
+  register_saved_media_file,
   rename_transcription_speakers,
   save_transcription_record,
   update_transcription_summary,
+  validate_file,
 )
 from app.schemas.transcription import (
   RenameSpeakerRequest,
@@ -72,6 +78,63 @@ class RegisterLocalPathRequest(BaseModel):
 
 class InspectFileRequest(BaseModel):
   file_path: str
+
+
+@router.post("/upload")
+async def upload_transcription_media(
+  file: UploadFile = File(...),
+  title: str = Form(""),
+  description: str = Form(""),
+  transcription_id: Optional[str] = Form(None),
+) -> dict[str, Any]:
+  """Upload media file via standard web multipart/form-data for controlled server processing."""
+  orig_filename = os.path.basename(file.filename or "media.mp3")
+  tid = transcription_id or str(uuid.uuid4())
+  tid, dest_path, stored_filename = get_media_destination(orig_filename, media_id=tid)
+
+  sha256 = hashlib.sha256()
+  total_size = 0
+  chunk_size = 1024 * 1024
+
+  try:
+    with open(dest_path, "wb") as f_out:
+      while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+          break
+        f_out.write(chunk)
+        sha256.update(chunk)
+        total_size += len(chunk)
+  except Exception as exc:
+    if dest_path.exists():
+      dest_path.unlink(missing_ok=True)
+    raise HTTPException(status_code=500, detail=f"Error guardando archivo multimedia: {exc}") from exc
+
+  valid, err = validate_file(orig_filename, total_size)
+  if not valid:
+    if dest_path.exists():
+      dest_path.unlink(missing_ok=True)
+    raise HTTPException(status_code=400, detail=err or "Archivo no válido.")
+
+  entry = register_saved_media_file(
+    media_id=tid,
+    filename=orig_filename,
+    stored_filename=stored_filename,
+    file_path=dest_path,
+    file_size=total_size,
+    file_hash=sha256.hexdigest(),
+    title=title or orig_filename,
+    description=description,
+  )
+
+  return {
+    "ok": True,
+    "media_id": tid,
+    "transcription_id": tid,
+    "size": total_size,
+    "entry": entry,
+    "message": "Archivo multimedia subido con éxito.",
+  }
 
 
 @router.post("/pick-local-file")

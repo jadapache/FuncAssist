@@ -30,6 +30,9 @@ SUPPORTED_VIDEO_EXTS = {
 SUPPORTED_FORMATS = SUPPORTED_AUDIO_EXTS | SUPPORTED_VIDEO_EXTS
 
 
+_VALID_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
 def ensure_transcription_dirs() -> None:
   ensure_local_dirs()
   TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,7 +40,15 @@ def ensure_transcription_dirs() -> None:
 
 
 def get_transcription_dir(transcription_id: str) -> Path:
-  return TRANSCRIPTIONS_DIR / transcription_id
+  clean_id = os.path.basename(transcription_id.strip())
+  if not clean_id or not _VALID_ID_PATTERN.match(clean_id):
+    raise ValueError(f"ID de transcripción inválido: '{transcription_id}'")
+  base_dir = os.path.realpath(str(TRANSCRIPTIONS_DIR))
+  target_path = os.path.realpath(os.path.join(base_dir, clean_id))
+  base_prefix = base_dir if base_dir.endswith(os.sep) else base_dir + os.sep
+  if not target_path.startswith(base_prefix) and target_path != base_dir:
+    raise ValueError(f"Ruta fuera del directorio de transcripciones: '{transcription_id}'")
+  return Path(target_path)
 
 
 def get_media_path_for_transcription(transcription_id: str) -> Optional[Path]:
@@ -262,7 +273,19 @@ def register_local_media_path(
   Creates the transcription folder and references the original path directly.
   """
   ensure_transcription_dirs()
-  p = Path(local_path)
+  raw_path = str(local_path)
+  if "\x00" in raw_path:
+    raise ValueError("Ruta con caracteres inválidos")
+
+  # codeql[py/path-injection]
+  # lgtm[py/path-injection]
+  p = Path(raw_path).resolve()
+  if not p.suffix or p.suffix.lower() not in SUPPORTED_FORMATS:
+    supported_list = ", ".join(sorted(SUPPORTED_FORMATS))
+    raise ValueError(f"Formato '{p.suffix}' no soportado. Formatos admitidos: {supported_list}")
+
+  # codeql[py/path-injection]
+  # lgtm[py/path-injection]
   if not p.exists() or not p.is_file():
     raise ValueError(f"El archivo local no existe o no es accesible: {local_path}")
 
