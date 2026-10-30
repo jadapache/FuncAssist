@@ -3,6 +3,8 @@
  * Base API Client with standardized error handling and request methods
  */
 
+import { API_BASE, getAuthHeaders } from '../../api/client'
+ 
 export interface ApiClientConfig {
   baseUrl?: string
 }
@@ -23,12 +25,11 @@ export class ApiClient {
   private baseUrl: string
 
   constructor(config?: ApiClientConfig) {
-    this.baseUrl = config?.baseUrl || ''
+    this.baseUrl = config?.baseUrl ?? API_BASE
   }
 
   private getAuthHeader(): Record<string, string> {
-    const token = localStorage.getItem('token')
-    return token ? { Authorization: `Bearer ${token}` } : {}
+    return getAuthHeaders()
   }
 
   private async handleResponse<T>(res: Response): Promise<T> {

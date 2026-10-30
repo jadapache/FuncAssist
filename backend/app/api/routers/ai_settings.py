@@ -7,9 +7,9 @@ from app.ai.catalog import get_model_catalog
 from app.ai.frontier_sync import get_frontier_sync_status, sync_frontier_models_catalog
 from app.ai.providers.factory import get_ai_settings
 from app.ai.providers.registry import find_provider_spec
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
-from app.core.storage import load_app_settings, save_app_settings, save_user_ai_settings
+from app.core.storage import save_user_ai_settings
 
 router = APIRouter(prefix="/ai", tags=["ai-settings"])
 
@@ -39,13 +39,21 @@ async def ai_models_catalog(
     provider: str = "all",
     task_type: str = "all",
 ) -> dict[str, Any]:
+    if refresh:
+        try:
+            await sync_frontier_models_catalog(force_remote=False)
+        except Exception:
+            pass
     catalog = await get_model_catalog(refresh=refresh, provider=provider, task_type=task_type)
     return catalog.model_dump()
 
 
 @router.post("/models/sync")
 @handle_grounded_errors
-async def sync_ai_models_catalog(force_remote: bool = True) -> dict[str, Any]:
+async def sync_ai_models_catalog(
+    force_remote: bool = True,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Manually trigger background synchronization of frontier models from LiteLLM."""
     sync_result = await sync_frontier_models_catalog(force_remote=force_remote)
     catalog = await get_model_catalog(refresh=True)
@@ -57,7 +65,9 @@ async def sync_ai_models_catalog(force_remote: bool = True) -> dict[str, Any]:
 
 @router.get("/models/sync-status")
 @handle_grounded_errors
-async def get_ai_models_sync_status() -> dict[str, Any]:
+async def get_ai_models_sync_status(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Retrieve last frontier models synchronization status."""
     return get_frontier_sync_status()
 
@@ -65,9 +75,9 @@ async def get_ai_models_sync_status() -> dict[str, Any]:
 @router.get("/settings")
 @handle_grounded_errors
 async def get_settings_endpoint(
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     config = get_ai_settings(user_id=user_id)
     provider = (config.get("provider") or "").lower()
     spec = find_provider_spec(provider)
@@ -107,9 +117,9 @@ async def get_settings_endpoint(
 @handle_grounded_errors
 async def update_ai_settings(
     body: AISettingsUpdate = Body(...),
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    user_id = current_user.get("id") if current_user else None
+    user_id = current_user["id"]
     data = body.model_dump(exclude_none=True)
 
     # Normalize inference_provider -> provider
@@ -124,13 +134,5 @@ async def update_ai_settings(
     elif "inference_model" in data:
         data.pop("inference_model")
 
-    if user_id:
-        save_user_ai_settings(user_id, data)
-    else:
-        current = load_app_settings()
-        ai = dict(current.get("ai") or {})
-        for key, value in data.items():
-            ai[key] = value
-        save_app_settings({"ai": ai})
-
+    save_user_ai_settings(user_id, data)
     return await get_settings_endpoint(current_user=current_user)

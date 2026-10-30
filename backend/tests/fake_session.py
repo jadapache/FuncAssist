@@ -6,6 +6,7 @@ Zero SQLite dependencies - operates strictly as an in-memory double of SQLAlchem
 from __future__ import annotations
 
 import copy
+import uuid
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, Generator, List, Optional, Type
 
@@ -97,12 +98,15 @@ class FakeAsyncSession:
     return self
 
   async def __aexit__(self, exc_type, exc_val, exc_tb):
-    pass
+    if exc_type is not None:
+      await self.rollback()
 
   def add(self, obj: Any) -> None:
     t = type(obj)
     if t not in self.storage.tables:
       self.storage.tables[t] = {}
+    if hasattr(obj, "id") and getattr(obj, "id", None) is None:
+      obj.id = str(uuid.uuid4())
     obj_id = getattr(obj, "id", None) or getattr(obj, "key", None) or str(id(obj))
     self.storage.tables[t][obj_id] = obj
 
@@ -229,12 +233,15 @@ class FakeSyncSession:
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
-    pass
+    if exc_type is not None:
+      self.rollback()
 
   def add(self, obj: Any) -> None:
     t = type(obj)
     if t not in self.storage.tables:
       self.storage.tables[t] = {}
+    if hasattr(obj, "id") and getattr(obj, "id", None) is None:
+      obj.id = str(uuid.uuid4())
     obj_id = getattr(obj, "id", None) or getattr(obj, "key", None) or str(id(obj))
     self.storage.tables[t][obj_id] = obj
 

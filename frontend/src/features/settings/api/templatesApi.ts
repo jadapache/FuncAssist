@@ -1,5 +1,6 @@
 import {
   API_BASE,
+  getAuthHeaders,
   handleResponse,
   type CorporateTemplate,
   type TemplateDetail,
@@ -7,12 +8,16 @@ import {
 
 export const templatesApi = {
   getTemplates: () =>
-    fetch(`${API_BASE}/api/templates`).then((r) =>
+    fetch(`${API_BASE}/api/templates`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) =>
       handleResponse<{ templates: CorporateTemplate[] }>(r),
     ),
 
   getTemplateContent: (id: string) =>
-    fetch(`${API_BASE}/api/templates/${id}/content`).then((r) =>
+    fetch(`${API_BASE}/api/templates/${id}/content`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) =>
       handleResponse<TemplateDetail>(r),
     ),
 
@@ -21,9 +26,11 @@ export const templatesApi = {
     form.append('file', file)
     if (title) form.append('title', title)
     if (module) form.append('module', module)
-    return fetch(`${API_BASE}/api/templates/upload`, { method: 'POST', body: form }).then((r) =>
-      handleResponse<{ template: CorporateTemplate }>(r),
-    )
+    return fetch(`${API_BASE}/api/templates/upload`, {
+      method: 'POST',
+      headers: { ...getAuthHeaders() },
+      body: form,
+    }).then((r) => handleResponse<{ template: CorporateTemplate }>(r))
   },
 
   updateTemplate: (
@@ -32,12 +39,15 @@ export const templatesApi = {
   ) =>
     fetch(`${API_BASE}/api/templates/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<{ template: CorporateTemplate }>(r)),
 
   deleteTemplate: (id: string) =>
-    fetch(`${API_BASE}/api/templates/${id}`, { method: 'DELETE' }).then((r) =>
+    fetch(`${API_BASE}/api/templates/${id}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() },
+    }).then((r) =>
       handleResponse<{ ok: boolean; template_id: string }>(r),
     ),
 }

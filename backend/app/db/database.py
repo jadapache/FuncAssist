@@ -90,7 +90,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
   """Provide an asynchronous SQLAlchemy session with automatic commit / rollback."""
   if _async_session_override is not None:
     async with _async_session_override() as session:
-      yield session
+      try:
+        yield session
+      except Exception:
+        if hasattr(session, "rollback"):
+          await session.rollback()
+        raise
     return
 
   get_async_engine()
@@ -108,7 +113,12 @@ def get_sync_db() -> Generator[Session, None]:
   """Provide a synchronous SQLAlchemy session with automatic commit / rollback."""
   if _sync_session_override is not None:
     with _sync_session_override() as session:
-      yield session
+      try:
+        yield session
+      except Exception:
+        if hasattr(session, "rollback"):
+          session.rollback()
+        raise
     return
 
   get_sync_engine()
@@ -120,7 +130,6 @@ def get_sync_db() -> Generator[Session, None]:
       session.rollback()
       raise
 
-
 async def init_db() -> None:
   """Initialize PostgreSQL schema and tables using SQLAlchemy ORM Metadata."""
   try:
@@ -130,3 +139,4 @@ async def init_db() -> None:
     logger.info("PostgreSQL database tables initialized successfully via SQLAlchemy ORM.")
   except Exception as exc:
     logger.warning("Could not automatically initialize PostgreSQL tables: %s", exc)
+

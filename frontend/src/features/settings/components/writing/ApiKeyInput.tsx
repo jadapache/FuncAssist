@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Key } from 'lucide-react'
+import { Eye, EyeOff, Key, Check } from 'lucide-react'
 
 export interface ApiKeyInputProps {
   label: string
@@ -27,8 +27,9 @@ export const ApiKeyInput = ({
           <span>{label}</span>
         </span>
         {hasSavedKey && !value && (
-          <span className="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-            ✓ Configurada
+          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
+            <Check className="h-3 w-3" />
+            <span>Configurada</span>
           </span>
         )}
       </label>
@@ -51,4 +52,3 @@ export const ApiKeyInput = ({
     </div>
   )
 }
-

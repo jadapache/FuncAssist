@@ -1,8 +1,9 @@
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.api.deps import get_current_admin_user
 from app.core.integration_config import get_jira_oauth_public, save_jira_oauth_config
 from app.core.integration_config import (
   get_github_oauth_public,
@@ -12,7 +13,11 @@ from app.core.integration_config import (
 )
 from app.core.storage import load_app_settings, save_app_settings
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(
+  prefix="/settings",
+  tags=["settings"],
+  dependencies=[Depends(get_current_admin_user)],
+)
 
 
 class AppSettingsUpdate(BaseModel):
@@ -103,6 +108,8 @@ class HealthResponse(BaseModel):
 health_router = APIRouter(tags=["health"])
 
 
+@health_router.get("/health", response_model=HealthResponse)
 @health_router.get("/api/health", response_model=HealthResponse)
+@health_router.get("/api/health/ready", response_model=HealthResponse)
 async def health() -> HealthResponse:
   return HealthResponse()

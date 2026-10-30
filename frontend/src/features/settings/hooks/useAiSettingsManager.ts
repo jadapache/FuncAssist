@@ -184,53 +184,62 @@ export function useAiSettingsManager() {
     }
   }, [])
 
+  const [configuredCreds, setConfiguredCreds] = useState<string[]>([])
+
   useEffect(() => {
     let isMounted = true
     const load = async () => {
       setLoadingAi(true)
       try {
         await loadDynamicCatalog(false)
-        const settings = await api.getAiSettings()
+        const [settings, userPrefs, credsList] = await Promise.all([
+          api.getAiSettings(),
+          api.getUserPreferences().catch(() => null),
+          api.listProviderCredentials().catch(() => []),
+        ])
         if (!isMounted) return
         setAi(settings)
 
+        const creds = credsList.map((c) => c.provider.toLowerCase())
+        setConfiguredCreds(creds)
+
         const isFirstTimeSetup = !settings.provider && !settings.transcription_provider
 
-        const prov = settings.provider || 'builtin'
+        const prov = userPrefs?.inference_provider || settings.provider || 'builtin'
         setProvider(prov)
 
-        if (settings.model) {
-          setModel(settings.model)
+        const activeModel = userPrefs?.inference_model || settings.model
+        if (activeModel) {
+          setModel(activeModel)
         } else if (isFirstTimeSetup) {
-          if (prov === 'groq') setModel('llama-3.3-70b-versatile')
+          if (prov === 'groq') setModel('qwen3.8-27b')
           else if (prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
           else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
           else setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
         } else {
-          // Provider exists but model is unset, assign sensible default for that provider
-          if (prov === 'groq') setModel('llama-3.3-70b-versatile')
+          if (prov === 'groq') setModel('qwen3.8-27b')
           else if (prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
           else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
         }
 
-        if (settings.transcription_provider) {
-          const savedProvider = settings.transcription_provider
-          setVoiceAudioProvider(savedProvider)
+        const activeTransProv = userPrefs?.transcription_provider || settings.transcription_provider
+        if (activeTransProv) {
+          setVoiceAudioProvider(activeTransProv)
 
-          const savedModel = settings.transcription_model
+          const savedModel = userPrefs?.transcription_model || settings.transcription_model
           if (savedModel) {
             setVoiceAudioModel(savedModel)
           } else {
             const defaultTransModel =
-              savedProvider === 'groq'
+              activeTransProv === 'groq'
                 ? 'whisper-large-v3'
-                : savedProvider === 'openai'
-                ? 'whisper-1'
-                : 'base'
+                : activeTransProv === 'openai'
+                  ? 'whisper-1'
+                  : 'base'
             setVoiceAudioModel(defaultTransModel)
           }
         } else if (isFirstTimeSetup) {
@@ -398,6 +407,11 @@ export function useAiSettingsManager() {
   }
 
   const checkIsKeyConfigured = (p: string) => {
+    const pLower = p.toLowerCase()
+    const hasCred =
+      configuredCreds.includes(pLower) ||
+      (pLower === 'claude' && configuredCreds.includes('anthropic'))
+    if (hasCred) return true
     if (p === 'groq') return Boolean(ai?.groq_api_key_set)
     if (p === 'gemini') return Boolean(ai?.gemini_api_key_set)
     if (p === 'openai') return Boolean(ai?.openai_api_key_set)
@@ -444,6 +458,10 @@ export function useAiSettingsManager() {
     try {
       const updated = await api.updateAiSettings(payload)
       setAi(updated)
+      await api.updateUserPreferences({
+        inference_provider: provider,
+        inference_model: model.trim(),
+      }).catch(() => null)
       setGroqKey('')
       setGeminiKey('')
       setOpenaiKey('')
@@ -540,6 +558,10 @@ export function useAiSettingsManager() {
     try {
       const updated = await api.updateAiSettings(payload)
       setAi(updated)
+      await api.updateUserPreferences({
+        transcription_provider: voiceAudioProvider,
+        transcription_model: voiceAudioModel.trim(),
+      }).catch(() => null)
       setTranscriptionGroqKey('')
       setTranscriptionOpenaiKey('')
       toast.success('Configuración del motor de transcripción y voz guardada exitosamente.')
@@ -621,6 +643,8 @@ export function useAiSettingsManager() {
     handleAiSave,
     handleTestConnection,
     handleVoiceAudioSave,
+    configuredCreds,
+    setConfiguredCreds,
   }
 }
 

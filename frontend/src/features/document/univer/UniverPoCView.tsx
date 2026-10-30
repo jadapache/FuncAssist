@@ -14,6 +14,7 @@ import { UniverContainer } from './UniverContainer'
 import { DocumentChatBar, type AgenticStep } from './DocumentChatBar'
 import { DocumentInspectorModal } from './DocumentInspectorModal'
 import { useToast } from '../../../context/ToastContext'
+import { API_BASE, getAuthHeaders } from '../../../api/client'
 
 const DEFAULT_DOCX_FIXTURE = `# DOCUMENTO DE ESPECIFICACIÓN DE MEJORA FUNCIONAL
 
@@ -125,10 +126,13 @@ export const UniverPoCView = () => {
         return
       }
 
-      const endpoint = format === 'docx' ? '/api/doc-agent/export-docx' : '/api/doc-agent/export-xlsx'
+      const endpoint =
+        format === 'docx'
+          ? `${API_BASE}/api/doc-agent/export-docx`
+          : `${API_BASE}/api/doc-agent/export-xlsx`
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           title,
           content: adapter.getRawContent(),
@@ -183,9 +187,9 @@ export const UniverPoCView = () => {
       setCurrentSteps([...steps])
 
       // 2. Call FastAPI Backend Agentic RAG endpoint
-      const response = await fetch('/api/doc-agent/agentic-prompt', {
+      const response = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           prompt,
           document_state: stateBefore,
