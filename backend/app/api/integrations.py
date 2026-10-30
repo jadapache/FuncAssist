@@ -13,7 +13,6 @@ from app.integrations.sync import load_sync_cache, sync_integration
 router = APIRouter(
   prefix="/integrations",
   tags=["integrations"],
-  dependencies=[Depends(get_current_user)],
 )
 
 
