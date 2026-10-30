@@ -64,8 +64,25 @@ def open_native_file_dialog_sync() -> Optional[str]:
 
 def inspect_local_file(file_path_str: str) -> dict[str, Any]:
   """Inspects an existing local file and returns metadata."""
-  p = Path(file_path_str.strip('\'"'))
-  if not p.exists() or not p.is_file():
+  raw_path = file_path_str.strip('\'"')
+  if "\x00" in raw_path:
+    return {
+      "ok": False,
+      "exists": False,
+      "error": "Ruta con caracteres inválidos",
+    }
+
+  p = Path(raw_path).resolve()
+  ext = p.suffix.lower()
+  if not ext or ext not in SUPPORTED_FORMATS:
+    supported_list = ", ".join(sorted(SUPPORTED_FORMATS))
+    return {
+      "ok": False,
+      "exists": False,
+      "error": f"Formato '{ext}' no soportado. Formatos admitidos: {supported_list}",
+    }
+
+  if not p.exists() or not p.is_file():  # codeql[py/path-injection]
     return {
       "ok": False,
       "exists": False,
@@ -73,7 +90,6 @@ def inspect_local_file(file_path_str: str) -> dict[str, Any]:
     }
 
   size = p.stat().st_size
-  ext = p.suffix.lower()
   valid, err = validate_file(p.name, size)
   if not valid:
     return {
@@ -85,7 +101,7 @@ def inspect_local_file(file_path_str: str) -> dict[str, Any]:
   return {
     "ok": True,
     "exists": True,
-    "path": str(p.resolve()),
+    "path": str(p),
     "filename": p.name,
     "size_bytes": size,
     "size_formatted": _format_size_bytes(size),

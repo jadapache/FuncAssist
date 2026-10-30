@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -12,6 +13,19 @@ from app.core.settings import BUILTIN_MODELS_DIR
 from app.ai.builtin_seeds import DEFAULT_BUILTIN_MODELS
 
 logger = logging.getLogger(__name__)
+
+_SAFE_FILENAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _safe_model_path(cache_dir: Path, filename: str) -> Path:
+    safe_name = os.path.basename(filename.strip())
+    if not safe_name or not _SAFE_FILENAME_PATTERN.match(safe_name):
+        raise ValueError(f"Nombre de archivo de modelo inválido: '{filename}'")
+    resolved_cache = cache_dir.resolve()
+    target = (resolved_cache / safe_name).resolve()
+    if not target.is_relative_to(resolved_cache):
+        raise ValueError(f"Ruta fuera del directorio de modelos built-in: '{filename}'")
+    return target
 
 
 def get_builtin_cache_dir() -> Path:
@@ -126,7 +140,7 @@ def cancel_builtin_model_download(model_id: str) -> bool:
             if meta:
                 cache_dir = get_builtin_cache_dir()
                 filename = meta["filename"]
-                tmp_file = cache_dir / f"{filename}.download"
+                tmp_file = _safe_model_path(cache_dir, f"{filename}.download")
                 if tmp_file.exists():
                     try:
                         tmp_file.unlink()
@@ -159,7 +173,7 @@ def get_builtin_models_info() -> List[Dict[str, Any]]:
 
     for model_id, meta in catalog.items():
         filename = meta["filename"]
-        target_file = cache_dir / filename
+        target_file = _safe_model_path(cache_dir, filename)
         is_downloaded = target_file.exists() and target_file.stat().st_size > 10 * 1024 * 1024  # > 10MB
         disk_size_mb = round(target_file.stat().st_size / (1024 * 1024), 1) if is_downloaded else 0.0
 
@@ -195,8 +209,8 @@ def download_builtin_model_file(
     url = meta["url"]
     filename = meta["filename"]
     cache_dir = get_builtin_cache_dir()
-    target_file = cache_dir / filename
-    tmp_file = cache_dir / f"{filename}.download"
+    target_file = _safe_model_path(cache_dir, filename)
+    tmp_file = _safe_model_path(cache_dir, f"{filename}.download")
 
     # If target already exists and is non-empty (>10MB), skip
     if target_file.exists() and target_file.stat().st_size > 10 * 1024 * 1024:
@@ -329,8 +343,8 @@ def delete_builtin_model_file(model_id: str) -> bool:
     if not filename.endswith(".gguf"):
         filename = f"{filename}.gguf"
 
-    target_file = cache_dir / filename
-    tmp_file = cache_dir / f"{filename}.download"
+    target_file = _safe_model_path(cache_dir, filename)
+    tmp_file = _safe_model_path(cache_dir, f"{filename}.download")
 
     deleted = False
     if target_file.exists():

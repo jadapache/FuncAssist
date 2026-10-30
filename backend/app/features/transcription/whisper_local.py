@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -13,6 +14,20 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 from app.core.settings import WHISPER_MODELS_DIR
+
+_SAFE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _safe_whisper_path(cache_dir: Path, name: str) -> Path:
+  safe_name = os.path.basename(name.strip())
+  if not safe_name or not _SAFE_NAME_PATTERN.match(safe_name):
+    raise ValueError(f"Nombre de modelo inválido: '{name}'")
+  resolved_cache = cache_dir.resolve()
+  target = (resolved_cache / safe_name).resolve()
+  if not target.is_relative_to(resolved_cache):
+    raise ValueError(f"Ruta fuera del directorio de modelos Whisper: '{name}'")
+  return target
+
 
 def get_whisper_cache_dir() -> Path:
   WHISPER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -149,7 +164,7 @@ def cancel_whisper_download(model_id: str) -> bool:
       logger.info(f"Cancellation requested for Whisper model {clean}")
 
       cache_dir = get_whisper_cache_dir()
-      tmp_file = cache_dir / f"{clean}.pt.download"
+      tmp_file = _safe_whisper_path(cache_dir, f"{clean}.pt.download")
       if tmp_file.exists():
         try:
           tmp_file.unlink()
@@ -312,8 +327,8 @@ def download_model_file(
 
     url = whisper._MODELS[clean_id]
     cache_dir = get_whisper_cache_dir()
-    target_file = cache_dir / f"{clean_id}.pt"
-    tmp_file = cache_dir / f"{clean_id}.pt.download"
+    target_file = _safe_whisper_path(cache_dir, f"{clean_id}.pt")
+    tmp_file = _safe_whisper_path(cache_dir, f"{clean_id}.pt.download")
 
     if target_file.exists() and target_file.stat().st_size > 1024 * 1024:
       logger.info(f"Whisper model {clean_id} already exists at {target_file}")
@@ -395,7 +410,7 @@ def download_model_file(
     return target_file
 
   except Exception as exc:
-    tmp_file_check = cache_dir / f"{clean_id}.pt.download" if 'cache_dir' in locals() else None
+    tmp_file_check = _safe_whisper_path(cache_dir, f"{clean_id}.pt.download") if 'cache_dir' in locals() else None
     if tmp_file_check and tmp_file_check.exists():
       try:
         tmp_file_check.unlink()
@@ -422,11 +437,11 @@ def delete_model_file(model_id: str) -> bool:
   clean = model_id.strip().lower()
   clean_fw = clean.replace("fw-", "").replace("faster-whisper-", "")
   
-  target_file = cache_dir / f"{clean}.pt"
-  tmp_file = cache_dir / f"{clean}.pt.download"
-  fw_dir = cache_dir / f"faster-whisper-{clean_fw}"
-  m_dir = cache_dir / clean
-  onnx_dir = cache_dir / f"onnx-{clean}"
+  target_file = _safe_whisper_path(cache_dir, f"{clean}.pt")
+  tmp_file = _safe_whisper_path(cache_dir, f"{clean}.pt.download")
+  fw_dir = _safe_whisper_path(cache_dir, f"faster-whisper-{clean_fw}")
+  m_dir = _safe_whisper_path(cache_dir, clean)
+  onnx_dir = _safe_whisper_path(cache_dir, f"onnx-{clean}")
 
   deleted = False
   if onnx_dir.exists() and onnx_dir.is_dir():
