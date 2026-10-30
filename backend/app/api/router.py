@@ -7,6 +7,7 @@ from app.api import (
   history,
   integrations,
   knowledge,
+  me,
   settings as settings_api,
   transcription,
   transcription_stream,
@@ -25,6 +26,8 @@ from app.api.routers import (
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
 api_router.include_router(user.router)
+api_router.include_router(me.router, prefix="/me")
+api_router.include_router(me.router, prefix="/v1/me", include_in_schema=False)
 api_router.include_router(integrations.router)
 api_router.include_router(settings_api.router)
 api_router.include_router(knowledge.router)
@@ -40,9 +43,3 @@ api_router.include_router(features_pm.router)
 api_router.include_router(features_qa.router)
 api_router.include_router(features_doc.router)
 api_router.include_router(templates.router)
-
-
-@api_router.post("/runs/{run_id}/cancel")
-async def cancel_run_alias(run_id: str):
-    return await document_agent.cancel_agent_run(run_id)
-

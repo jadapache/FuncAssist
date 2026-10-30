@@ -4,11 +4,15 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_current_user
 from app.core.settings import USER_DOCUMENTS_DIR
 from app.core.storage import get_user_preferences, load_app_settings, save_app_settings, save_user_preferences
 
-router = APIRouter(prefix="/user", tags=["user"])
+router = APIRouter(
+    prefix="/user",
+    tags=["user"],
+    dependencies=[Depends(get_current_user)],
+)
 
 UserRole = Literal["admin", "pm", "funcional", "dev", "qa"]
 
@@ -27,18 +31,19 @@ class UpdateProfileRequest(BaseModel):
 
 @router.get("/profile")
 async def get_user_profile(
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> UserProfile:
     """Get current user profile and documents directory preference."""
-    settings = load_app_settings()
-    user_id = current_user.get("id") if current_user else None
-    user_prefs = get_user_preferences(user_id) if user_id else {}
+    user_id = current_user["id"]
+    user_prefs = get_user_preferences(user_id)
+    docs_path = user_prefs.get("documents_path") or str(USER_DOCUMENTS_DIR)
 
-    docs_path = user_prefs.get("documents_path") or settings.get("documents_path") or str(USER_DOCUMENTS_DIR)
+    display_name = user_prefs.get("display_name") or current_user.get("full_name") or current_user.get("username", "Usuario")
+    user_role = user_prefs.get("user_role") or current_user.get("role", "funcional")
 
     return UserProfile(
-        display_name=settings.get("display_name", "Usuario"),
-        user_role=settings.get("user_role", "admin"),
+        display_name=display_name,
+        user_role=user_role,
         documents_path=docs_path,
     )
 
@@ -46,41 +51,48 @@ async def get_user_profile(
 @router.put("/profile")
 async def update_user_profile(
     body: UpdateProfileRequest,
-    current_user: Optional[dict[str, Any]] = Depends(get_optional_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> UserProfile:
-    """Update user profile (display_name, user_role, documents_path)."""
-    settings = load_app_settings()
-    user_id = current_user.get("id") if current_user else None
+    """Update user profile preferences."""
+    user_id = current_user["id"]
+    prefs_update: dict[str, Any] = {}
 
     if body.display_name:
-        settings["display_name"] = body.display_name
+        prefs_update["display_name"] = body.display_name.strip()
     if body.user_role:
-        settings["user_role"] = body.user_role
+        prefs_update["user_role"] = body.user_role
     if body.documents_path is not None:
         clean_path = body.documents_path.strip()
-        settings["documents_path"] = clean_path
-        if user_id:
-            save_user_preferences(user_id, {"documents_path": clean_path})
+        prefs_update["documents_path"] = clean_path
 
-    save_app_settings(settings, user_id=user_id)
+    if prefs_update:
+        save_user_preferences(user_id, prefs_update)
 
-    user_prefs = get_user_preferences(user_id) if user_id else {}
-    resolved_path = user_prefs.get("documents_path") or settings.get("documents_path") or str(USER_DOCUMENTS_DIR)
+    user_prefs = get_user_preferences(user_id)
+    resolved_path = user_prefs.get("documents_path") or str(USER_DOCUMENTS_DIR)
+
+    display_name = user_prefs.get("display_name") or current_user.get("full_name") or current_user.get("username", "Usuario")
+    user_role = user_prefs.get("user_role") or current_user.get("role", "funcional")
 
     return UserProfile(
-        display_name=settings.get("display_name", "Usuario"),
-        user_role=settings.get("user_role", "admin"),
+        display_name=display_name,
+        user_role=user_role,
         documents_path=resolved_path,
     )
 
 
 @router.post("/setup")
-async def first_time_setup(body: UserProfile) -> UserProfile:
-    """First-time setup: save display name and role."""
-    settings = load_app_settings()
-    settings["display_name"] = body.display_name
-    settings["user_role"] = body.user_role
+async def first_time_setup(
+    body: UserProfile,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> UserProfile:
+    """Setup user profile preferences."""
+    user_id = current_user["id"]
+    prefs_update: dict[str, Any] = {
+        "display_name": body.display_name.strip(),
+        "user_role": body.user_role,
+    }
     if body.documents_path:
-        settings["documents_path"] = body.documents_path.strip()
-    save_app_settings(settings)
+        prefs_update["documents_path"] = body.documents_path.strip()
+    save_user_preferences(user_id, prefs_update)
     return body

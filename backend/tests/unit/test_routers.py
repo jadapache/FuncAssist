@@ -1,9 +1,21 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.deps import get_current_user
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def override_current_user():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "test-user-001",
+        "username": "testuser",
+        "role": "admin",
+    }
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_ai_settings_endpoints():

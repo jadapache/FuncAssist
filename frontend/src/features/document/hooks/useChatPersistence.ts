@@ -23,6 +23,7 @@ export interface ChatAttachment {
   type: 'image' | 'file'
   dataUrl?: string
   size?: number
+  content?: string
 }
 
 export interface ChatPersistMessage {

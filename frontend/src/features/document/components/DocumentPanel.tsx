@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import type { UniverAdapter } from '../../../features/document/agent/adapters/UniverAdapter'
 import { useToast } from '../../../context/ToastContext'
+import { API_BASE, getAuthHeaders } from '../../../api/client'
 
 interface DocumentPanelProps {
   adapter: UniverAdapter
@@ -87,10 +88,13 @@ export const DocumentPanel = ({
           return
         }
 
-        const endpoint = format === 'docx' ? '/api/doc-agent/export-docx' : '/api/doc-agent/export-xlsx'
+        const endpoint =
+          format === 'docx'
+            ? `${API_BASE}/api/doc-agent/export-docx`
+            : `${API_BASE}/api/doc-agent/export-xlsx`
         const response = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ title, content }),
         })
 

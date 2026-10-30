@@ -1,8 +1,6 @@
 import {
   Activity,
   ArrowRight,
-  Bot,
-  Brain,
   ClipboardCheck,
   ClipboardList,
   Eye,
@@ -14,18 +12,15 @@ import {
   LayoutGrid,
   MessageSquare,
   Mic,
-  Plug,
   Sparkles,
   Sun,
   TestTube2,
-  Zap,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { api } from '../api/client'
 import { IntegrationTile } from '../components/ui/IntegrationTile'
 import { QuickActionCard } from '../components/ui/QuickActionCard'
-import { StatCard } from '../components/ui/StatCard'
 import { useUser } from '../context/UserContext'
 import type { IntegrationInfo } from '../types'
 
@@ -44,7 +39,6 @@ export const DashboardPage = () => {
   const { displayName } = useOutletContext<OutletContext>()
   const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
   const [backendOk, setBackendOk] = useState<boolean | null>(null)
-  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -53,12 +47,14 @@ export const DashboardPage = () => {
       try {
         await api.health()
         setBackendOk(true)
-        const [items, ai] = await Promise.all([api.getIntegrations(), api.getAiSettings()])
-        setIntegrations(items)
-        setAiConfigured(Boolean(ai.provider))
       } catch {
         setBackendOk(false)
-        setAiConfigured(false)
+      }
+      try {
+        const items = await api.getIntegrations()
+        setIntegrations(items)
+      } catch {
+        setIntegrations([])
       }
     }
     void load()
@@ -67,17 +63,6 @@ export const DashboardPage = () => {
   const jira = integrations.find((item) => item.id === 'jira')
   const github = integrations.find((item) => item.id === 'github')
   const gitlab = integrations.find((item) => item.id === 'gitlab')
-  const connectedCount = integrations.filter((item) => item.status === 'connected').length
-  const totalIntegrations = integrations.length
-
-  const readiness = useMemo(() => {
-    let score = 10
-    if (backendOk) score += 25
-    if (jira?.status === 'connected') score += 15
-    if (connectedCount > 2) score += 30
-    if (aiConfigured) score += 20
-    return Math.min(score, 100)
-  }, [backendOk, jira, connectedCount, aiConfigured])
 
   const { user } = useUser()
   const role = user?.user_role || 'admin'
@@ -94,69 +79,50 @@ export const DashboardPage = () => {
             <h1 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">
               {getGreeting()}, {displayName}
             </h1>
-            <p className="mt-2 max-w-xl text-sm text-blue-100 md:text-base">
+            <p className="mt-2 max-w-2xl text-sm text-blue-100 md:text-base">
               Obtiene contexto en tiempo real de Jira, GitHub y tus documentos para responder con referencias precisas sin alucinaciones.
             </p>
           </div>
 
-          <div className="flex shrink-0 flex-col items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-md">
+          {/* Estado del sistema (Backend Health) */}
+          <div className="flex shrink-0 flex-col items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-md min-w-[210px] shadow-sm">
             <div className="w-full text-center text-sm font-medium text-blue-100">
               Estado del sistema
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-cyan-300 shadow-sm backdrop-blur-sm">
-                <Bot className="h-6 w-6" aria-hidden />
-              </div>
-              <div className="flex items-end gap-1.5">
-                <span className="text-4xl font-bold">{readiness}%</span>
-                <span className="mb-1 text-xs text-blue-200">listo</span>
-              </div>
-            </div>
-            <div className="h-2 w-full min-w-[180px] overflow-hidden rounded-full bg-white/20">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-300 to-cyan-300 transition-all duration-1000 ease-out"
-                style={{ width: `${readiness}%` }}
-              />
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 shadow-sm backdrop-blur-sm ${
+                  backendOk
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : backendOk === false
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'bg-white/10 text-cyan-300'
+                }`}
+              >
+                <Activity className="h-5 w-5" aria-hidden />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      backendOk
+                        ? 'bg-emerald-400 animate-pulse'
+                        : backendOk === false
+                        ? 'bg-amber-400'
+                        : 'bg-slate-300 animate-pulse'
+                    }`}
+                  />
+                  <span className="text-xl font-bold tracking-tight text-white">
+                    {backendOk === null ? '…' : backendOk ? 'En línea' : 'Desconectado'}
+                  </span>
+                </div>
+                <span className="text-[11px] text-blue-200">
+                  {backendOk === null ? 'Verificando estado' : backendOk ? 'API respondiendo' : 'Inicia el servidor FastAPI'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      </section>
-
-      {/* Stats */}
-      <section aria-label="Métricas del sistema" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Backend"
-          value={backendOk === null ? '…' : backendOk ? 'En línea' : 'Desconectado'}
-          icon={Activity}
-          accent={backendOk ? 'emerald' : 'amber'}
-          trend={backendOk ? 'API respondiendo' : 'Inicia el servidor FastAPI'}
-          loading={backendOk === null}
-        />
-        <StatCard
-          label="Integraciones"
-          value={totalIntegrations ? `${connectedCount} / ${totalIntegrations}` : `${connectedCount}`}
-          icon={Plug}
-          accent="cyan"
-          trend={connectedCount === totalIntegrations && totalIntegrations > 0 ? 'Todas las fuentes vinculadas' : 'Conecta Jira, GitHub y GitLab'}
-          to="/settings?tab=integrations"
-        />
-        <StatCard
-          label="Proveedor de IA"
-          value={aiConfigured === null ? '…' : aiConfigured ? 'Configurado' : 'Requiere config.'}
-          icon={Brain}
-          accent={aiConfigured ? 'primary' : 'amber'}
-          trend={aiConfigured ? 'Listo para ejecuciones' : 'Añade la clave en Configuración'}
-          loading={aiConfigured === null}
-          to="/settings"
-        />
-        <StatCard
-          label="Búsqueda RAG"
-          value="BM25"
-          icon={Zap}
-          accent="primary"
-          trend="Contexto en vivo y documentos"
-          to="/knowledge"
-        />
       </section>
 
       {/* Quick actions */}

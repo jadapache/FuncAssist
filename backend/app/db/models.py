@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -13,13 +14,17 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
-  pass
+  def __init__(self, **kwargs: Any) -> None:
+    if "id" not in kwargs:
+      kwargs["id"] = str(uuid.uuid4())
+    for k, v in kwargs.items():
+      setattr(self, k, v)
 
 
 class UserModel(Base):
   __tablename__ = "users"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
   username: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
   email: Mapped[Optional[str]] = mapped_column(String, nullable=True, default="")
   full_name: Mapped[Optional[str]] = mapped_column(String, nullable=True, default="")
@@ -48,7 +53,8 @@ class UserModel(Base):
 class SettingModel(Base):
   __tablename__ = "settings"
 
-  key: Mapped[str] = mapped_column(String, primary_key=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  key: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
   value_json: Mapped[str] = mapped_column(Text, nullable=False)
   updated_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
@@ -60,45 +66,19 @@ class SettingModel(Base):
     except Exception:
       parsed = self.value_json
     return {
+      "id": self.id,
       "key": self.key,
       "value": parsed,
       "updated_at": self.updated_at.isoformat() if self.updated_at else None,
     }
 
 
-class UserPreferencesModel(Base):
-  __tablename__ = "user_preferences"
+class OrganizationModel(Base):
+  __tablename__ = "organizations"
 
-  user_id: Mapped[str] = mapped_column(String, primary_key=True)
-  inference_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-  inference_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-  transcription_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-  transcription_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-  settings_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, default=dict)
-  updated_at: Mapped[Optional[datetime]] = mapped_column(
-    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
-  )
-
-  def to_dict(self) -> Dict[str, Any]:
-    return {
-      "user_id": self.user_id,
-      "inference_provider": self.inference_provider,
-      "inference_model": self.inference_model,
-      "transcription_provider": self.transcription_provider,
-      "transcription_model": self.transcription_model,
-      "settings_json": self.settings_json or {},
-      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-    }
-
-
-class UserProviderCredentialModel(Base):
-  __tablename__ = "user_provider_credentials"
-
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-  provider: Mapped[str] = mapped_column(Text, nullable=False)
-  secret_ref: Mapped[str] = mapped_column(Text, nullable=False)
-  status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  name: Mapped[str] = mapped_column(String(120), nullable=False)
+  slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
@@ -109,28 +89,256 @@ class UserProviderCredentialModel(Base):
   def to_dict(self) -> Dict[str, Any]:
     return {
       "id": self.id,
+      "name": self.name,
+      "slug": self.slug,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class OrganizationMemberModel(Base):
+  __tablename__ = "organization_members"
+  __table_args__ = (
+    UniqueConstraint("organization_id", "user_id", name="uq_organization_members_org_user"),
+  )
+
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  organization_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+  )
+  user_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+  )
+  role: Mapped[str] = mapped_column(String(50), default="member")
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+
+  organization = relationship("OrganizationModel", foreign_keys=[organization_id])
+  user = relationship("UserModel", foreign_keys=[user_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "organization_id": self.organization_id,
+      "user_id": self.user_id,
+      "role": self.role,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+    }
+
+
+class UserSecretModel(Base):
+  __tablename__ = "user_secrets"
+
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+  )
+  purpose: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+  ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+  nonce: Mapped[str] = mapped_column(Text, nullable=False)
+  key_version: Mapped[int] = mapped_column(Integer, default=1)
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "purpose": self.purpose,
+      "key_version": self.key_version,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserPreferencesModel(Base):
+  __tablename__ = "user_preferences"
+
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True
+  )
+  inference_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  inference_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  transcription_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  transcription_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  language: Mapped[Optional[str]] = mapped_column(String(10), default="es")
+  settings_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, default=dict)
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "inference_provider": self.inference_provider,
+      "inference_model": self.inference_model,
+      "transcription_provider": self.transcription_provider,
+      "transcription_model": self.transcription_model,
+      "language": self.language or "es",
+      "settings_json": self.settings_json or {},
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserProviderCredentialModel(Base):
+  __tablename__ = "user_provider_credentials"
+  __table_args__ = (
+    UniqueConstraint("user_id", "provider", name="uq_user_provider_credentials_user_provider"),
+  )
+
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+  )
+  provider: Mapped[str] = mapped_column(Text, nullable=False)
+  secret_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("user_secrets.id", ondelete="SET NULL"), nullable=True, index=True
+  )
+  secret_ref: Mapped[str] = mapped_column(Text, nullable=False)
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+  last_validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+  validation_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
+  secret = relationship("UserSecretModel", foreign_keys=[secret_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
       "user_id": self.user_id,
       "provider": self.provider,
+      "secret_id": self.secret_id,
       "secret_ref": self.secret_ref,
+      "status": self.status,
+      "last_validated_at": self.last_validated_at.isoformat() if self.last_validated_at else None,
+      "validation_error": self.validation_error,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+    }
+
+
+class UserJiraConnectionModel(Base):
+  __tablename__ = "user_jira_connections"
+  __table_args__ = (
+    UniqueConstraint("user_id", name="uq_user_jira_connections_user"),
+  )
+
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True
+  )
+  jira_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  cloud_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  account_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  account_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  access_token_secret_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("user_secrets.id", ondelete="SET NULL"), nullable=True
+  )
+  refresh_token_secret_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("user_secrets.id", ondelete="SET NULL"), nullable=True
+  )
+  access_token_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  refresh_token_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  expires_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+  scopes_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
+  status: Mapped[str] = mapped_column(Text, nullable=False, default="connected")
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+  updated_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
+  )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    try:
+      scopes = json.loads(self.scopes_json) if self.scopes_json else []
+    except Exception:
+      scopes = []
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "jira_url": self.jira_url,
+      "cloud_id": self.cloud_id,
+      "account_email": self.account_email,
+      "account_id": self.account_id,
+      "expires_at": self.expires_at,
+      "scopes": scopes,
       "status": self.status,
       "created_at": self.created_at.isoformat() if self.created_at else None,
       "updated_at": self.updated_at.isoformat() if self.updated_at else None,
     }
 
 
+class AuditEventModel(Base):
+  __tablename__ = "audit_events"
+
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+  )
+  action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+  resource_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+  resource_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+  details_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+  ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+  created_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+  )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
+
+  def to_dict(self) -> Dict[str, Any]:
+    return {
+      "id": self.id,
+      "user_id": self.user_id,
+      "action": self.action,
+      "resource_type": self.resource_type,
+      "resource_id": self.resource_id,
+      "details": self.details_json or {},
+      "ip_address": self.ip_address,
+      "created_at": self.created_at.isoformat() if self.created_at else None,
+    }
+
+
 class OrganizationIntegrationModel(Base):
   __tablename__ = "organization_integrations"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  organization_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  organization_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, default="default", index=True
+  )
   provider: Mapped[str] = mapped_column(Text, nullable=False)
   client_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
   client_secret_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
   status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
-  created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  created_by: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+  )
   updated_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
   )
+
+  organization = relationship("OrganizationModel", foreign_keys=[organization_id])
+  creator = relationship("UserModel", foreign_keys=[created_by])
 
   def to_dict(self) -> Dict[str, Any]:
     return {
@@ -151,8 +359,10 @@ class UserIntegrationModel(Base):
     UniqueConstraint("user_id", "provider", name="uq_user_integrations_user_provider"),
   )
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+  )
   provider: Mapped[str] = mapped_column(Text, nullable=False, index=True)
   external_account_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
   external_account_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -198,9 +408,11 @@ class UserIntegrationModel(Base):
 class McpServerModel(Base):
   __tablename__ = "mcp_servers"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
   organization_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+  )
   name: Mapped[str] = mapped_column(String, nullable=False)
   description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
   endpoint_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -216,6 +428,8 @@ class McpServerModel(Base):
   updated_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
   )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
     try:
@@ -246,8 +460,10 @@ class McpServerModel(Base):
 class ChatSessionModel(Base):
   __tablename__ = "chat_sessions"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+  )
   title: Mapped[str] = mapped_column(String, nullable=False, default="Nueva conversación")
   feature_slug: Mapped[str] = mapped_column(String, nullable=False, default="general", index=True)
   document_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
@@ -259,6 +475,8 @@ class ChatSessionModel(Base):
   updated_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
   )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
     try:
@@ -282,9 +500,13 @@ class ChatSessionModel(Base):
 class ChatMessageModel(Base):
   __tablename__ = "chat_messages"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  session_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  session_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+  )
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+  )
   role: Mapped[str] = mapped_column(String, nullable=False)
   content: Mapped[str] = mapped_column(Text, nullable=False)
   context_sources_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -292,6 +514,9 @@ class ChatMessageModel(Base):
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
+
+  session = relationship("ChatSessionModel", foreign_keys=[session_id])
+  user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
     sources = []
@@ -322,14 +547,18 @@ class ChatMessageModel(Base):
 class StandupModel(Base):
   __tablename__ = "standups"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+  )
   title: Mapped[str] = mapped_column(String, nullable=False)
   content: Mapped[str] = mapped_column(Text, nullable=False)
   sources_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
     sources = []
@@ -351,8 +580,10 @@ class StandupModel(Base):
 class PRDReviewModel(Base):
   __tablename__ = "prd_reviews"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+  )
   prd_title: Mapped[str] = mapped_column(String, nullable=False)
   content: Mapped[str] = mapped_column(Text, nullable=False)
   score: Mapped[int] = mapped_column(Integer, default=0)
@@ -360,6 +591,8 @@ class PRDReviewModel(Base):
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
     return {
@@ -377,14 +610,18 @@ class TestPlanModel(Base):
   __test__ = False
   __tablename__ = "test_plans"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  user_id: Mapped[Optional[str]] = mapped_column(
+    String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+  )
   feature_name: Mapped[str] = mapped_column(String, nullable=False)
   test_type: Mapped[str] = mapped_column(String, default="regression")
   content: Mapped[str] = mapped_column(Text, nullable=False)
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
+
+  user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
     return {
@@ -401,7 +638,7 @@ class AITemplateModel(Base):
   """Current active version of an AI prompt or rubric template."""
   __tablename__ = "ai_templates"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)  
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))  
   template_type: Mapped[str] = mapped_column(String, nullable=False, index=True) 
   feature: Mapped[str] = mapped_column(String, nullable=False, index=True)
   version: Mapped[int] = mapped_column(Integer, default=1)
@@ -435,8 +672,10 @@ class AITemplateVersionModel(Base):
   """Audit history log of all prompt/rubric template changes."""
   __tablename__ = "ai_template_versions"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
-  template_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  template_id: Mapped[str] = mapped_column(
+    String(36), ForeignKey("ai_templates.id", ondelete="CASCADE"), nullable=False, index=True
+  )
   template_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
   feature: Mapped[str] = mapped_column(String, nullable=False, index=True)
   version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -446,6 +685,8 @@ class AITemplateVersionModel(Base):
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
+
+  template = relationship("AITemplateModel", foreign_keys=[template_id])
 
   def to_dict(self) -> Dict[str, Any]:
     try:
@@ -469,7 +710,7 @@ class TranscriptionModel(Base):
   """Transcription, segments, summary, and audio metadata stored in PostgreSQL."""
   __tablename__ = "transcriptions"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
   title: Mapped[str] = mapped_column(String, nullable=False, default="Reunión")
   description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
   original_filename: Mapped[Optional[str]] = mapped_column(String, nullable=True, default="")
@@ -550,7 +791,7 @@ class CorporateTemplateModel(Base):
   """Corporate document templates metadata and content stored in PostgreSQL."""
   __tablename__ = "corporate_templates"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
   title: Mapped[str] = mapped_column(String, nullable=False)
   filename: Mapped[str] = mapped_column(String, nullable=False)
   stored_filename: Mapped[str] = mapped_column(String, nullable=False)
@@ -591,7 +832,7 @@ class AIModelCatalogModel(Base):
   """Frontier and built-in AI models catalog synchronized into PostgreSQL."""
   __tablename__ = "ai_models_catalog"
 
-  id: Mapped[str] = mapped_column(String, primary_key=True)
+  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
   provider: Mapped[str] = mapped_column(String, nullable=False, index=True)
   task_type: Mapped[str] = mapped_column(String, nullable=False, default="chat_writing", index=True)
   name: Mapped[str] = mapped_column(String, nullable=False)

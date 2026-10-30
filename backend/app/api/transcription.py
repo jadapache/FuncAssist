@@ -11,8 +11,10 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
+
+from app.api.deps import get_current_user
 
 from app.core.settings import USER_DATA_DIR
 from app.core.storage import load_app_settings
@@ -43,7 +45,11 @@ from app.schemas.transcription import (
   UpdateSummaryRequest,
 )
 
-router = APIRouter(prefix="/transcription", tags=["transcription"])
+router = APIRouter(
+  prefix="/transcription",
+  tags=["transcription"],
+  dependencies=[Depends(get_current_user)],
+)
 
 
 class ExportDocumentRequest(BaseModel):

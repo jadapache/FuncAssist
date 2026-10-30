@@ -1,7 +1,7 @@
 """AI Model Catalog Service.
 
 Loads model metadata (rate limits, pricing, context windows, and tasks)
-directly from declarative JSON catalog (models_catalog.json).
+directly from declarative JSON catalog or PostgreSQL repository with resilient fallbacks.
 """
 
 from __future__ import annotations
@@ -12,13 +12,15 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-import shutil
+from typing import Any
 
-# Ensure LiteLLM offline cost map default
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-from app.core.settings import ROOT_DIR, USER_DATA_DIR
+from app.core.settings import ROOT_DIR, USER_DATA_DIR, WHISPER_MODELS_DIR
 from app.models import AIModelInfo, ModelCatalogResponse
-from app.ai.builtin_local import load_builtin_catalog
+from app.ai.builtin_local import get_builtin_cache_dir, load_builtin_catalog, resolve_model_meta
+from app.ai.builtin_seeds import DEFAULT_BUILTIN_MODELS
+from app.ai.frontier_sync import KNOWN_FRONTIER_MODELS
+from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
 
 logger = logging.getLogger(__name__)
 
@@ -27,146 +29,151 @@ FALLBACK_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "models_catalog.json"
 
 _catalog_cache: list[AIModelInfo] | None = None
 _catalog_cache_ts: float = 0.0
-_CACHE_TTL_SECONDS = 300  # 5 minutos
+_CACHE_TTL_SECONDS = 300
+_BUILTIN_PROVIDERS = ("builtin", "local", "faster-whisper", "moonshine", "onnx")
+
+
+def _resolve_context_length(tokens_str: str) -> int:
+    if "131" in tokens_str:
+        return 131072
+    if "65" in tokens_str:
+        return 65536
+    if "8" in tokens_str:
+        return 8192
+    return 32768
+
+
+def _build_builtin_chat_model(item: dict[str, Any]) -> AIModelInfo:
+    model_id = item["id"]
+    tokens_str = item.get("tokens", "32.768 tokens")
+    return AIModelInfo(
+        id=model_id,
+        raw_id=item.get("filename", model_id),
+        name=item.get("name", model_id),
+        provider="builtin",
+        provider_name="Built-in (Local)",
+        description=item.get("description", ""),
+        context_window=tokens_str,
+        context_length=_resolve_context_length(tokens_str),
+        task_type="chat_writing",
+        task_label="Redacción y Chat",
+        tier_type="free",
+        pricing_prompt=0.0,
+        pricing_completion=0.0,
+        pricing_label="Gratis (Local)",
+        rate_limits="Sin límite (Local)",
+        badge="Built-in (Sin Ollama)",
+        is_free=True,
+        size=item.get("size"),
+    )
+
+
+def _resolve_transcription_provider_info(item: dict[str, Any], model_id: str) -> tuple[str, str, str]:
+    prov = item.get("provider", "builtin")
+    if prov == "onnx" or item.get("engine") == "onnxruntime" or "parakeet" in model_id or "sense-voice" in model_id:
+        return ("onnx", "ONNX Runtime (Offline)", "ONNX Runtime")
+    if prov == "faster-whisper" or model_id.startswith("fw-"):
+        return ("faster-whisper", "Faster Whisper (CTranslate2)", "CTranslate2 Local")
+    if prov == "moonshine" or model_id.startswith("moonshine"):
+        return ("moonshine", "Moonshine (Useful Sensors)", "Moonshine Local")
+    return ("builtin", "Whisper Local (CPU/GPU)", "Whisper Local")
+
+
+def _build_builtin_transcription_model(item: dict[str, Any]) -> AIModelInfo:
+    model_id = item["id"]
+    prov_id, prov_name, badge = _resolve_transcription_provider_info(item, model_id)
+    return AIModelInfo(
+        id=model_id,
+        raw_id=item.get("tag", model_id),
+        name=item.get("name", model_id),
+        provider=prov_id,
+        provider_name=prov_name,
+        description=item.get("description", ""),
+        context_window="Audio local",
+        context_length=0,
+        task_type="transcription",
+        task_label="Transcripción y Voz",
+        tier_type="free",
+        pricing_prompt=0.0,
+        pricing_completion=0.0,
+        pricing_label="Gratis (Local)",
+        rate_limits="Sin límite (Local)",
+        badge=badge,
+        is_free=True,
+        size=item.get("size"),
+        accuracy=item.get("accuracy"),
+    )
 
 
 def _load_builtin_model_infos() -> list[AIModelInfo]:
-    """Load built-in models from repository / seed catalog and map them to AIModelInfo."""
-    data = list(load_builtin_catalog(task_type=None).values())
+    try:
+        data = list(load_builtin_catalog(task_type=None).values())
+    except Exception as exc:
+        logger.debug(f"Built-in catalog file load failed: {exc}")
+        data = list(DEFAULT_BUILTIN_MODELS.values())
 
     builtin_models: list[AIModelInfo] = []
     for item in data:
         if not isinstance(item, dict) or "id" not in item:
             continue
         task_type = item.get("task_type", "chat_writing")
-        model_id = item["id"]
-        name = item.get("name", model_id)
-        description = item.get("description", "")
-        size = item.get("size")
-
         if task_type == "chat_writing":
-            tokens_str = item.get("tokens", "32.768 tokens")
-            ctx_len = 32768
-            if "131" in tokens_str:
-                ctx_len = 131072
-            elif "65" in tokens_str:
-                ctx_len = 65536
-            elif "8" in tokens_str:
-                ctx_len = 8192
-
-            builtin_models.append(
-                AIModelInfo(
-                    id=model_id,
-                    raw_id=item.get("filename", model_id),
-                    name=name,
-                    provider="builtin",
-                    provider_name="Built-in (Local)",
-                    description=description,
-                    context_window=tokens_str,
-                    context_length=ctx_len,
-                    task_type="chat_writing",
-                    task_label="Redacción y Chat",
-                    tier_type="free",
-                    pricing_prompt=0.0,
-                    pricing_completion=0.0,
-                    pricing_label="Gratis (Local)",
-                    rate_limits="Sin límite (Local)",
-                    badge="Built-in (Sin Ollama)",
-                    is_free=True,
-                    size=size,
-                )
-            )
+            builtin_models.append(_build_builtin_chat_model(item))
         elif task_type == "transcription":
-            prov = item.get("provider", "builtin")
-            if prov == "onnx" or item.get("engine") == "onnxruntime" or "parakeet" in model_id or "sense-voice" in model_id:
-                prov_id = "onnx"
-                prov_name = "ONNX Runtime (Offline)"
-                badge = "ONNX Runtime"
-            elif prov == "faster-whisper" or model_id.startswith("fw-"):
-                prov_id = "faster-whisper"
-                prov_name = "Faster Whisper (CTranslate2)"
-                badge = "CTranslate2 Local"
-            elif prov == "moonshine" or model_id.startswith("moonshine"):
-                prov_id = "moonshine"
-                prov_name = "Moonshine (Useful Sensors)"
-                badge = "Moonshine Local"
-            else:
-                prov_id = "builtin"
-                prov_name = "Whisper Local (CPU/GPU)"
-                badge = "Whisper Local"
-
-            builtin_models.append(
-                AIModelInfo(
-                    id=model_id,
-                    raw_id=item.get("tag", model_id),
-                    name=name,
-                    provider=prov_id,
-                    provider_name=prov_name,
-                    description=description,
-                    context_window="Audio local",
-                    context_length=0,
-                    task_type="transcription",
-                    task_label="Transcripción y Voz",
-                    tier_type="free",
-                    pricing_prompt=0.0,
-                    pricing_completion=0.0,
-                    pricing_label="Gratis (Local)",
-                    rate_limits="Sin límite (Local)",
-                    badge=badge,
-                    is_free=True,
-                    size=size,
-                    accuracy=item.get("accuracy"),
-                )
-            )
-
+            builtin_models.append(_build_builtin_transcription_model(item))
     return builtin_models
 
 
-def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
-    """Load verified model list combining frontier models (models_catalog.json) and built-in models (builtin_models_catalog.json)."""
-    global _catalog_cache, _catalog_cache_ts
+def _load_frontier_from_db() -> list[dict[str, Any]]:
+    try:
+        repo = AIModelCatalogRepository()
+        items = repo.list_sync()
+        return items if isinstance(items, list) else []
+    except Exception as exc:
+        logger.debug(f"DB load frontier models fallback: {exc}")
+        return []
 
+
+def _load_frontier_from_file(file_path: Path) -> list[dict[str, Any]]:
+    if not file_path.exists():
+        return []
+    try:
+        parsed = json.loads(file_path.read_text(encoding="utf-8"))
+        return parsed if isinstance(parsed, list) else []
+    except Exception as exc:
+        logger.debug(f"File load failed for {file_path}: {exc}")
+        return []
+
+
+def _filter_non_builtin(items: list[dict[str, Any]]) -> list[AIModelInfo]:
+    frontier: list[AIModelInfo] = []
+    for item in items:
+        if not isinstance(item, dict) or "id" not in item:
+            continue
+        if item.get("provider") in _BUILTIN_PROVIDERS:
+            continue
+        try:
+            frontier.append(AIModelInfo(**item))
+        except Exception as exc:
+            logger.debug(f"Failed to validate frontier model {item.get('id')}: {exc}")
+    return frontier
+
+
+def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
+    global _catalog_cache, _catalog_cache_ts
     now = time.monotonic()
     if not refresh and _catalog_cache is not None and (now - _catalog_cache_ts) < _CACHE_TTL_SECONDS:
         return _catalog_cache
 
-    frontier_models: list[AIModelInfo] = []
+    raw_items = _load_frontier_from_db()
+    if not raw_items:
+        raw_items = _load_frontier_from_file(CATALOG_FILE)
+    if not raw_items:
+        raw_items = _load_frontier_from_file(FALLBACK_CATALOG_FILE)
+    if not raw_items:
+        raw_items = KNOWN_FRONTIER_MODELS
 
-    # 1. Attempt to load frontier models from PostgreSQL entity first
-    try:
-        from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
-        repo = AIModelCatalogRepository()
-        db_items = repo.list_sync()
-        if db_items:
-            frontier_models = [
-                AIModelInfo(**item) for item in db_items
-                if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
-            ]
-        elif FALLBACK_CATALOG_FILE.exists():
-            # Seed PostgreSQL repository from bundled template
-            try:
-                seed_data = json.loads(FALLBACK_CATALOG_FILE.read_text(encoding="utf-8"))
-                repo.bulk_upsert_sync(seed_data)
-                frontier_models = [
-                    AIModelInfo(**item) for item in seed_data
-                    if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
-                ]
-            except Exception as seed_err:
-                logger.debug(f"Failed to seed catalog into DB: {seed_err}")
-    except Exception as exc:
-        logger.debug(f"DB load frontier models fallback: {exc}")
-
-    # 2. Read-only in-memory fallback from repository bundled file (without modifying disk)
-    if not frontier_models and FALLBACK_CATALOG_FILE.exists():
-        try:
-            data = json.loads(FALLBACK_CATALOG_FILE.read_text(encoding="utf-8"))
-            frontier_models = [
-                AIModelInfo(**item) for item in data
-                if isinstance(item, dict) and item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx")
-            ]
-        except Exception as e:
-            logger.error(f"Failed to load fallback catalog from {FALLBACK_CATALOG_FILE}: {e}")
-
+    frontier_models = _filter_non_builtin(raw_items)
     builtin_models = _load_builtin_model_infos()
     combined = frontier_models + builtin_models
 
@@ -175,84 +182,98 @@ def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
     return _catalog_cache
 
 
+def _get_transcription_disk_state(model: AIModelInfo, cache_dir: Path) -> tuple[bool, float]:
+    clean_id = model.id.replace("whisper-", "")
+    if model.provider == "onnx" or "parakeet" in model.id or "sense-voice" in model.id:
+        o_dir = cache_dir / f"onnx-{model.id}"
+        files = list(o_dir.glob("*.onnx")) if o_dir.exists() else []
+        is_dl = len(files) > 0 and sum(f.stat().st_size for f in files) > 1024 * 1024
+        return is_dl, round(sum(f.stat().st_size for f in files) / (1024 * 1024), 1) if is_dl else 0.0
+
+    if model.provider == "faster-whisper" or model.id.startswith("fw-"):
+        fw_clean = clean_id.replace("fw-", "").replace("faster-whisper-", "")
+        m_bin = cache_dir / f"faster-whisper-{fw_clean}" / "model.bin"
+        is_dl = m_bin.exists() and m_bin.stat().st_size > 1024 * 1024
+        return is_dl, round(m_bin.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
+
+    if model.provider == "moonshine" or model.id.startswith("moonshine"):
+        m_dir = cache_dir / model.id
+        is_dl = m_dir.exists() and any(m_dir.iterdir()) if m_dir.exists() else False
+        return is_dl, 90.0 if ("tiny" in model.id) else (360.0 if is_dl else 0.0)
+
+    target_pt = cache_dir / f"{clean_id}.pt"
+    if not target_pt.exists():
+        legacy_pt = Path.home() / ".cache" / "whisper" / f"{clean_id}.pt"
+        if legacy_pt.exists():
+            target_pt = legacy_pt
+    is_dl = target_pt.exists() and target_pt.stat().st_size > 1024 * 1024
+    return is_dl, round(target_pt.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
+
+
+def _enrich_transcription_models(models: list[AIModelInfo]) -> None:
+    for m in models:
+        if m.task_type == "transcription" and m.provider in _BUILTIN_PROVIDERS:
+            try:
+                is_dl, size_mb = _get_transcription_disk_state(m, WHISPER_MODELS_DIR)
+                m.is_downloaded = is_dl
+                m.disk_size_mb = size_mb
+            except Exception as exc:
+                logger.debug(f"Transcription state check failed for {m.id}: {exc}")
+
+
+def _enrich_chat_models(models: list[AIModelInfo]) -> None:
+    cache_dir = get_builtin_cache_dir()
+    for m in models:
+        if m.provider == "builtin" and m.task_type == "chat_writing":
+            try:
+                meta = resolve_model_meta(m.id)
+                if meta:
+                    gguf = cache_dir / meta["filename"]
+                    is_dl = gguf.exists() and gguf.stat().st_size > 10 * 1024 * 1024
+                    m.is_downloaded = is_dl
+                    m.disk_size_mb = round(gguf.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
+            except Exception as exc:
+                logger.debug(f"Chat model state check failed for {m.id}: {exc}")
+
+
+def _filter_catalog_models(models: list[AIModelInfo], provider: str, task_type: str) -> list[AIModelInfo]:
+    filtered = models
+    if provider and provider != "all":
+        p_key = provider.lower()
+        filtered = [m for m in filtered if m.provider.lower() == p_key]
+    if task_type and task_type != "all":
+        t_key = task_type.lower()
+        filtered = [m for m in filtered if m.task_type.lower() == t_key]
+    return filtered
+
+
 async def get_model_catalog(
     refresh: bool = False,
     provider: str = "all",
     task_type: str = "all",
 ) -> ModelCatalogResponse:
-    """Retrieve catalog of AI models from the declarative JSON registry."""
-    models = load_local_catalog(refresh=refresh)
+    try:
+        models = load_local_catalog(refresh=refresh)
+    except Exception as exc:
+        logger.error(f"Catalog loading raised exception: {exc}")
+        models = []
 
     source = "local_json"
     error_msg = None
-
     if not models:
         error_msg = "Error de conexión, no se pudo obtener los modelos"
         source = "error"
 
-    # Dynamically enrich builtin Whisper and local transcription models with download state
-    from app.core.settings import WHISPER_MODELS_DIR
-    whisper_cache = WHISPER_MODELS_DIR
-    for m in models:
-        if m.task_type == "transcription" and m.provider in ("builtin", "local", "faster-whisper", "moonshine", "onnx"):
-            clean_id = m.id.replace("whisper-", "")
-            if m.provider == "onnx" or "parakeet" in m.id or "sense-voice" in m.id:
-                o_dir = whisper_cache / f"onnx-{m.id}"
-                onnx_files = list(o_dir.glob("*.onnx")) if o_dir.exists() else []
-                is_dl = len(onnx_files) > 0 and sum(f.stat().st_size for f in onnx_files) > 1024 * 1024
-                m.is_downloaded = is_dl
-                m.disk_size_mb = round(sum(f.stat().st_size for f in onnx_files) / (1024 * 1024), 1) if is_dl else 0.0
-            elif m.provider == "faster-whisper" or m.id.startswith("fw-"):
-                clean_fw = clean_id.replace("fw-", "").replace("faster-whisper-", "")
-                fw_dir = whisper_cache / f"faster-whisper-{clean_fw}"
-                model_bin = fw_dir / "model.bin"
-                is_dl = model_bin.exists() and model_bin.stat().st_size > 1024 * 1024
-                m.is_downloaded = is_dl
-                m.disk_size_mb = round(model_bin.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
-            elif m.provider == "moonshine" or m.id.startswith("moonshine"):
-                m_dir = whisper_cache / m.id
-                is_dl = m_dir.exists() and any(m_dir.iterdir()) if m_dir.exists() else False
-                m.is_downloaded = is_dl
-                m.disk_size_mb = 90.0 if ("tiny" in m.id) else (360.0 if is_dl else 0.0)
-            else:
-                target_pt = whisper_cache / f"{clean_id}.pt"
-                if not target_pt.exists():
-                    legacy_pt = Path.home() / ".cache" / "whisper" / f"{clean_id}.pt"
-                    if legacy_pt.exists():
-                        target_pt = legacy_pt
-                is_dl = target_pt.exists() and target_pt.stat().st_size > 1024 * 1024
-                m.is_downloaded = is_dl
-                m.disk_size_mb = round(target_pt.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
+    _enrich_transcription_models(models)
+    _enrich_chat_models(models)
 
-    # Dynamically enrich builtin chat_writing LLM models with local download state
-    from app.ai.builtin_local import get_builtin_cache_dir, resolve_model_meta
-    builtin_cache = get_builtin_cache_dir()
-    for m in models:
-        if m.provider == "builtin" and m.task_type == "chat_writing":
-            meta = resolve_model_meta(m.id)
-            if meta:
-                target_gguf = builtin_cache / meta["filename"]
-                is_dl = target_gguf.exists() and target_gguf.stat().st_size > 10 * 1024 * 1024
-                m.is_downloaded = is_dl
-                m.disk_size_mb = round(target_gguf.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
-
-    # Filter by provider
-    if provider and provider != "all":
-        prov_key = provider.lower()
-        models = [m for m in models if m.provider.lower() == prov_key]
-
-    # Filter by task_type (chat_writing vs transcription)
-    if task_type and task_type != "all":
-        task_key = task_type.lower()
-        models = [m for m in models if m.task_type.lower() == task_key]
-
-    all_providers = sorted(list(set(m.provider for m in models))) if models else []
+    filtered_models = _filter_catalog_models(models, provider, task_type)
+    all_providers = sorted(list(set(m.provider for m in filtered_models))) if filtered_models else []
 
     return ModelCatalogResponse(
         updated_at=datetime.now(timezone.utc).isoformat(),
         source=source,
         providers=all_providers,
-        models=models,
+        models=filtered_models,
         error=error_msg,
     )
-

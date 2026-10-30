@@ -1,6 +1,7 @@
 """User personal integrations persistence (e.g. personal OAuth Jira).
 
-Stores encrypted access and refresh tokens scoped strictly to (user_id, provider).
+Stores encrypted access and refresh tokens scoped strictly to (user_id, provider)
+and maintains synchronization with UserJiraConnectionModel and SecretStore.
 """
 
 from __future__ import annotations
@@ -12,9 +13,10 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
+from app.core.secret_store import secret_store
 from app.core.secrets import decrypt_secret, encrypt_secret
 from app.core.storage_cache import _CACHE_CONNECTIONS, make_user_conn_cache_key
-from app.db.models import UserIntegrationModel
+from app.db.models import UserIntegrationModel, UserJiraConnectionModel
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ def save_user_integration(
   if not user_id or not provider:
     raise ValueError("user_id and provider are required to save a user integration.")
 
+  payload = dict(payload)
+  payload.setdefault("status", "connected")
   raw = json.dumps(payload, ensure_ascii=False)
   enc_str = encrypt_secret(raw)
 
@@ -37,19 +41,33 @@ def save_user_integration(
 
   access_token = payload.get("access_token")
   refresh_token = payload.get("refresh_token")
-  enc_access = encrypt_secret(access_token) if access_token else None
-  enc_refresh = encrypt_secret(refresh_token) if refresh_token else None
 
-  scopes = payload.get("scopes") or []
-  scopes_json = json.dumps(scopes) if isinstance(scopes, list) else str(scopes)
-
-  metadata = {
-    k: v for k, v in payload.items()
-    if k not in ("access_token", "refresh_token", "scopes", "user_id", "provider")
-  }
-  metadata_json = json.dumps(metadata)
+  access_secret_id: Optional[str] = None
+  refresh_secret_id: Optional[str] = None
 
   def _persist(session: Any) -> None:
+    nonlocal access_secret_id, refresh_secret_id
+    if access_token:
+      access_secret_id = secret_store.create_secret(
+        user_id=user_id,
+        purpose=f"{provider}_access_token",
+        plain_value=access_token,
+        db=session,
+      )
+    if refresh_token:
+      refresh_secret_id = secret_store.create_secret(
+        user_id=user_id,
+        purpose=f"{provider}_refresh_token",
+        plain_value=refresh_token,
+        db=session,
+      )
+
+    enc_access = f"sec::{access_secret_id}" if access_secret_id else (encrypt_secret(access_token) if access_token else None)
+    enc_refresh = f"sec::{refresh_secret_id}" if refresh_secret_id else (encrypt_secret(refresh_token) if refresh_token else None)
+
+    scopes = payload.get("scopes") or []
+    scopes_json = json.dumps(scopes) if isinstance(scopes, list) else str(scopes)
+
     item = session.scalar(
       select(UserIntegrationModel).where(
         UserIntegrationModel.user_id == user_id,
@@ -80,6 +98,45 @@ def save_user_integration(
         status=payload.get("status") or "connected",
       )
       session.add(new_item)
+
+    if provider == "jira":
+      jira_item = session.scalar(
+        select(UserJiraConnectionModel).where(UserJiraConnectionModel.user_id == user_id)
+      )
+      jira_url = payload.get("jira_url") or payload.get("base_url") or payload.get("site_url")
+      cloud_id = payload.get("cloud_id")
+      account_email = payload.get("account_email") or payload.get("email")
+      account_id = payload.get("account_id") or payload.get("external_account_id")
+
+      if jira_item:
+        jira_item.jira_url = jira_url
+        jira_item.cloud_id = cloud_id
+        jira_item.account_email = account_email
+        jira_item.account_id = account_id
+        jira_item.access_token_secret_id = access_secret_id
+        jira_item.refresh_token_secret_id = refresh_secret_id
+        jira_item.access_token_ref = enc_access
+        jira_item.refresh_token_ref = enc_refresh
+        jira_item.expires_at = payload.get("expires_at")
+        jira_item.scopes_json = scopes_json
+        jira_item.status = payload.get("status") or "connected"
+      else:
+        new_jira = UserJiraConnectionModel(
+          id=str(uuid.uuid4()),
+          user_id=user_id,
+          jira_url=jira_url,
+          cloud_id=cloud_id,
+          account_email=account_email,
+          account_id=account_id,
+          access_token_secret_id=access_secret_id,
+          refresh_token_secret_id=refresh_secret_id,
+          access_token_ref=enc_access,
+          refresh_token_ref=enc_refresh,
+          expires_at=payload.get("expires_at"),
+          scopes_json=scopes_json,
+          status=payload.get("status") or "connected",
+        )
+        session.add(new_jira)
 
   if db is not None:
     _persist(db)
@@ -166,8 +223,15 @@ def delete_user_integration(
     )
     if item:
       session.delete(item)
-      return True
-    return existed
+
+    if provider == "jira":
+      jira_item = session.scalar(
+        select(UserJiraConnectionModel).where(UserJiraConnectionModel.user_id == user_id)
+      )
+      if jira_item:
+        session.delete(jira_item)
+
+    return bool(item or existed)
 
   if db is not None:
     return _delete(db)
@@ -179,7 +243,7 @@ def delete_user_integration(
       session.commit()
       return res
   except Exception as exc:
-    logger.error("Could not delete user integration from DB: %s", exc)
+    logger.error("Failed deleting user integration %s/%s: %s", user_id, provider, exc)
     raise
 
 
@@ -188,30 +252,6 @@ def user_integration_exists(
   provider: str,
   db: Optional[Any] = None,
 ) -> bool:
-  """Check if a user integration exists in memory or DB."""
-  if not user_id or not provider:
-    return False
-
-  cache_key = make_user_conn_cache_key(user_id, provider)
-  if cache_key in _CACHE_CONNECTIONS:
-    return True
-
-  def _exists(session: Any) -> bool:
-    item = session.scalar(
-      select(UserIntegrationModel.id).where(
-        UserIntegrationModel.user_id == user_id,
-        UserIntegrationModel.provider == provider,
-      )
-    )
-    return item is not None
-
-  if db is not None:
-    return _exists(db)
-
-  try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      return _exists(session)
-  except Exception:
-    return False
-
+  """Check whether a user has an active connection configured."""
+  data = load_user_integration(user_id, provider, db=db)
+  return data is not None and data.get("status", "connected") == "connected"
