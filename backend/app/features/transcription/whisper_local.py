@@ -22,11 +22,12 @@ def _safe_whisper_path(cache_dir: Path, name: str) -> Path:
   safe_name = os.path.basename(name.strip())
   if not safe_name or not _SAFE_NAME_PATTERN.match(safe_name):
     raise ValueError(f"Nombre de modelo inválido: '{name}'")
-  resolved_cache = cache_dir.resolve()
-  target = (resolved_cache / safe_name).resolve()
-  if not target.is_relative_to(resolved_cache):
+  base_dir = os.path.realpath(str(cache_dir))
+  target_path = os.path.realpath(os.path.join(base_dir, safe_name))
+  base_prefix = base_dir if base_dir.endswith(os.sep) else base_dir + os.sep
+  if not target_path.startswith(base_prefix) and target_path != base_dir:
     raise ValueError(f"Ruta fuera del directorio de modelos Whisper: '{name}'")
-  return target
+  return Path(target_path)
 
 
 def get_whisper_cache_dir() -> Path:
