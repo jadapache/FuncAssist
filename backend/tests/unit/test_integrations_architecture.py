@@ -272,3 +272,47 @@ def test_mcp_server_model_update_properties():
   assert server.status == "disabled"
   assert "tool2" in server.allowed_tools_json
 
+
+
+def test_my_jira_callback_error_handling():
+  from fastapi.testclient import TestClient
+  from app.main import app
+  from unittest.mock import AsyncMock, patch
+
+  client = TestClient(app)
+
+  # 1. Error returned by provider (CodeQL safe static error, no reflection, anti-cache headers)
+  res = client.get("/api/me/integrations/jira/callback?error=access_denied_raw_message", follow_redirects=False)
+  assert res.status_code == 307
+  assert "jira=error" in res.headers["location"]
+  assert "message=oauth_error" in res.headers["location"]
+  assert "access_denied_raw_message" not in res.headers["location"]
+  assert res.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
+  assert res.headers["pragma"] == "no-cache"
+
+  # 2. Missing code or state
+  res_missing = client.get("/api/me/integrations/jira/callback?code=123", follow_redirects=False)
+  assert res_missing.status_code == 307
+  assert "message=missing_code" in res_missing.headers["location"]
+  assert res_missing.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
+
+  # 3. Invalid state from CSRF check
+  with patch("app.integrations.registry.registry.get") as mock_reg:
+    mock_jira = AsyncMock()
+    mock_jira.handle_oauth_callback.side_effect = ValueError("Invalid OAuth state. Restart the Jira connection flow.")
+    mock_reg.return_value = mock_jira
+
+    res_invalid_state = client.get("/api/me/integrations/jira/callback?code=c&state=invalid", follow_redirects=False)
+    assert res_invalid_state.status_code == 307
+    assert "message=invalid_state" in res_invalid_state.headers["location"]
+
+  # 4. Success redirect
+  with patch("app.integrations.registry.registry.get") as mock_reg:
+    mock_jira = AsyncMock()
+    mock_jira.handle_oauth_callback.return_value = None
+    mock_reg.return_value = mock_jira
+
+    res_success = client.get("/api/me/integrations/jira/callback?code=c&state=valid", follow_redirects=False)
+    assert res_success.status_code == 307
+    assert "jira=connected" in res_success.headers["location"]
+    assert res_success.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"

@@ -396,7 +396,7 @@ async def get_files_changed(
 @router.post("/{integration_id}/sync")
 async def sync_integration_data(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> dict:
   try:
     user_id = str(current_user["id"]) if current_user and "id" in current_user else None
@@ -410,7 +410,7 @@ async def sync_integration_data(
 @router.get("/{integration_id}/sync")
 async def get_sync_cache(
   integration_id: str,
-  current_user: dict | None = Depends(get_optional_current_user),
+  current_user: dict = Depends(get_current_user),
 ) -> dict:
   user_id = str(current_user["id"]) if current_user and "id" in current_user else None
   cached = await load_sync_cache(integration_id, user_id=user_id)
