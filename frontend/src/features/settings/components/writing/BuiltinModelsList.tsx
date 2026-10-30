@@ -9,7 +9,7 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react'
-import { webLLMProvider } from '../../../ai/providers/WebLLMProvider'
+// Provider imported lazily where needed to enable code-splitting
 import {
   WEBLLM_MODELS_CATALOG,
   detectHardwareProfile,
@@ -20,6 +20,12 @@ import type {
   WebLLMInitProgress,
   WebLLMModelDefinition,
 } from '../../../ai/types/webLlm'
+
+// Lazy load WebLLMProvider to keep it in a separate chunk
+const getWebLLMProvider = async () => {
+  const module = await import('../../../ai/providers/WebLLMProvider')
+  return module.webLLMProvider
+}
 import { formatProgressStage } from '../../../../utils/formatProgressStage'
 
 
@@ -42,9 +48,10 @@ export const BuiltinModelsList = ({
   const refreshCacheStatus = useCallback(async () => {
     setIsRefreshing(true)
     try {
+      const provider = await getWebLLMProvider()
       const nextMap: Record<string, boolean> = {}
       for (const m of WEBLLM_MODELS_CATALOG) {
-        nextMap[m.id] = await webLLMProvider.isModelCached(m.id)
+        nextMap[m.id] = await provider.isModelCached(m.id)
       }
       setCachedMap(nextMap)
     } finally {
@@ -75,7 +82,7 @@ export const BuiltinModelsList = ({
     }))
 
     try {
-      await webLLMProvider.initModel(modelDef.id, (report) => {
+      await (await getWebLLMProvider()).initModel(modelDef.id, (report) => {
         setProgressState((prev) => ({
           ...prev,
           [modelDef.id]: report,
@@ -93,7 +100,7 @@ export const BuiltinModelsList = ({
   const handleDelete = async (modelId: string) => {
     setDeletingId(modelId)
     try {
-      await webLLMProvider.deleteCachedModel(modelId)
+      await (await getWebLLMProvider()).deleteCachedModel(modelId)
       await refreshCacheStatus()
     } catch (err) {
       console.error(`Error eliminando modelo ${modelId}:`, err)
