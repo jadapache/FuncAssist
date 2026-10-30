@@ -17,7 +17,7 @@ Covers:
 """
 
 import time
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 import pytest
 from app.core import storage
 from app.core.storage_cache import clear_storage_caches
@@ -316,3 +316,17 @@ def test_my_jira_callback_error_handling():
     assert res_success.status_code == 307
     assert "jira=connected" in res_success.headers["location"]
     assert res_success.headers["cache-control"] == "no-store, no-cache, must-revalidate, max-age=0"
+
+
+@pytest.mark.asyncio
+async def test_api_integrations_jira_callback_without_auth():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    with patch('app.integrations.registry.registry.get') as mock_reg, patch('app.api.integrations.sync_integration') as mock_sync:
+        mock_jira = AsyncMock()
+        mock_reg.return_value = mock_jira
+        res = client.get('/api/integrations/jira/callback?code=testcode&state=teststate', follow_redirects=False)
+        assert res.status_code == 307
+        assert 'jira=connected' in res.headers['location']
