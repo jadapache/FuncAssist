@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from typing import Any, List, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode, urljoin
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
@@ -288,31 +288,52 @@ async def connect_my_jira(
   return oauth_res.model_dump() if hasattr(oauth_res, "model_dump") else oauth_res
 
 
-@router.get("/integrations/jira/callback")
+OAUTH_REDIRECT_HEADERS: dict[str, str] = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+  "Pragma": "no-cache",
+}
+
+
+def _build_jira_redirect(params: dict[str, str], target_path: str = "/profile") -> RedirectResponse:
+  settings = get_settings()
+  base_url = settings.frontend_url.rstrip("/") + "/"
+  query_string = urlencode(params)
+  path_with_query = f"{target_path.lstrip('/')}?{query_string}" if query_string else target_path.lstrip("/")
+  return RedirectResponse(
+    url=urljoin(base_url, path_with_query),
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    headers=OAUTH_REDIRECT_HEADERS,
+  )
+
+
+@router.get("/integrations/jira/callback", response_class=RedirectResponse)
 async def my_jira_callback(
   code: Optional[str] = Query(None),
   state: Optional[str] = Query(None),
   error: Optional[str] = Query(None),
-) -> Any:
+) -> RedirectResponse:
   """Handle Jira OAuth redirect callback, exchanging authorization code for tokens."""
-  settings = get_settings()
-  frontend = settings.frontend_url.rstrip("/")
-
-  # Determine target page from state or default to profile (user settings)
-  target_path = "/profile"
-
   if error:
-    return RedirectResponse(f"{frontend}{target_path}?jira=error&message={quote(error)}")
+    logger.warning("Jira OAuth callback returned error: %s", error)
+    return _build_jira_redirect({"jira": "error", "message": "oauth_error"})
+
   if not code or not state:
-    return RedirectResponse(f"{frontend}{target_path}?jira=error&message=missing_code")
+    logger.warning("Jira OAuth callback invoked without code or state parameter")
+    return _build_jira_redirect({"jira": "error", "message": "missing_code"})
 
   try:
     jira_integration = registry.get("jira")
     await jira_integration.handle_oauth_callback(code, state)
-    return RedirectResponse(f"{frontend}{target_path}?jira=connected")
+    return _build_jira_redirect({"jira": "connected"})
+  except ValueError as exc:
+    logger.warning("Jira OAuth state validation failed: %s", exc)
+    err_msg = str(exc).lower()
+    if "state" in err_msg or "expired" in err_msg:
+      return _build_jira_redirect({"jira": "error", "message": "invalid_state"})
+    return _build_jira_redirect({"jira": "error", "message": "oauth_error"})
   except Exception as exc:
-    logger.warning("Jira OAuth callback failed: %s", exc)
-    return RedirectResponse(f"{frontend}{target_path}?jira=error&message={quote(str(exc))}")
+    logger.warning("Jira OAuth token exchange failed: %s", exc)
+    return _build_jira_redirect({"jira": "error", "message": "oauth_error"})
 
 
 
