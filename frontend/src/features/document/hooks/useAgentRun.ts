@@ -40,10 +40,6 @@ export function useAgentRun() {
 
   const cancelRun = useCallback(async () => {
     const currentRunId = runState.runId
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
-    }
     setRunState((prev) => ({
       ...prev,
       status: 'cancelled',
@@ -54,7 +50,13 @@ export function useAgentRun() {
         await docAgentApi.cancelRun(currentRunId)
       } catch {
         // Run already terminated on server
+      } finally {
+        abortControllerRef.current?.abort()
+        abortControllerRef.current = null
       }
+    } else {
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
     }
   }, [runState.runId])
 
