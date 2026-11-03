@@ -47,33 +47,6 @@ def _extract_candidate_api_key(body: AITestConnectionRequest) -> str | None:
         or body.claude_api_key
     )
 
-
-def _verify_builtin_model(model_name: str) -> dict[str, Any]:
-    meta = resolve_model_meta(model_name)
-    if not meta:
-        return {
-            "ok": False,
-            "message": f"Modelo integrado '{model_name}' no reconocido en el catálogo.",
-        }
-    cache_dir = get_builtin_cache_dir()
-    target_file = cache_dir / meta["filename"]
-    if not target_file.exists() or target_file.stat().st_size < 10 * 1024 * 1024:
-        return {
-            "ok": False,
-            "message": (
-                f"El modelo local '{meta['name']}' no está descargado todavía en disco. "
-                "Haz clic en el botón 'Descargar' en la sección de Modelos Integrados para instalarlo."
-            ),
-        }
-    disk_size = round(target_file.stat().st_size / (1024 * 1024), 1)
-    return {
-        "ok": True,
-        "message": f"Modelo integrado '{meta['name']}' verificado en disco ({disk_size} MB) y listo para uso local.",
-        "provider": "builtin",
-        "model": meta["id"],
-    }
-
-
 @router.post("/test-connection")
 @handle_grounded_errors
 async def test_ai_connection(
@@ -122,7 +95,7 @@ async def test_ai_connection(
 @handle_grounded_errors
 async def list_ollama_models(base_url: str | None = None) -> dict[str, Any]:
     config = get_ai_settings()
-    target_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
+    target_url = (base_url or config.get("ollama_base_url")).rstrip("/")
     if not target_url:
         return {"ok": False, "message": "Debes configurar una URL explícita de Ollama."}
     try:
@@ -140,7 +113,7 @@ async def list_ollama_models(base_url: str | None = None) -> dict[str, Any]:
 @handle_grounded_errors
 async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, Any]:
     config = get_ai_settings()
-    target_url = (body.base_url or config.get("ollama_base_url") or "").rstrip("/")
+    target_url = (body.base_url or config.get("ollama_base_url")).rstrip("/")
     if not target_url:
         raise HTTPException(status_code=400, detail="Debes configurar una URL explícita de Ollama.")
     try:
@@ -162,7 +135,7 @@ async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, An
 async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = None) -> dict[str, Any]:
     """Delete a local Ollama model to free disk space."""
     config = get_ai_settings()
-    target_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
+    target_url = (base_url or config.get("ollama_base_url")).rstrip("/")
     if not target_url:
         raise HTTPException(status_code=400, detail="Debes configurar una URL explícita de Ollama.")
     try:

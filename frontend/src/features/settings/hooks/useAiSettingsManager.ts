@@ -254,18 +254,16 @@ export function useAiSettingsManager() {
           setVoiceAudioModel('whisper-large-v3')
         }
 
-        if (
-          settings.ollama_base_url &&
-          settings.ollama_base_url !== 'http://localhost:11434' &&
-          settings.ollama_base_url !== 'http://127.0.0.1:11434'
-        ) {
+        if (settings.ollama_base_url) {
           setOllamaUrl(settings.ollama_base_url)
         } else {
           setOllamaUrl('')
         }
 
         // Fetch local Ollama, Whisper and Built-in models silently in background
-        void fetchOllamaModels(settings.ollama_base_url || 'http://localhost:11434', false)
+        if (settings.ollama_base_url) {
+          void fetchOllamaModels(settings.ollama_base_url, false)
+        }
         void fetchLocalWhisperModels()
         void fetchLocalBuiltinModels()
       } catch (err) {

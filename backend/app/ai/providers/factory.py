@@ -27,7 +27,7 @@ def get_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
     "gemini_api_key": ai.get("gemini_api_key") or os.getenv("GEMINI_API_KEY", ""),
     "transcription_groq_api_key": ai.get("transcription_groq_api_key") or ai.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
     "transcription_openai_api_key": ai.get("transcription_openai_api_key") or ai.get("openai_api_key") or os.getenv("OPENAI_API_KEY", ""),
-    "ollama_base_url": ai.get("ollama_base_url") or os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+    "ollama_base_url": ai.get("ollama_base_url") or os.getenv("OLLAMA_BASE_URL") or None,
   }
 
 
@@ -52,6 +52,8 @@ def resolve_provider(
 
   if spec.is_local:
     target_base_url = base_url or config.get("ollama_base_url") or spec.default_base_url
+    if not target_base_url:
+      raise ValueError("Ollama requiere una URL explícita; no se configura un endpoint local por defecto.")
     return LiteLLMProvider(spec, base_url=target_base_url, default_model=chosen_model)
 
   # Cloud provider

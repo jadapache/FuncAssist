@@ -227,5 +227,5 @@ class GeminiProvider(LiteLLMProvider):
 
 
 class OllamaProvider(LiteLLMProvider):
-  def __init__(self, base_url: str = "http://127.0.0.1:11434", default_model: str = "qwen2.5:2b") -> None:
+  def __init__(self, base_url: str, default_model: str = "qwen2.5:2b") -> None:
     super().__init__("ollama", base_url=base_url, default_model=default_model)

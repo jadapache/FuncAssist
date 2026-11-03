@@ -59,7 +59,7 @@ export const OllamaManager = ({
               type="text"
               value={ollamaUrl}
               onChange={(e) => setOllamaUrl(e.target.value)}
-              placeholder="http://localhost:11434"
+              placeholder="https://tu-servidor-ollama:11434"
               className="input-field text-xs font-mono py-1.5 border border-slate-200 rounded-xl"
             />
             <button

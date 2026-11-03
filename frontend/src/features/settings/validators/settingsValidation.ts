@@ -4,9 +4,9 @@ export type ValidationResult = {
 }
 
 export function normalizeOllamaUrl(url?: string): string {
-  if (!url) return 'http://localhost:11434'
+  if (!url) return ''
   const trimmed = url.trim()
-  return trimmed || 'http://localhost:11434'
+  return trimmed
 }
 
 export function isValidHttpUrl(stringUrl: string): boolean {
@@ -48,7 +48,7 @@ export function validateAiSettingsPayload(params: AiSettingsValidationParams): V
     if (!isValidHttpUrl(target)) {
       return {
         isValid: false,
-        error: 'La dirección URL de Ollama debe ser una URL válida (ejemplo: http://localhost:11434).',
+    error: 'Debes indicar la URL del servidor Ollama.',
       }
     }
   }
