@@ -25,6 +25,10 @@ _ARTIFACT_PATTERN_ALT = re.compile(
     r'<artifact\s+extension="([^"]+)"\s+title="([^"]+)">(.*?)</artifact>',
     re.DOTALL | re.IGNORECASE,
 )
+_ARTIFACT_OPEN = re.compile(
+    r'<artifact\s+(?:title="([^"]+)"\s+extension="([^"]+)"|extension="([^"]+)"\s+title="([^"]+)")>',
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -70,9 +74,23 @@ def extract_artifacts(raw_text: str) -> tuple[list[LLMArtifact], str]:
                 index=idx,
             ))
 
+    # Recover blocks cut off before the closing tag, including a partial
+    # closing tag such as ``</art``.
+    openings = list(_ARTIFACT_OPEN.finditer(raw_text))
+    if len(artifacts) < len(openings):
+        artifacts = []
+        for idx, opening in enumerate(openings):
+            end = openings[idx + 1].start() if idx + 1 < len(openings) else len(raw_text)
+            block = raw_text[opening.end():end]
+            closing = block.find("</artifact>")
+            content = block[:closing] if closing >= 0 else re.sub(r"</art(?:ifact)?$", "", block)
+            title = opening.group(1) or opening.group(4)
+            extension = opening.group(2) or opening.group(3)
+            artifacts.append(LLMArtifact(title.strip(), extension.strip().lower(), content.strip(), idx))
+
     # Limpiar el texto de todas las etiquetas artifact
-    clean = _ARTIFACT_PATTERN.sub("", raw_text)
-    clean = _ARTIFACT_PATTERN_ALT.sub("", clean)
+    clean = _ARTIFACT_OPEN.sub("", raw_text)
+    clean = re.sub(r"</artifact>|</art$", "", clean, flags=re.IGNORECASE)
     clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
 
     # Si hay bloques <chat>, extraer su contenido como texto limpio de conversacion

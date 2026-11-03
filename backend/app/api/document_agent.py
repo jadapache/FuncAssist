@@ -821,9 +821,9 @@ def _format_stream_error(err: Exception) -> str:
 
 @router.post("/runs/{run_id}/cancel")
 async def cancel_agent_run(run_id: str):
-    # Cancellation is intentionally idempotent. The stream may finish and unregister
-    # the run just before this request arrives; that is already the desired state.
-    run_registry.cancel_run(run_id, reason="User cancelled run")
+    if not run_registry.cancel_run(run_id, reason="User cancelled run"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     return {"status": "cancelled", "run_id": run_id}
 
 
