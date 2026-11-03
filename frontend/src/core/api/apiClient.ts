@@ -3,7 +3,7 @@
  * Base API Client with standardized error handling and request methods
  */
 
-import { API_BASE, getAuthHeaders } from '../../api/client'
+import { API_BASE, getAuthHeaders } from './config'
  
 export interface ApiClientConfig {
   baseUrl?: string

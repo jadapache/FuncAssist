@@ -1,4 +1,3 @@
-import { AUTH_TOKEN_KEY } from '../constants/app'
 import { authApi } from './modules/auth'
 import { knowledgeApi } from '../features/knowledge/api/knowledgeApi'
 import { aiSettingsApi } from '../features/settings/api/aiSettingsApi'
@@ -19,20 +18,7 @@ export type * from '../features/settings/types'
 export type * from '../features/document/types'
 export type * from '../features/transcription/api/transcriptionApi'
 
-export const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  (typeof window !== 'undefined' &&
-  (window.location.protocol === 'tauri:' ||
-    window.location.hostname === 'tauri.localhost' ||
-    '__TAURI__' in window ||
-    '__TAURI_INTERNALS__' in window)
-    ? 'http://127.0.0.1:6728'
-    : '')
-
-export const getAuthHeaders = (): Record<string, string> => {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY)
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
+export { API_BASE, getAuthHeaders } from '../core/api/config'
 
 export type AuthUser = {
   id: string
