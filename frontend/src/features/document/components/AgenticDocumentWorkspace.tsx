@@ -38,7 +38,8 @@ import { VoiceInput } from '../../transcription/components/VoiceInput'
 import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
 
 import { featuresApi } from '../../../api/modules/features'
-import type { AIRubric } from '../../../api/client'
+import type { AIPromptTemplate, AIRubric } from '../../../api/client'
+import { userApi } from '../../../api/modules/user'
 import { FEATURE_METAS } from '../../settings/components/prompts_rubrics/types'
 
 
@@ -102,14 +103,29 @@ export const AgenticDocumentWorkspace = ({
     Array<{ id: string; name: string; dataUrl: string; size: number }>
   >([])
   const [customShortcuts, setCustomShortcuts] = useState<string[]>([])
+  const [availablePrompts, setAvailablePrompts] = useState<AIPromptTemplate[]>([])
   const [availableRubrics, setAvailableRubrics] = useState<AIRubric[]>([])
   const [rubricMenuOpen, setRubricMenuOpen] = useState(false)
+  const [activeRole, setActiveRole] = useState('funcional')
 
   useEffect(() => {
     let isMounted = true
-    Promise.all([featuresApi.getAiPrompts(), featuresApi.getAiRubrics()])
-      .then(([promptsRes, rubricsRes]) => {
+    if (!user?.id) return () => {
+      isMounted = false
+    }
+
+    setActiveRole((user?.role || 'funcional').toLowerCase())
+    void userApi.getUserProfile()
+      .then((profile) => {
+        if (isMounted && profile.user_role) setActiveRole(profile.user_role.toLowerCase())
+      })
+      .catch(() => undefined)
+
+    void Promise.allSettled([featuresApi.getAiPrompts(), featuresApi.getAiRubrics()])
+      .then(([promptsResult, rubricsResult]) => {
         if (!isMounted) return
+        const promptsRes = promptsResult.status === 'fulfilled' ? promptsResult.value : null
+        const rubricsRes = rubricsResult.status === 'fulfilled' ? rubricsResult.value : null
         const coreFeatures = new Set([
           'generic_plan',
           'generic_report',
@@ -121,32 +137,41 @@ export const AgenticDocumentWorkspace = ({
           'prd_checker',
           'change_impact',
         ])
-        const custom = (promptsRes.prompts || [])
+        const custom = (promptsRes?.prompts || [])
           .map((p) => p.feature)
           .filter((f) => !coreFeatures.has(f))
-        setCustomShortcuts(custom)
-        setAvailableRubrics(rubricsRes.rubrics || [])
-      })
-      .catch(() => {
-        // Fall back to default shortcuts
+        if (promptsRes) {
+          setAvailablePrompts(promptsRes.prompts || [])
+          setCustomShortcuts(custom)
+        }
+        if (rubricsRes) {
+          setAvailableRubrics(rubricsRes.rubrics || [])
+        }
       })
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [user?.id, user?.role])
 
-  const visibleRubrics = useMemo(() => {
-    const role = (user?.role || 'funcional').toLowerCase()
-    if (role === 'admin') return availableRubrics
+  const roleFeatureFilter = useMemo(() => {
+    const role = activeRole.toLowerCase()
+    if (role === 'admin') return null
 
-    const allowedFeatures = role === 'qa'
+    return role === 'qa'
       ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'qa').map((meta) => meta.id))
       : role === 'pm'
         ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'product').map((meta) => meta.id))
         : new Set(['mejoras_doc', 'inventario_doc', 'levantamiento_doc', 'generic_report', 'transcript_summary'])
+  }, [activeRole])
 
-    return availableRubrics.filter((rubric) => allowedFeatures.has(rubric.feature))
-  }, [availableRubrics, user?.role])
+  const visiblePrompts = useMemo(
+    () => roleFeatureFilter ? availablePrompts.filter((prompt) => roleFeatureFilter.has(prompt.feature)) : availablePrompts,
+    [availablePrompts, roleFeatureFilter],
+  )
+  const visibleRubrics = useMemo(
+    () => roleFeatureFilter ? availableRubrics.filter((rubric) => roleFeatureFilter.has(rubric.feature)) : availableRubrics,
+    [availableRubrics, roleFeatureFilter],
+  )
 
   // Dynamic prompt textarea height & expansion (capped at 40% max of chat container height)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -702,15 +727,38 @@ export const AgenticDocumentWorkspace = ({
                   <div className="absolute left-3 right-3 bottom-14 z-40 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
                     <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-100 mb-1">
                       <span className="text-[11px] font-bold text-slate-800">Skills y rúbricas disponibles</span>
-                      <span className="text-[10px] text-slate-400">/{user?.role || 'funcional'}</span>
+                      <span className="text-[10px] text-slate-400">/{activeRole}</span>
                     </div>
-                    {visibleRubrics.length === 0 ? (
-                      <div className="px-2 py-3 text-xs text-slate-500">No hay rúbricas disponibles para este rol.</div>
-                    ) : visibleRubrics.map((rubric) => {
-                      const meta = FEATURE_METAS.find((item) => item.id === rubric.feature)
-                      return (
+                    {visiblePrompts.length === 0 && visibleRubrics.length === 0 ? (
+                      <div className="px-2 py-3 text-xs text-slate-500">No hay prompts, skills ni rúbricas disponibles para este rol.</div>
+                    ) : (
+                      <>
+                        {visiblePrompts.map((prompt) => {
+                          const meta = FEATURE_METAS.find((item) => item.id === prompt.feature)
+                          return (
+                            <button
+                              key={`prompt-${prompt.feature}`}
+                              type="button"
+                              onClick={() => {
+                                setDraft(`/${prompt.feature} `)
+                                setRubricMenuOpen(false)
+                                textareaRef.current?.focus()
+                              }}
+                              className="w-full rounded-xl px-2.5 py-2 text-left hover:bg-blue-50 transition"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-slate-800">/{prompt.feature}</span>
+                                <span className="text-[9px] uppercase tracking-wide text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Prompt / Skill</span>
+                              </div>
+                              <span className="block text-[10px] text-slate-500 truncate">{meta?.title || `Prompt de ${prompt.feature}`}</span>
+                            </button>
+                          )
+                        })}
+                        {visibleRubrics.map((rubric) => {
+                          const meta = FEATURE_METAS.find((item) => item.id === rubric.feature)
+                          return (
                         <button
-                          key={rubric.feature}
+                          key={`rubric-${rubric.feature}`}
                           type="button"
                           onClick={() => {
                             setDraft(`/${rubric.feature} `)
@@ -719,11 +767,16 @@ export const AgenticDocumentWorkspace = ({
                           }}
                           className="w-full rounded-xl px-2.5 py-2 text-left hover:bg-blue-50 transition"
                         >
-                          <span className="block text-xs font-semibold text-slate-800">/{rubric.feature}</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-slate-800">/{rubric.feature}</span>
+                            <span className="text-[9px] uppercase tracking-wide text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">Rúbrica</span>
+                          </div>
                           <span className="block text-[10px] text-slate-500 truncate">{meta?.title || `Rúbrica de ${rubric.feature}`}</span>
                         </button>
-                      )
-                    })}
+                          )
+                        })}
+                      </>
+                    )}
                   </div>
                 )}
 
