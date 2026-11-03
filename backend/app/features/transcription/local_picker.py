@@ -37,16 +37,18 @@ def inspect_local_file(file_path_str: str) -> dict[str, Any]:
       "error": "Ruta con caracteres inválidos",
     }
 
-  if Path(raw_path).is_absolute():
-     return {
-       "ok": False,
-       "exists": False,
-       "error": "La selección directa de archivos locales está deshabilitada. Use el formulario de subida web.",
-     }
+  candidate = Path(raw_path)
+  
+  if candidate.is_absolute() or any(part == ".." for part in candidate.parts) or candidate.name != raw_path:
+    return {
+      "ok": False,
+      "exists": False,
+      "error": "La selección directa de archivos locales está deshabilitada. Use el formulario de subida web.",
+    }
   
   try:
     safe_root = Path(USER_DATA_DIR).resolve()
-    p = (safe_root / raw_path).resolve()
+    p = (safe_root / candidate.name).resolve()
     p.relative_to(safe_root)
   except (ValueError, Exception):
     return {
