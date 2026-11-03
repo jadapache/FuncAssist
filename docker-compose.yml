@@ -1,0 +1,56 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: funcassist_app
+    restart: unless-stopped
+    ports:
+      - "6728:6728"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=6728
+      - FRONTEND_URL=http://localhost:6728
+      - BACKEND_URL=http://localhost:6728
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/funcAssit
+      - REDIS_URL=redis://redis:6379
+      - KNOWLEDGE_DATA_DIR=/app/knowledge_data
+      - SECRET_KEY=${SECRET_KEY:-insecure_change_in_production_key_32chars}
+    volumes:
+      - funcassist_knowledge:/app/knowledge_data
+      - funcassist_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  db:
+    image: postgres:16-alpine
+    container_name: funcassist_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: qa_mgmt
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: funcassist_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  funcassist_knowledge:
+  funcassist_data:
+  postgres_data:
+  redis_data:
+
