@@ -6,10 +6,21 @@ export interface BackendSessionPayload {
   title?: string
   feature_slug?: string
   document_content?: string
+  documentContent?: string
   artifacts?: DocumentArtifact[]
   active_artifact_id?: string
+  activeArtifactId?: string
   created_at: string
   updated_at: string
+}
+
+interface BackendMessagePayload {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  timestamp?: string
+  created_at?: string
+  attachments?: ChatConversation['messages'][number]['attachments']
 }
 
 export const chatSessionsApi = {
@@ -20,15 +31,32 @@ export const chatSessionsApi = {
     })
     const data = await handleResponse<{ sessions: BackendSessionPayload[] }>(res)
 
-    return (data.sessions || []).map((s) => ({
+    const sessions = await Promise.all((data.sessions || []).map(async (s) => {
+      const detailRes = await fetch(`${API_BASE}/api/chat/sessions/${encodeURIComponent(s.id)}`, {
+        headers: { ...getAuthHeaders() },
+      })
+      const detail = await handleResponse<{ session?: BackendSessionPayload & { messages?: BackendMessagePayload[] } }>(detailRes)
+      const messages = (detail.session?.messages || [])
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+        .map((message) => ({
+          id: message.id,
+          role: message.role as 'user' | 'assistant',
+          content: message.content,
+          timestamp: message.created_at || message.timestamp || new Date().toISOString(),
+          attachments: message.attachments,
+        }))
+
+      return {
       id: s.id,
       name: s.title || 'Conversación',
       lastInteraction: s.updated_at || s.created_at || new Date().toISOString(),
-      messages: [],
-      documentContent: s.document_content || '',
+      messages,
+      documentContent: s.document_content || s.documentContent || '',
       artifacts: s.artifacts || [],
-      activeArtifactId: s.active_artifact_id,
+      activeArtifactId: s.active_artifact_id || s.activeArtifactId,
+      }
     }))
+    return sessions
   },
 
   deleteSession: async (sessionId: string): Promise<boolean> => {
