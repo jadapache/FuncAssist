@@ -89,7 +89,13 @@ async def upload_transcription_media(
 ) -> dict[str, Any]:
   """Upload media file via standard web multipart/form-data for controlled server processing."""
   orig_filename = os.path.basename(file.filename or "media.mp3")
-  tid = transcription_id or str(uuid.uuid4())
+  if transcription_id:
+    try:
+      tid = str(uuid.UUID(transcription_id))
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail="transcription_id inválido.") from exc
+  else:
+    tid = str(uuid.uuid4())
   tid, dest_path, stored_filename = get_media_destination(orig_filename, media_id=tid)
 
   sha256 = hashlib.sha256()
