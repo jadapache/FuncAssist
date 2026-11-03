@@ -416,7 +416,13 @@ async def dictate_audio(file: UploadFile = File(...)):
 
     from app.features.transcription.service import _resolve_provider
     engine = _resolve_provider(provider_id, model_id)
-    res = await asyncio.to_thread(engine.transcribe, str(temp_file))
+    # All local transcription providers share the same contract and require
+    # both the audio path and the configured model identifier.
+    res = await asyncio.to_thread(
+      engine.transcribe,
+      temp_file,
+      model_id=model_id,
+    )
     transcribed_text = res.text.strip() if res else ""
     return {"text": transcribed_text, "filename": file.filename}
   except Exception:
