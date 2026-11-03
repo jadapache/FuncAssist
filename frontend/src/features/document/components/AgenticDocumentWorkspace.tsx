@@ -7,6 +7,7 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
+  Square,
   X,
   Layers,
   Check,
@@ -26,7 +27,6 @@ import {
   type DocumentArtifact,
 } from '../../../features/document/hooks/useChatPersistence'
 import { ChatHistorySidebar } from './ChatHistorySidebar'
-import { AgenticThinkingBubble } from './AgenticThinkingBubble'
 import { useAuth } from '../../../context/AuthContext'
 import { ArtifactsStudio } from './ArtifactsStudio'
 import { useArtifacts } from '../hooks/useArtifacts'
@@ -38,6 +38,8 @@ import { VoiceInput } from '../../transcription/components/VoiceInput'
 import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
 
 import { featuresApi } from '../../../api/modules/features'
+import type { AIRubric } from '../../../api/client'
+import { FEATURE_METAS } from '../../settings/components/prompts_rubrics/types'
 
 
 interface AgenticDocumentWorkspaceProps {
@@ -100,11 +102,13 @@ export const AgenticDocumentWorkspace = ({
     Array<{ id: string; name: string; dataUrl: string; size: number }>
   >([])
   const [customShortcuts, setCustomShortcuts] = useState<string[]>([])
+  const [availableRubrics, setAvailableRubrics] = useState<AIRubric[]>([])
+  const [rubricMenuOpen, setRubricMenuOpen] = useState(false)
 
   useEffect(() => {
     let isMounted = true
-    featuresApi.getAiPrompts()
-      .then((res) => {
+    Promise.all([featuresApi.getAiPrompts(), featuresApi.getAiRubrics()])
+      .then(([promptsRes, rubricsRes]) => {
         if (!isMounted) return
         const coreFeatures = new Set([
           'generic_plan',
@@ -117,10 +121,11 @@ export const AgenticDocumentWorkspace = ({
           'prd_checker',
           'change_impact',
         ])
-        const custom = (res.prompts || [])
+        const custom = (promptsRes.prompts || [])
           .map((p) => p.feature)
           .filter((f) => !coreFeatures.has(f))
         setCustomShortcuts(custom)
+        setAvailableRubrics(rubricsRes.rubrics || [])
       })
       .catch(() => {
         // Fall back to default shortcuts
@@ -129,6 +134,19 @@ export const AgenticDocumentWorkspace = ({
       isMounted = false
     }
   }, [])
+
+  const visibleRubrics = useMemo(() => {
+    const role = (user?.role || 'funcional').toLowerCase()
+    if (role === 'admin') return availableRubrics
+
+    const allowedFeatures = role === 'qa'
+      ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'qa').map((meta) => meta.id))
+      : role === 'pm'
+        ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'product').map((meta) => meta.id))
+        : new Set(['mejoras_doc', 'inventario_doc', 'levantamiento_doc', 'generic_report', 'transcript_summary'])
+
+    return availableRubrics.filter((rubric) => allowedFeatures.has(rubric.feature))
+  }, [availableRubrics, user?.role])
 
   // Dynamic prompt textarea height & expansion (capped at 40% max of chat container height)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -379,7 +397,6 @@ export const AgenticDocumentWorkspace = ({
     isGenerating,
     generatingConversationId,
     streamingText,
-    generationStatus,
     runState,
     handleCancelRun,
     handleSendMessage,
@@ -405,6 +422,7 @@ export const AgenticDocumentWorkspace = ({
     renameConversation,
     onResetPromptInputs: () => {
       setDraft('')
+      setRubricMenuOpen(false)
       setUserResizedHeight(null)
       setIsMaximized(false)
       setTextareaHeight(BASE_TEXTAREA_HEIGHT)
@@ -544,27 +562,29 @@ export const AgenticDocumentWorkspace = ({
                   </div>
                 ))}
 
-                {/* Live streaming assistant bubble while processing in this specific conversation */}
+                {/* Minimal loading state while the first response/artifact is not available yet */}
                 {isCurrentChatGenerating && (
-                  <div className="flex gap-3 justify-start animate-in fade-in duration-150">
-                    <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
-                      <div className="flex items-center gap-4 text-[10px] opacity-70 font-medium">
-                        <span>Asistente IA</span>
+                  !streamingText && runState.artifacts.length === 0 ? (
+                    <div className="flex gap-3 justify-start animate-in fade-in duration-150" aria-busy="true">
+                      <div className="max-w-[85%] rounded-2xl p-4 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none shadow-2xs">
+                        <div className="flex items-center gap-2 mb-3">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#002777]" />
+                          <span className="text-[10px] font-semibold text-slate-500">Preparando respuesta</span>
+                        </div>
+                        <div className="space-y-2 w-64">
+                          <div className="h-2 rounded-full bg-slate-200 animate-pulse" />
+                          <div className="h-2 rounded-full bg-slate-200 animate-pulse w-5/6" />
+                          <div className="h-2 rounded-full bg-slate-200 animate-pulse w-2/3" />
+                        </div>
                       </div>
-                      <AgenticThinkingBubble
-                        status={generationStatus}
-                        isProcessing={isCurrentChatGenerating}
-                        steps={runState.steps}
-                        sources={runState.sources}
-                        onCancel={handleCancelRun}
-                        isCancelled={runState.status === 'cancelled'}
-                      />
-
-                      {streamingText && (
-                        <MarkdownMessage content={streamingText} />
-                      )}
                     </div>
-                  </div>
+                  ) : streamingText ? (
+                    <div className="flex gap-3 justify-start animate-in fade-in duration-150">
+                      <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
+                        <MarkdownMessage content={streamingText} />
+                      </div>
+                    </div>
+                  ) : null
                 )}
               </>
             )}
@@ -645,7 +665,11 @@ export const AgenticDocumentWorkspace = ({
                 <textarea
                   ref={textareaRef}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setDraft(value)
+                    setRubricMenuOpen(value.trimStart().startsWith('/'))
+                  }}
                   onPaste={(e) => {
                     const items = e.clipboardData?.items
                     if (items) {
@@ -667,11 +691,41 @@ export const AgenticDocumentWorkspace = ({
                       handleSubmitForm(e)
                     }
                   }}
+                  onFocus={() => setRubricMenuOpen(draft.trimStart().startsWith('/'))}
                   placeholder={config.placeholder || 'Escribe tu petición, consulta o usa /plan...'}
                   disabled={isGenerating}
                   style={{ height: `${textareaHeight}px` }}
                   className="w-full bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none resize-none placeholder:text-slate-400 disabled:opacity-60 font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal"
                 />
+
+                {rubricMenuOpen && (
+                  <div className="absolute left-3 right-3 bottom-14 z-40 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                    <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-100 mb-1">
+                      <span className="text-[11px] font-bold text-slate-800">Skills y rúbricas disponibles</span>
+                      <span className="text-[10px] text-slate-400">/{user?.role || 'funcional'}</span>
+                    </div>
+                    {visibleRubrics.length === 0 ? (
+                      <div className="px-2 py-3 text-xs text-slate-500">No hay rúbricas disponibles para este rol.</div>
+                    ) : visibleRubrics.map((rubric) => {
+                      const meta = FEATURE_METAS.find((item) => item.id === rubric.feature)
+                      return (
+                        <button
+                          key={rubric.feature}
+                          type="button"
+                          onClick={() => {
+                            setDraft(`/${rubric.feature} `)
+                            setRubricMenuOpen(false)
+                            textareaRef.current?.focus()
+                          }}
+                          className="w-full rounded-xl px-2.5 py-2 text-left hover:bg-blue-50 transition"
+                        >
+                          <span className="block text-xs font-semibold text-slate-800">/{rubric.feature}</span>
+                          <span className="block text-[10px] text-slate-500 truncate">{meta?.title || `Rúbrica de ${rubric.feature}`}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {/* Attached Images Thumbnail Row */}
                 {attachedImages.length > 0 && (
@@ -806,13 +860,14 @@ export const AgenticDocumentWorkspace = ({
 
                     {/* Send Button (↑) */}
                     <button
-                      type="submit"
-                      disabled={isGenerating || !draft.trim()}
+                      type={isGenerating ? 'button' : 'submit'}
+                      onClick={isGenerating ? () => void handleCancelRun() : undefined}
+                      disabled={!isGenerating && !draft.trim()}
                       className="h-8 w-8 rounded-full flex items-center justify-center transition shrink-0 shadow-xs ml-1 bg-[#002777] text-white hover:bg-[#003399] disabled:opacity-30 disabled:hover:bg-[#002777] cursor-pointer"
-                      title={isGenerating ? 'Generando respuesta...' : 'Enviar consulta'}
+                      title={isGenerating ? 'Cancelar generación' : 'Enviar consulta'}
                     >
                       {isGenerating ? (
-                        <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                        <Square className="h-3.5 w-3.5 fill-white text-white" />
                       ) : (
                         <ArrowUp className="h-4 w-4 stroke-[2.5]" />
                       )}
