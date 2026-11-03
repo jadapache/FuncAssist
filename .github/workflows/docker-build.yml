@@ -12,6 +12,11 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
+      PBKDF2_SALT: ${{ secrets.CI_PBKDF2_SALT }}
+      DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
+      REDIS_URL: ${{ secrets.CI_REDIS_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
