@@ -4,6 +4,7 @@ import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperMode
 import { useToast } from '../../../context/ToastContext'
 import { useBackgroundJobs } from '../../../context/BackgroundJobContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
+import { inferenceService } from '../../ai/services/InferenceService'
 
 // Lazy-load WebLLM provider to avoid bundling AI dependencies in initial load
 let webLLMProviderPromise: Promise<Awaited<typeof import('../../ai/providers/WebLLMProvider')>['webLLMProvider']> | null = null
@@ -458,6 +459,7 @@ export function useAiSettingsManager() {
     try {
       const updated = await api.updateAiSettings(payload)
       setAi(updated)
+      inferenceService.setAiSettings(updated)
       await api.updateUserPreferences({
         inference_provider: provider,
         inference_model: model.trim(),
