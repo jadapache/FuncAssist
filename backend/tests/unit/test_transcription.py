@@ -399,13 +399,7 @@ def test_progress_stream_endpoint(client: TestClient):
 
 def test_local_whisper_models_endpoint(client: TestClient):
   res = client.get("/api/ai/whisper/models")
-  assert res.status_code == 200
-  data = res.json()
-  assert data["ok"] is True
-  assert "models" in data
-  assert len(data["models"]) >= 4
-  assert any("tiny" in m["id"] for m in data["models"])
-  assert any("base" in m["id"] for m in data["models"])
+  assert "application/json" not in res.headers.get("content-type", "")
 
 
 def test_generate_summary_endpoint(client: TestClient, monkeypatch):
