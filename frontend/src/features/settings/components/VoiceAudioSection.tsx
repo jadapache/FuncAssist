@@ -55,15 +55,6 @@ export const VoiceAudioSection = ({
   savingAi,
   handleVoiceAudioSave,
 }: VoiceAudioSectionProps) => {
-  // Construcción de la lista de modelos de voz locales integrados
-  const builtinFromCatalog = catalogModels.filter(
-    (m) =>
-      m.task_type === 'transcription' &&
-      (m.provider === 'builtin' ||
-        m.provider === 'local' ||
-        m.provider === 'onnx'),
-  )
-
   const DEFAULT_ONNX_MODELS: LocalVoiceModelItem[] = [
     {
       id: 'whisper-tiny',
@@ -107,21 +98,7 @@ export const VoiceAudioSection = ({
     },
   ]
 
-  const localVoiceModelsList: LocalVoiceModelItem[] =
-    builtinFromCatalog.length > 0
-      ? builtinFromCatalog.map((m) => ({
-          id: m.id,
-          name: m.name,
-          tag: m.raw_id || m.id,
-          description: m.description,
-          size: m.size || '~75 MB',
-          accuracy: m.accuracy || 'Estándar',
-          provider: 'onnx',
-          engine: 'onnxruntime-web',
-          is_downloaded: true,
-          disk_size_mb: m.disk_size_mb,
-        }))
-      : DEFAULT_ONNX_MODELS
+  const localVoiceModelsList = DEFAULT_ONNX_MODELS
 
   const isBuiltIn =
     voiceAudioProvider === 'builtin' ||
