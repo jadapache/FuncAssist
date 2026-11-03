@@ -11,7 +11,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -183,6 +183,8 @@ def create_app() -> FastAPI:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str = ""):
+      if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
       candidate = FRONTEND_DIST / full_path
       if full_path and candidate.is_file():
         return FileResponse(candidate)

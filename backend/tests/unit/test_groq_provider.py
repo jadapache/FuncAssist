@@ -63,7 +63,8 @@ def test_provider_registry():
     assert find_provider_spec("groq").litellm_prefix == "groq"
     assert find_provider_spec("anthropic").id == "claude"
     assert find_provider_spec("google").id == "gemini"
-    assert find_provider_spec("builtin").id == "ollama"
+    assert find_provider_spec("local").id == "ollama"
+    assert find_provider_spec("builtin") is None
     assert find_provider_spec("unknown_xyz") is None
 
 

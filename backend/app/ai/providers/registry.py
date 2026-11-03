@@ -42,6 +42,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     config_key="gemini_api_key",
     default_model="gemini-2.5-flash",
     aliases=("google",),
+    default_max_tokens=8192,
   ),
   "claude": ProviderSpec(
     id="claude",
@@ -51,6 +52,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     config_key="claude_api_key",
     default_model="claude-3-5-haiku-latest",
     aliases=("anthropic",),
+    default_max_tokens=8192,
   ),
   "openai": ProviderSpec(
     id="openai",
@@ -59,6 +61,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     env_key="OPENAI_API_KEY",
     config_key="openai_api_key",
     default_model="gpt-4o-mini",
+    default_max_tokens=16384,
   ),
   "ollama": ProviderSpec(
     id="ollama",
@@ -138,15 +141,14 @@ def resolve_model_max_tokens(
   except Exception:
     pass
 
-  provider_defaults = {"openai": 16384, "claude": 8192, "gemini": 8192}
-  default_limit = (spec.default_max_tokens if spec else None) or provider_defaults.get(prov_clean) or (8192 if is_stream else 4096)
+  ceiling = model_limit if model_limit is not None else (spec.default_max_tokens if spec else None)
 
-  if model_limit is not None:
+  if ceiling is not None:
     if requested_max is not None:
-      return max(1, min(requested_max, model_limit))
-    return max(1, model_limit)
+      return max(1, min(requested_max, ceiling))
+    return max(1, ceiling)
 
   if requested_max is not None:
     return max(1, requested_max)
 
-  return max(1, default_limit)
+  return 8192 if is_stream else 4096

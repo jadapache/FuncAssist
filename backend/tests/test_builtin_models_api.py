@@ -7,7 +7,7 @@ client = TestClient(app)
 
 def test_builtin_model_endpoints_are_not_exposed():
     response = client.get("/api/ai/builtin/models")
-    assert "application/json" not in response.headers.get("content-type", "")
+    assert response.status_code == 404
 
 
 def test_download_unknown_builtin_model():
@@ -22,7 +22,7 @@ def test_delete_non_downloaded_builtin_model():
 
 def test_get_builtin_download_tasks():
     response = client.get("/api/ai/builtin/tasks")
-    assert "application/json" not in response.headers.get("content-type", "")
+    assert response.status_code == 404
 
 
 def test_cancel_builtin_model_download():

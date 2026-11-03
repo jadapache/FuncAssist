@@ -399,7 +399,7 @@ def test_progress_stream_endpoint(client: TestClient):
 
 def test_local_whisper_models_endpoint(client: TestClient):
   res = client.get("/api/ai/whisper/models")
-  assert "application/json" not in res.headers.get("content-type", "")
+  assert res.status_code == 404
 
 
 def test_generate_summary_endpoint(client: TestClient, monkeypatch):
@@ -540,11 +540,10 @@ def test_guid_folder_layout_and_sidecars():
   assert get_transcription_record(tid) is None
 
 
-def test_providers_registry_and_resolution():
+def test_providers_registry_and_resolution(monkeypatch):
   from app.features.transcription.providers import (
     get_provider,
     list_all_providers,
-    list_available_providers,
   )
   from app.features.transcription.service import _resolve_provider
 
@@ -570,11 +569,12 @@ def test_providers_registry_and_resolution():
   assert moon_p is not None
   assert "Moonshine" in moon_p.display_name
 
-  # Provider auto-resolution
+  # Provider auto-resolution with simulated availability
+  monkeypatch.setattr(fw_p, "is_available", lambda: True)
   resolved_fw = _resolve_provider("faster-whisper", "fw-tiny")
-  if fw_p.is_available():
-    assert resolved_fw.provider_id == "faster-whisper"
+  assert resolved_fw.provider_id == "faster-whisper"
 
+  monkeypatch.setattr(whisper_p, "is_available", lambda: True)
   resolved_py = _resolve_provider("whisper-python", "base")
   assert resolved_py.provider_id == "whisper-python"
 
