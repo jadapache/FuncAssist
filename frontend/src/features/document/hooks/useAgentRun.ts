@@ -115,7 +115,7 @@ export function useAgentRun() {
           const result = await inferenceService.generateMessages(
             messages,
             (chunk, accumulated) => onChunk(accumulated, chunk),
-            { maxTokens: 4096, temperature: 0.4 },
+            { temperature: 0.4, autoContinue: true, maxContinuations: 3 },
           )
           const response: AgenticPromptResponse = {
             answer: result.content,

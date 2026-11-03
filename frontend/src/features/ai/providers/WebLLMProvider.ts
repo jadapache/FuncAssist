@@ -7,6 +7,23 @@ import {
   type ChatCompletionChunk,
 } from '@mlc-ai/web-llm'
 import type { ChatMessage, WebLLMInitProgress } from '../types/webLlm'
+import { WEBLLM_MODELS_CATALOG } from '../policies/modelSelectionPolicy'
+
+type CompletionOptions = {
+  maxTokens?: number
+  temperature?: number
+  autoContinue?: boolean
+  maxContinuations?: number
+}
+
+function resolveGenerationBudget(modelId: string, messages: ChatMessage[], requested?: number): number {
+  const model = WEBLLM_MODELS_CATALOG.find((item) => item.id === modelId)
+  const contextWindow = Number.parseInt(model?.contextWindow.replace(/[^0-9]/g, '') || '8192', 10)
+  const inputTokens = Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 4)
+  const availableTokens = Math.max(512, contextWindow - inputTokens - 256)
+  const modelSafeLimit = Math.min(8192, availableTokens)
+  return Math.max(512, Math.min(requested ?? modelSafeLimit, modelSafeLimit))
+}
 
 export class WebLLMProvider {
   private static instance: WebLLMProvider | null = null
@@ -86,7 +103,7 @@ export class WebLLMProvider {
 
   public async complete(
     messages: ChatMessage[],
-    options?: { maxTokens?: number; temperature?: number },
+    options?: CompletionOptions,
   ): Promise<string> {
     if (!this.engine) {
       throw new Error('El motor de WebLLM no está inicializado. Descarga y selecciona un modelo primero.')
@@ -94,7 +111,7 @@ export class WebLLMProvider {
 
     const response = await this.engine.chat.completions.create({
       messages,
-      max_tokens: options?.maxTokens ?? 2048,
+      max_tokens: resolveGenerationBudget(this.loadedModelId || '', messages, options?.maxTokens),
       temperature: options?.temperature ?? 0.7,
       stream: false,
     })
@@ -105,26 +122,46 @@ export class WebLLMProvider {
   public async streamComplete(
     messages: ChatMessage[],
     onChunk: (chunk: string, accumulated: string) => void,
-    options?: { maxTokens?: number; temperature?: number },
+    options?: CompletionOptions,
   ): Promise<string> {
     if (!this.engine) {
       throw new Error('El motor de WebLLM no está inicializado.')
     }
 
-    const stream = await this.engine.chat.completions.create({
-      messages,
-      max_tokens: options?.maxTokens ?? 2048,
-      temperature: options?.temperature ?? 0.7,
-      stream: true,
-    })
-
+    const maxContinuations = options?.maxContinuations ?? 3
     let accumulated = ''
-    for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
-      const delta = chunk.choices[0]?.delta?.content || ''
-      if (delta) {
-        accumulated += delta
-        onChunk(delta, accumulated)
+    let continuationMessages = messages
+
+    for (let attempt = 0; attempt <= (options?.autoContinue ? maxContinuations : 0); attempt += 1) {
+      const stream = await this.engine.chat.completions.create({
+        messages: continuationMessages,
+        max_tokens: resolveGenerationBudget(this.loadedModelId || '', continuationMessages, options?.maxTokens),
+        temperature: options?.temperature ?? 0.7,
+        stream: true,
+      })
+
+      let finishReason: string | null = null
+      for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
+        finishReason = chunk.choices[0]?.finish_reason || finishReason
+        const delta = chunk.choices[0]?.delta?.content || ''
+        if (delta) {
+          accumulated += delta
+          onChunk(delta, accumulated)
+        }
       }
+
+      if (finishReason !== 'length' || attempt >= maxContinuations) {
+        break
+      }
+
+      continuationMessages = [
+        ...messages,
+        { role: 'assistant', content: accumulated } as ChatMessage,
+        {
+          role: 'user',
+          content: 'Continúa exactamente desde el último punto sin repetir contenido. Finaliza el documento completo.',
+        },
+      ]
     }
 
     return accumulated

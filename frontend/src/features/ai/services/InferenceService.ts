@@ -107,7 +107,7 @@ export class InferenceService {
   public async generateMessages(
     messages: ChatMessage[],
     onChunk?: StreamChunkCallback,
-    options?: { maxTokens?: number; temperature?: number },
+    options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
   ): Promise<{ content: string; modelUsed: string }> {
     const settings = await this.getAiSettings()
     const provider = this.resolveProvider(settings)
@@ -156,7 +156,7 @@ export class InferenceService {
     modelId: string,
     messages: ChatMessage[],
     onChunk?: StreamChunkCallback,
-    options?: { maxTokens?: number; temperature?: number },
+    options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
   ): Promise<string> {
     const provider = await getWebLLMProvider()
     
