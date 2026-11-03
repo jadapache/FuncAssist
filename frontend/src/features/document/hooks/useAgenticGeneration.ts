@@ -18,6 +18,7 @@ import type { UniverAdapter } from '../../../features/document/agent/adapters/Un
 interface UseAgenticGenerationOptions {
   config: FuncionalFeatureConfig
   templateContent: string
+  templateId: string | null
   sources: string[]
   activeConversation: ChatConversation | null
   activeArtifact: Artifact | null
@@ -218,6 +219,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
   const {
     config,
     templateContent,
+    templateId,
     sources,
     activeConversation,
     activeArtifact,
@@ -325,6 +327,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
               content: d.content || '',
             })),
             current_document: currentDocContent,
+            template_id: templateId || undefined,
             chat_context: currentMsgs.slice(-4).map((m) => `${m.role}: ${m.content}`),
             sources,
             conversation_id: targetConvId,
