@@ -37,6 +37,7 @@ const getGreeting = () => {
 
 export const DashboardPage = () => {
   const { displayName } = useOutletContext<OutletContext>()
+  const { user } = useUser()
   const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
   const [backendOk, setBackendOk] = useState<boolean | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -64,8 +65,8 @@ export const DashboardPage = () => {
   const github = integrations.find((item) => item.id === 'github')
   const gitlab = integrations.find((item) => item.id === 'gitlab')
 
-  const { user } = useUser()
   const role = user?.user_role || 'admin'
+  const loggedInName = user?.display_name || displayName
 
   return (
     <div className={`space-y-8 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
@@ -77,7 +78,7 @@ export const DashboardPage = () => {
         <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">
-              {getGreeting()}, {displayName}
+              {getGreeting()}, {loggedInName}
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-blue-100 md:text-base">
               Obtiene contexto en tiempo real de Jira, GitHub y tus documentos para responder con referencias precisas sin alucinaciones.

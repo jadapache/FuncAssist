@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Artifact } from '../../../types/artifacts'
-import { loadChatConversations, saveChatConversations } from '../../../utils/chatStorage'
 import { draftsApi } from '../../../features/document/api/draftsApi'
 import { chatSessionsApi } from '../../../features/document/api/chatSessionsApi'
 
@@ -44,48 +43,19 @@ export interface ThinkingStep {
 }
 
 /**
- * Hook for persisting and managing chat conversation history in localStorage and PostgreSQL / Borradores.
+ * Hook for persisting and managing chat conversation history in PostgreSQL / Borradores.
  */
 export function useChatPersistence(featureSlug: string, userId?: string | null) {
-  const [conversations, setConversations] = useState<ChatConversation[]>(() =>
-    loadChatConversations(featureSlug, userId),
-  )
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
-    const loaded = loadChatConversations(featureSlug, userId)
-    return loaded.length > 0 ? loaded[0].id : null
-  })
+  const [conversations, setConversations] = useState<ChatConversation[]>([])
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
 
-  // Load from local storage and sync with remote PostgreSQL sessions
+  // Load sessions and messages directly from the remote PostgreSQL entity.
   useEffect(() => {
-    const local = loadChatConversations(featureSlug, userId)
-    setConversations(local)
-    setActiveConversationId((prev) => {
-      if (prev && local.some((c) => c.id === prev)) return prev
-      return local.length > 0 ? local[0].id : null
-    })
-
     let isCancelled = false
     chatSessionsApi.getSessions(featureSlug).then((remoteSessions) => {
-      if (isCancelled || !remoteSessions || remoteSessions.length === 0) return
-      setConversations((prev) => {
-        const merged = [...prev]
-        for (const remote of remoteSessions) {
-          const idx = merged.findIndex((m) => m.id === remote.id)
-          if (idx === -1) {
-            merged.push(remote)
-          } else {
-            if (!merged[idx].artifacts?.length && remote.artifacts?.length) {
-              merged[idx] = {
-                ...merged[idx],
-                artifacts: remote.artifacts,
-                documentContent: remote.documentContent || merged[idx].documentContent,
-                activeArtifactId: remote.activeArtifactId || merged[idx].activeArtifactId,
-              }
-            }
-          }
-        }
-        return merged
-      })
+      if (isCancelled) return
+      setConversations(remoteSessions)
+      setActiveConversationId((prev) => prev && remoteSessions.some((c) => c.id === prev) ? prev : remoteSessions[0]?.id ?? null)
     }).catch((err) => {
       console.debug('[useChatPersistence] Failed to fetch remote sessions:', err)
     })
@@ -95,13 +65,11 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
     }
   }, [featureSlug, userId])
 
-  // Persist to localStorage and sync to backend whenever conversations change (only non-empty conversations)
+  // Sync changes to the persisted chat entity whenever conversations change.
   useEffect(() => {
     const nonEmpties = conversations.filter(
       (c) => c.messages.length > 0 || (c.artifacts && c.artifacts.length > 0),
     )
-    saveChatConversations(featureSlug, nonEmpties, userId)
-
     // Debounced background sync to backend
     const timer = setTimeout(() => {
       nonEmpties.forEach((conv) => {

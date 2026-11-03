@@ -10,6 +10,17 @@ from __future__ import annotations
 from typing import Any
 
 DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
+  "builtin_agent": {
+    "version": 1,
+    "feature": "builtin_agent",
+    "allowed_sources": [],
+    "system": (
+      "Eres un asistente experto en análisis funcional, QA y documentación técnica. "
+      "Responde en español, genera directamente el contenido solicitado y conserva el formato Markdown cuando sea útil. "
+      "Si se solicita un plan, informe o documento, entrega el artefacto completo sin explicaciones meta."
+    ),
+    "user_template": "Solicitud del usuario:\n{query}\n\nContexto disponible:\n{context}\n\nCriterios aplicables:\n{rubric}",
+  },
   "standup": {
     "version": 1,
     "feature": "standup",

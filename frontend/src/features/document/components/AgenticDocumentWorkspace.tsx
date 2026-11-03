@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react'
+import type { FormEvent, UIEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
@@ -7,12 +7,14 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
+  Square,
   X,
   Layers,
   Check,
   ChevronUp,
   Maximize2,
   Minimize2,
+  ChevronDown,
 } from 'lucide-react'
 import { UniverAdapter } from '../../../features/document/agent/adapters/UniverAdapter'
 import { DocumentAgent } from '../../../features/document/agent/core/DocumentAgent'
@@ -26,7 +28,6 @@ import {
   type DocumentArtifact,
 } from '../../../features/document/hooks/useChatPersistence'
 import { ChatHistorySidebar } from './ChatHistorySidebar'
-import { AgenticThinkingBubble } from './AgenticThinkingBubble'
 import { useAuth } from '../../../context/AuthContext'
 import { ArtifactsStudio } from './ArtifactsStudio'
 import { useArtifacts } from '../hooks/useArtifacts'
@@ -38,6 +39,9 @@ import { VoiceInput } from '../../transcription/components/VoiceInput'
 import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
 
 import { featuresApi } from '../../../api/modules/features'
+import { api, type AIPromptTemplate, type AIRubric, type CorporateTemplate } from '../../../api/client'
+import { userApi } from '../../../api/modules/user'
+import { FEATURE_METAS } from '../../settings/components/prompts_rubrics/types'
 
 
 interface AgenticDocumentWorkspaceProps {
@@ -99,39 +103,113 @@ export const AgenticDocumentWorkspace = ({
   const [attachedImages, setAttachedImages] = useState<
     Array<{ id: string; name: string; dataUrl: string; size: number }>
   >([])
-  const [customShortcuts, setCustomShortcuts] = useState<string[]>([])
+  const [availablePrompts, setAvailablePrompts] = useState<AIPromptTemplate[]>([])
+  const [availableRubrics, setAvailableRubrics] = useState<AIRubric[]>([])
+  const [rubricMenuOpen, setRubricMenuOpen] = useState(false)
+  const [activeRole, setActiveRole] = useState('funcional')
+  const [corporateTemplates, setCorporateTemplates] = useState<CorporateTemplate[]>([])
+  const [visibleTemplateCount, setVisibleTemplateCount] = useState(3)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
+  const [selectedFeatureLabel, setSelectedFeatureLabel] = useState<string | null>(null)
+
+  useEffect(() => {
+    void api.getTemplates()
+      .then((res) => setCorporateTemplates(res.templates || []))
+      .catch(() => setCorporateTemplates([]))
+  }, [])
+
+  useEffect(() => {
+    setVisibleTemplateCount(3)
+  }, [corporateTemplates.length])
+
+  const handleTemplateListScroll = (event: UIEvent<HTMLDivElement>) => {
+    const list = event.currentTarget
+    const reachedEnd = list.scrollTop + list.clientHeight >= list.scrollHeight - 24
+    if (reachedEnd) {
+      setVisibleTemplateCount((count) => Math.min(count + 3, corporateTemplates.length))
+    }
+  }
+
+  const selectedTemplate = selectedTemplateId
+    ? corporateTemplates.find((template) => template.id === selectedTemplateId) || null
+    : null
+  const visibleCorporateTemplates = corporateTemplates.slice(0, visibleTemplateCount)
 
   useEffect(() => {
     let isMounted = true
-    featuresApi.getAiPrompts()
-      .then((res) => {
-        if (!isMounted) return
-        const coreFeatures = new Set([
-          'generic_plan',
-          'generic_report',
-          'mejoras_doc',
-          'inventario_doc',
-          'levantamiento_doc',
-          'standup',
-          'ask_product',
-          'prd_checker',
-          'change_impact',
-        ])
-        const custom = (res.prompts || [])
-          .map((p) => p.feature)
-          .filter((f) => !coreFeatures.has(f))
-        setCustomShortcuts(custom)
+    if (!user?.id) return () => {
+      isMounted = false
+    }
+
+    setActiveRole((user?.role || 'funcional').toLowerCase())
+    void userApi.getUserProfile()
+      .then((profile) => {
+        if (isMounted && profile.user_role) setActiveRole(profile.user_role.toLowerCase())
       })
-      .catch(() => {
-        // Fall back to default shortcuts
+      .catch(() => undefined)
+
+    void Promise.allSettled([featuresApi.getAiPrompts(), featuresApi.getAiRubrics()])
+      .then(([promptsResult, rubricsResult]) => {
+        if (!isMounted) return
+        const promptsRes = promptsResult.status === 'fulfilled' ? promptsResult.value : null
+        const rubricsRes = rubricsResult.status === 'fulfilled' ? rubricsResult.value : null
+        if (promptsRes) {
+          setAvailablePrompts(promptsRes.prompts || [])
+        }
+        if (rubricsRes) {
+          setAvailableRubrics(rubricsRes.rubrics || [])
+        }
       })
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [user?.id, user?.role])
+
+  const roleFeatureFilter = useMemo(() => {
+    const role = activeRole.toLowerCase()
+    if (role === 'admin') return null
+
+    return role === 'qa'
+      ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'qa').map((meta) => meta.id))
+      : role === 'pm'
+        ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'product').map((meta) => meta.id))
+        : new Set(['mejoras_doc', 'inventario_doc', 'levantamiento_doc', 'generic_report', 'transcript_summary'])
+  }, [activeRole])
+
+  const visiblePrompts = useMemo(
+    () => roleFeatureFilter ? availablePrompts.filter((prompt) => roleFeatureFilter.has(prompt.feature)) : availablePrompts,
+    [availablePrompts, roleFeatureFilter],
+  )
+  const visibleRubrics = useMemo(
+    () => roleFeatureFilter ? availableRubrics.filter((rubric) => roleFeatureFilter.has(rubric.feature)) : availableRubrics,
+    [availableRubrics, roleFeatureFilter],
+  )
+  const visiblePromptFeatures = useMemo(() => {
+    const features = new Set([
+      ...visiblePrompts.map((prompt) => prompt.feature),
+      ...visibleRubrics.map((rubric) => rubric.feature),
+    ])
+    return Array.from(features).sort()
+  }, [visiblePrompts, visibleRubrics])
 
   // Dynamic prompt textarea height & expansion (capped at 40% max of chat container height)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<HTMLDivElement>(null)
+  const editorBodyRef = useRef<HTMLSpanElement>(null)
+
+  const focusEditorEnd = useCallback(() => {
+    const body = editorBodyRef.current
+    if (!body) return
+    body.focus()
+    const range = document.createRange()
+    range.selectNodeContents(body)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }, [])
 
   const BASE_TEXTAREA_HEIGHT = 35
   const MAX_PANEL_PERCENT_HEIGHT = 230 // Maximum 40% of chat panel height cap
@@ -149,15 +227,15 @@ export const AgenticDocumentWorkspace = ({
       return
     }
 
-    if (!textareaRef.current) return
+    if (!editorRef.current) return
 
     if (!draft || draft.trim() === '') {
       setTextareaHeight(BASE_TEXTAREA_HEIGHT)
       return
     }
 
-    textareaRef.current.style.height = 'auto'
-    const scrollH = textareaRef.current.scrollHeight
+    editorRef.current.style.height = 'auto'
+    const scrollH = editorRef.current.scrollHeight
     const lineCount = draft.split('\n').length
 
     // Auto-expand to fit text smoothly up to 40% max height cap
@@ -379,14 +457,14 @@ export const AgenticDocumentWorkspace = ({
     isGenerating,
     generatingConversationId,
     streamingText,
-    generationStatus,
     runState,
     handleCancelRun,
     handleSendMessage,
   } = useAgenticGeneration({
 
     config,
-    templateContent,
+    templateContent: selectedTemplateId ? templateContent : '',
+    templateId: selectedTemplateId,
     sources,
     activeConversation,
     activeArtifact,
@@ -405,6 +483,9 @@ export const AgenticDocumentWorkspace = ({
     renameConversation,
     onResetPromptInputs: () => {
       setDraft('')
+      setSelectedFeature(null)
+      setSelectedFeatureLabel(null)
+      setRubricMenuOpen(false)
       setUserResizedHeight(null)
       setIsMaximized(false)
       setTextareaHeight(BASE_TEXTAREA_HEIGHT)
@@ -426,12 +507,15 @@ export const AgenticDocumentWorkspace = ({
 
   const handleSubmitForm = (e: FormEvent) => {
     e.preventDefault()
-    if ((!draft.trim() && attachedImages.length === 0 && uploadedDocs.length === 0) || isGenerating) return
+    const query = selectedFeature ? `/${selectedFeature}${draft.trim() ? ` ${draft.trim()}` : ''}` : draft
+    if ((!query.trim() && attachedImages.length === 0 && uploadedDocs.length === 0) || isGenerating) return
     const imagesToSend = [...attachedImages]
     const docsToSend = [...uploadedDocs]
     setAttachedImages([])
     setUploadedDocs([])
-    void handleSendMessage(draft, imagesToSend, docsToSend)
+    setSelectedFeature(null)
+    setSelectedFeatureLabel(null)
+    void handleSendMessage(query, imagesToSend, docsToSend)
   }
 
   return (
@@ -544,27 +628,30 @@ export const AgenticDocumentWorkspace = ({
                   </div>
                 ))}
 
-                {/* Live streaming assistant bubble while processing in this specific conversation */}
+                {/* Minimal loading state while the first response/artifact is not available yet */}
                 {isCurrentChatGenerating && (
-                  <div className="flex gap-3 justify-start animate-in fade-in duration-150">
-                    <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
-                      <div className="flex items-center gap-4 text-[10px] opacity-70 font-medium">
-                        <span>Asistente IA</span>
+                  !streamingText && runState.artifacts.length === 0 ? (
+                    <div className="flex gap-3 justify-start animate-in fade-in duration-150" aria-busy="true">
+                      <div className="relative w-full max-w-[85%] overflow-hidden rounded-2xl rounded-bl-none border border-slate-200 bg-slate-100 p-4 pt-14 text-slate-800 shadow-2xs">
+                        <div className="pointer-events-none absolute inset-x-4 top-4 flex items-center gap-2">
+                          <RefreshCw className="h-4 w-4 animate-spin text-[#002777]" aria-hidden="true" />
+                          <span className="text-xs font-semibold text-slate-500">Pensando...</span>
+                        </div>
+                        <div className="space-y-3 animate-pulse" aria-hidden="true">
+                          <div className="h-3 w-full rounded-full bg-slate-200" />
+                          <div className="h-3 w-11/12 rounded-full bg-slate-200" />
+                          <div className="h-3 w-4/5 rounded-full bg-slate-200" />
+                          <div className="h-3 w-2/5 rounded-full bg-slate-200" />
+                        </div>
                       </div>
-                      <AgenticThinkingBubble
-                        status={generationStatus}
-                        isProcessing={isCurrentChatGenerating}
-                        steps={runState.steps}
-                        sources={runState.sources}
-                        onCancel={handleCancelRun}
-                        isCancelled={runState.status === 'cancelled'}
-                      />
-
-                      {streamingText && (
-                        <MarkdownMessage content={streamingText} />
-                      )}
                     </div>
-                  </div>
+                  ) : streamingText ? (
+                    <div className="flex gap-3 justify-start animate-in fade-in duration-150">
+                      <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
+                        <MarkdownMessage content={streamingText} />
+                      </div>
+                    </div>
+                  ) : null
                 )}
               </>
             )}
@@ -573,56 +660,24 @@ export const AgenticDocumentWorkspace = ({
 
           {/* Chat Input Bar */}
           <div className="p-4 border-t border-slate-200/80 bg-white shrink-0 space-y-2">
-            {/* Quick Slash Commands bar */}
-            <div className="flex items-center gap-1.5 px-1 overflow-x-auto scrollbar-none py-0.5">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0">Atajos:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setDraft((d) => (d.startsWith('/plan') ? d : `/plan ${d}`.trim()))
-                  textareaRef.current?.focus()
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer shrink-0"
-              >
-                <Sparkles className="h-2.5 w-2.5" />
-                /plan
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDraft((d) => (d.startsWith('/informe') ? d : `/informe ${d}`.trim()))
-                  textareaRef.current?.focus()
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer shrink-0"
-              >
-                <FileText className="h-2.5 w-2.5" />
-                /informe
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDraft((d) => (d.startsWith('/plantilla') ? d : `/plantilla ${d}`.trim()))
-                  textareaRef.current?.focus()
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#002777] text-slate-600 border border-slate-200/80 transition cursor-pointer shrink-0"
-              >
-                /plantilla
-              </button>
-              {customShortcuts.map((slug) => (
+            {selectedTemplate && (
+              <div className="flex items-center gap-2 px-1 py-1 text-[11px] border-b border-slate-100">
+                <FileText className="h-3.5 w-3.5 text-[#002777] shrink-0" />
+                <span className="font-semibold text-slate-500">Formato:</span>
+                <span className="truncate font-semibold text-[#002777]" title={selectedTemplate.title}>
+                  {selectedTemplate.title}
+                </span>
                 <button
-                  key={slug}
                   type="button"
-                  onClick={() => {
-                    setDraft((d) => (d.startsWith(`/${slug}`) ? d : `/${slug} ${d}`.trim()))
-                    textareaRef.current?.focus()
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#002777] border border-indigo-200/80 transition cursor-pointer shrink-0"
+                  onClick={() => setSelectedTemplateId(null)}
+                  className="ml-auto rounded-md p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
+                  title="Quitar formato corporativo"
+                  aria-label="Quitar formato corporativo"
                 >
-                  /{slug}
+                  <X className="h-3.5 w-3.5" />
                 </button>
-              ))}
-            </div>
-
+              </div>
+            )}
             <form onSubmit={handleSubmitForm} className="relative">
               {/* Input Box Card */}
               <div className="relative rounded-2xl border border-slate-200 bg-slate-50/50 p-3 shadow-2xs focus-within:bg-white focus-within:border-slate-300 focus-within:ring-2 focus-within:ring-blue-100/80 transition space-y-2.5">
@@ -642,10 +697,20 @@ export const AgenticDocumentWorkspace = ({
                   </button>
                 </div>
 
-                <textarea
-                  ref={textareaRef}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                <div
+                  ref={editorRef}
+                  contentEditable={!isGenerating}
+                  suppressContentEditableWarning
+                  role="textbox"
+                  aria-multiline="true"
+                  data-placeholder={selectedFeature ? 'Describe qué debe generar el agente...' : (config.placeholder || 'Escribe tu petición o usa /...')}
+                  onInput={(e) => {
+                    // Depending on where the browser places the caret, text can
+                    // land in the editable body span or directly in the root.
+                    const value = editorBodyRef.current?.innerText || e.currentTarget.innerText || ''
+                    setDraft(value)
+                    setRubricMenuOpen(!selectedFeature && value.trimStart().startsWith('/'))
+                  }}
                   onPaste={(e) => {
                     const items = e.clipboardData?.items
                     if (items) {
@@ -667,11 +732,50 @@ export const AgenticDocumentWorkspace = ({
                       handleSubmitForm(e)
                     }
                   }}
-                  placeholder={config.placeholder || 'Escribe tu petición, consulta o usa /plan...'}
-                  disabled={isGenerating}
+                  onFocus={() => setRubricMenuOpen(!selectedFeature && draft.trimStart().startsWith('/'))}
                   style={{ height: `${textareaHeight}px` }}
-                  className="w-full bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none resize-none placeholder:text-slate-400 disabled:opacity-60 font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal"
-                />
+                  className="w-full min-h-[35px] bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"
+                >
+                  {selectedFeature && (
+                    <span contentEditable={false} className="font-bold text-[#002777]">
+                      {selectedFeatureLabel || selectedFeature}{' '}
+                    </span>
+                  )}
+                  <span ref={editorBodyRef} contentEditable={!isGenerating} />
+                </div>
+
+                {rubricMenuOpen && (
+                  <div className="absolute left-3 right-3 bottom-14 z-40 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                    <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-100 mb-1">
+                      <span className="text-[11px] font-bold text-slate-800">Prompts disponibles</span>
+                      <span className="text-[10px] text-slate-400">/{activeRole}</span>
+                    </div>
+                    {visiblePromptFeatures.length === 0 ? (
+                      <div className="px-2 py-3 text-xs text-slate-500">No hay prompts disponibles para este rol.</div>
+                    ) : (
+                      visiblePromptFeatures.map((feature) => {
+                        const meta = FEATURE_METAS.find((item) => item.id === feature)
+                        return (
+                        <button
+                          key={feature}
+                          type="button"
+                          onClick={() => {
+                            setSelectedFeature(feature)
+                            setSelectedFeatureLabel((meta?.title || feature).replace(/\s*\(\/[^)]+\)/, ''))
+                            setDraft('')
+                            setRubricMenuOpen(false)
+                            focusEditorEnd()
+                          }}
+                          className="w-full rounded-xl px-2.5 py-2 text-left hover:bg-blue-50 transition"
+                        >
+                          <span className="block text-xs font-semibold text-slate-800">/{feature}</span>
+                          <span className="block text-[10px] text-slate-500 truncate">{meta?.title || `Prompt de ${feature}`}</span>
+                        </button>
+                        )
+                      })
+                    )}
+                  </div>
+                )}
 
                 {/* Attached Images Thumbnail Row */}
                 {attachedImages.length > 0 && (
@@ -718,22 +822,82 @@ export const AgenticDocumentWorkspace = ({
 
                 {/* Bottom Actions Row: Attachment (+) and Voice on left, Pills + Send on right */}
                 <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
                     {/* Left: Attachment button (+) */}
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                      className="h-7 w-7 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center transition shrink-0 cursor-pointer shadow-2xs"
-                      title="Adjuntar archivo de contexto"
-                    >
-                      {uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setPlusMenuOpen((open) => !open)}
+                        disabled={uploading}
+                        className="h-7 w-7 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center transition shrink-0 cursor-pointer shadow-2xs"
+                        title="Adjuntar archivos o generar borrador"
+                      >
+                        {uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+                      </button>
+                      {plusMenuOpen && (
+                        <div className="absolute left-0 bottom-10 z-50 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlusMenuOpen(false)
+                              fileInputRef.current?.click()
+                            }}
+                            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-slate-50 transition"
+                          >
+                            <FileText className="h-4 w-4 text-slate-500" />
+                            <span>
+                              <span className="block text-xs font-semibold text-slate-800">Agregar fotos y archivos</span>
+                              <span className="block text-[10px] text-slate-400">Cargar desde la computadora</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTemplateMenuOpen((open) => !open)}
+                            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-blue-50 transition"
+                          >
+                            <span className="flex items-center gap-3">
+                              <Sparkles className="h-4 w-4 text-blue-500" />
+                              <span>
+                                <span className="block text-xs font-semibold text-slate-800">Generar borrador</span>
+                                <span className="block text-[10px] text-slate-400">Usar una plantilla corporativa</span>
+                              </span>
+                            </span>
+                            <ChevronDown className={`h-3 w-3 text-slate-400 transition ${templateMenuOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {templateMenuOpen && (
+                            <div
+                              className="mt-1 max-h-48 overflow-y-auto border-t border-slate-100 pt-1 scrollbar-thin"
+                              onScroll={handleTemplateListScroll}
+                            >
+                              <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Plantilla corporativa</div>
+                              {corporateTemplates.length === 0 ? (
+                                <div className="px-3 py-2 text-xs text-slate-500">No hay plantillas disponibles.</div>
+                              ) : visibleCorporateTemplates.map((template) => (
+                                <button
+                                  key={template.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedTemplateId(template.id)
+                                    setPlusMenuOpen(false)
+                                    setTemplateMenuOpen(false)
+                                    focusEditorEnd()
+                                  }}
+                                  className={`w-full rounded-lg px-3 py-2 text-left transition ${selectedTemplateId === template.id ? 'bg-blue-50 text-[#002777]' : 'hover:bg-slate-50 text-slate-700'}`}
+                                >
+                                  <span className="block text-xs font-semibold truncate">{template.title}</span>
+                                  <span className="block text-[10px] text-slate-400 truncate">{template.module || template.filename}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <VoiceInput
                       disabled={isGenerating}
                       onTranscriptionReady={(transcribedText) => {
                         setDraft((prev) => (prev ? `${prev} ${transcribedText}` : transcribedText))
-                        textareaRef.current?.focus()
+                        focusEditorEnd()
                       }}
                     />
                   </div>
@@ -806,13 +970,14 @@ export const AgenticDocumentWorkspace = ({
 
                     {/* Send Button (↑) */}
                     <button
-                      type="submit"
-                      disabled={isGenerating || !draft.trim()}
+                      type={isGenerating ? 'button' : 'submit'}
+                      onClick={isGenerating ? () => void handleCancelRun() : undefined}
+                      disabled={!isGenerating && !draft.trim() && !selectedFeature}
                       className="h-8 w-8 rounded-full flex items-center justify-center transition shrink-0 shadow-xs ml-1 bg-[#002777] text-white hover:bg-[#003399] disabled:opacity-30 disabled:hover:bg-[#002777] cursor-pointer"
-                      title={isGenerating ? 'Generando respuesta...' : 'Enviar consulta'}
+                      title={isGenerating ? 'Cancelar generación' : 'Enviar consulta'}
                     >
                       {isGenerating ? (
-                        <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                        <Square className="h-3.5 w-3.5 fill-white text-white" />
                       ) : (
                         <ArrowUp className="h-4 w-4 stroke-[2.5]" />
                       )}
@@ -871,3 +1036,4 @@ export const AgenticDocumentWorkspace = ({
     </div>
   )
 }
+

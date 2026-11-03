@@ -16,7 +16,7 @@ export const WEBLLM_MODELS_CATALOG: WebLLMModelDefinition[] = [
     vramFormatted: '~1.6 GB VRAM',
     contextWindow: '32.768 tokens',
     tier: 'balanced',
-    requiredFeatures: ['shader-f16'],
+    requiredFeatures: [],
   },
   {
     id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
@@ -28,7 +28,7 @@ export const WEBLLM_MODELS_CATALOG: WebLLMModelDefinition[] = [
     vramFormatted: '~880 MB VRAM',
     contextWindow: '131.072 tokens',
     tier: 'speed',
-    requiredFeatures: ['shader-f16'],
+    requiredFeatures: [],
   },
   {
     id: 'Qwen2.5-3B-Instruct-q4f16_1-MLC',
@@ -40,7 +40,7 @@ export const WEBLLM_MODELS_CATALOG: WebLLMModelDefinition[] = [
     vramFormatted: '~2.5 GB VRAM',
     contextWindow: '32.768 tokens',
     tier: 'quality',
-    requiredFeatures: ['shader-f16'],
+    requiredFeatures: [],
   },
   {
     id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC',
@@ -52,7 +52,7 @@ export const WEBLLM_MODELS_CATALOG: WebLLMModelDefinition[] = [
     vramFormatted: '~1.7 GB VRAM',
     contextWindow: '8.192 tokens',
     tier: 'speed',
-    requiredFeatures: ['shader-f16'],
+    requiredFeatures: [],
   },
   {
     id: 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC',
@@ -64,7 +64,7 @@ export const WEBLLM_MODELS_CATALOG: WebLLMModelDefinition[] = [
     vramFormatted: '~1.6 GB VRAM',
     contextWindow: '32.768 tokens',
     tier: 'balanced',
-    requiredFeatures: ['shader-f16'],
+    requiredFeatures: [],
   },
 ]
 
@@ -161,7 +161,7 @@ export function evaluateModel(
     }
   }
 
-  if (model.requiredFeatures?.includes('shader-f16') && !profile.hasShaderF16) {
+  if (false && model.requiredFeatures?.includes('shader-f16') && !profile.hasShaderF16) {
     return {
       model,
       isCompatible: false,

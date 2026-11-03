@@ -22,11 +22,18 @@ export const VoiceInput = ({
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const waveformFrameRef = useRef<number | null>(null)
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
     return () => {
       stopMediaTracks(streamRef.current)
       if (timerRef.current) clearInterval(timerRef.current)
+      if (waveformFrameRef.current) window.cancelAnimationFrame(waveformFrameRef.current)
+      analyserRef.current?.disconnect()
+      void audioContextRef.current?.close()
     }
   }, [])
 
@@ -42,8 +49,55 @@ export const VoiceInput = ({
       streamRef.current = stream
       chunksRef.current = []
 
+      const audioContext = new AudioContext()
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 128
+      analyser.smoothingTimeConstant = 0.78
+      audioContext.createMediaStreamSource(stream).connect(analyser)
+      audioContextRef.current = audioContext
+      analyserRef.current = analyser
+      const frequencyData = new Uint8Array(analyser.frequencyBinCount)
+      const animateWaveform = () => {
+        analyser.getByteFrequencyData(frequencyData)
+        const canvas = waveformCanvasRef.current
+        const context = canvas?.getContext('2d')
+        if (canvas && context) {
+          const ratio = window.devicePixelRatio || 1
+          const width = Math.max(1, Math.floor(canvas.clientWidth * ratio))
+          const height = Math.max(1, Math.floor(canvas.clientHeight * ratio))
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width
+            canvas.height = height
+          }
+          context.clearRect(0, 0, width, height)
+          context.fillStyle = '#60a5fa'
+          const count = 44
+          const gap = 2 * ratio
+          const barWidth = Math.max(1, (width - gap * (count - 1)) / count)
+          for (let index = 0; index < count; index += 1) {
+            const value = frequencyData[Math.floor(index * frequencyData.length / count)] / 255
+            const barHeight = Math.max(3 * ratio, value * height * 0.9)
+            context.fillRect(index * (barWidth + gap), (height - barHeight) / 2, barWidth, barHeight)
+          }
+        }
+        waveformFrameRef.current = window.requestAnimationFrame(animateWaveform)
+      }
+      animateWaveform()
+
       const mimeType = getSupportedMimeType()
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      if (!mimeType) {
+        stopMediaTracks(stream)
+        streamRef.current = null
+        analyser.disconnect()
+        await audioContext.close()
+        audioContextRef.current = null
+        analyserRef.current = null
+        if (waveformFrameRef.current) window.cancelAnimationFrame(waveformFrameRef.current)
+        waveformFrameRef.current = null
+        setErrorMsg('Este navegador no soporta grabación de audio OGG/Opus.')
+        return
+      }
+      const recorder = new MediaRecorder(stream, { mimeType })
       mediaRecorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
@@ -73,6 +127,14 @@ export const VoiceInput = ({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     }
+    if (waveformFrameRef.current) {
+      window.cancelAnimationFrame(waveformFrameRef.current)
+      waveformFrameRef.current = null
+    }
+    analyserRef.current?.disconnect()
+    analyserRef.current = null
+    void audioContextRef.current?.close()
+    audioContextRef.current = null
     setIsRecording(false)
   }, [])
 
@@ -89,9 +151,9 @@ export const VoiceInput = ({
 
   if (isRecording) {
     return (
-      <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-rose-50 text-rose-800 text-xs font-medium border border-rose-200 animate-in fade-in duration-150 ${className}`}>
-        <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
-        <span className="font-mono">{formattedTime}</span>
+      <div className={`inline-flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-slate-600 text-xs font-medium animate-in fade-in duration-150 ${className}`}>
+        <span className="shrink-0 font-mono text-[11px] tabular-nums">{formattedTime}</span>
+        <canvas ref={waveformCanvasRef} className="block h-6 min-w-0 flex-1 w-full" aria-label="Nivel de voz capturada" />
         <button
           type="button"
           onClick={stopRecording}
@@ -132,7 +194,7 @@ function stopMediaTracks(stream: MediaStream | null) {
 }
 
 function getSupportedMimeType(): string | undefined {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+  const candidates = ['audio/ogg;codecs=opus', 'audio/ogg']
   for (const c of candidates) {
     if (MediaRecorder.isTypeSupported(c)) return c
   }
@@ -154,7 +216,7 @@ async function uploadAudioSnippet(
   setLoading(true)
   try {
     const formData = new FormData()
-    formData.append('file', blob, 'dictation.webm')
+    formData.append('file', blob, 'dictation.ogg')
 
     const res = await fetch(`${API_BASE}/api/transcription/dictate`, {
       method: 'POST',

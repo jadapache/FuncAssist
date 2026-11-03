@@ -117,9 +117,7 @@ def _load_builtin_model_infos() -> list[AIModelInfo]:
         if not isinstance(item, dict) or "id" not in item:
             continue
         task_type = item.get("task_type", "chat_writing")
-        if task_type == "chat_writing":
-            builtin_models.append(_build_builtin_chat_model(item))
-        elif task_type == "transcription":
+        if task_type == "transcription":
             builtin_models.append(_build_builtin_transcription_model(item))
     return builtin_models
 

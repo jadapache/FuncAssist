@@ -99,6 +99,29 @@ export class InferenceService {
     return { content: output, modelUsed: `${provider}:${model}` }
   }
 
+  /**
+   * Generates an arbitrary prompt with the selected provider. Built-in models
+   * deliberately stay on this path so their weights and prompts never leave
+   * the browser for the backend/LiteLLM pipeline.
+   */
+  public async generateMessages(
+    messages: ChatMessage[],
+    onChunk?: StreamChunkCallback,
+    options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
+  ): Promise<{ content: string; modelUsed: string }> {
+    const settings = await this.getAiSettings()
+    const provider = this.resolveProvider(settings)
+    const model = this.resolveModel(settings)
+
+    if (provider === 'builtin') {
+      const content = await this.executeWebLLM(model, messages, onChunk, options)
+      return { content, modelUsed: model }
+    }
+
+    const content = await this.executeBackendPrompt(messages, onChunk)
+    return { content, modelUsed: `${provider}:${model}` }
+  }
+
   private buildSummarizeMessages(request: SummarizeRequest): ChatMessage[] {
     const systemContent =
       request.systemPrompt ||
@@ -133,7 +156,7 @@ export class InferenceService {
     modelId: string,
     messages: ChatMessage[],
     onChunk?: StreamChunkCallback,
-    options?: { maxTokens?: number; temperature?: number },
+    options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
   ): Promise<string> {
     const provider = await getWebLLMProvider()
     

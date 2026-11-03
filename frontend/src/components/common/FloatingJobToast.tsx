@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useState } from 'react'
 import {
   Download,
   Mic,
@@ -7,6 +7,9 @@ import {
   X,
   Loader2,
   Ban,
+  GripVertical,
+  Minus,
+  Maximize2,
 } from 'lucide-react'
 import type { BackgroundJobItem } from '../../context/BackgroundJobContext'
 
@@ -21,6 +24,10 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
   onCancelJob,
   onDismissJob,
 }) => {
+  const [collapsedJobs, setCollapsedJobs] = useState<Set<string>>(new Set())
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+
   if (jobs.length === 0) {
     return null
   }
@@ -29,6 +36,16 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
     <aside
       aria-label="Notificaciones de procesos en segundo plano"
       className="fixed top-6 right-6 z-50 flex flex-col gap-3 w-80 sm:w-96 pointer-events-auto animate-fade-in font-sans"
+      style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}
+      onPointerMove={(event) => {
+        if (!dragRef.current) return
+        setPosition({
+          x: dragRef.current.originX + event.clientX - dragRef.current.startX,
+          y: dragRef.current.originY + event.clientY - dragRef.current.startY,
+        })
+      }}
+      onPointerUp={() => { dragRef.current = null }}
+      onPointerCancel={() => { dragRef.current = null }}
     >
       {jobs.map((task) => {
         const isComplete = task.status === 'complete'
@@ -36,6 +53,17 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
         const isCancelled = task.status === 'cancelled'
         const inProgress = !isComplete && !isFailed && !isCancelled
         const isCancelling = inProgress && Boolean(task.stageText?.toLowerCase().startsWith('cancelando'))
+        const isCollapsed = collapsedJobs.has(task.id)
+
+        const toggleCollapsed = (event: React.MouseEvent) => {
+          event.stopPropagation()
+          setCollapsedJobs((previous) => {
+            const next = new Set(previous)
+            if (next.has(task.id)) next.delete(task.id)
+            else next.add(task.id)
+            return next
+          })
+        }
 
         const renderIcon = () => {
           if (isComplete) {
@@ -63,13 +91,28 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
               if (task.onClick) task.onClick()
             }}
             className={[
-              'bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xl transition-all duration-200',
+              'bg-white border border-slate-200/90 rounded-2xl shadow-xl transition-all duration-200',
+              isCollapsed ? 'px-3 py-2.5' : 'p-4',
               task.onClick ? 'cursor-pointer hover:border-slate-300 hover:shadow-2xl' : '',
             ].join(' ')}
           >
-            <div className="flex items-center gap-3.5">
+            <div
+              className="flex items-center gap-2"
+              onPointerDown={(event) => {
+                if ((event.target as HTMLElement).closest('button')) return
+                dragRef.current = {
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  originX: position.x,
+                  originY: position.y,
+                }
+                event.currentTarget.setPointerCapture?.(event.pointerId)
+              }}
+              style={{ cursor: 'grab', touchAction: 'none' }}
+              title="Arrastrar notificación"
+            >
               {/* Left Action Icon */}
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 shadow-2xs">
+              <div className={`flex shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 shadow-2xs ${isCollapsed ? 'h-8 w-8' : 'h-10 w-10'}`}>
                 {renderIcon()}
               </div>
 
@@ -84,6 +127,7 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                     {task.title}
                   </h4>
 
+                  <div className="flex items-center gap-1 shrink-0">
                   {inProgress && (task.onCancel || onCancelJob) && (
                     <button
                       type="button"
@@ -120,8 +164,19 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                       <X className="h-3.5 w-3.5" />
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={toggleCollapsed}
+                    className="text-slate-400 hover:text-slate-700 p-0.5 rounded transition cursor-pointer"
+                    title={isCollapsed ? 'Expandir proceso' : 'Minimizar proceso'}
+                    aria-label={isCollapsed ? 'Expandir proceso' : 'Minimizar proceso'}
+                  >
+                    {isCollapsed ? <Maximize2 className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+                  </button>
+                  </div>
                 </div>
 
+                {!isCollapsed && <>
                 {/* Horizontal Progress Bar */}
                 <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden border border-slate-200/60">
                   <div
@@ -162,7 +217,9 @@ export const FloatingJobToast: React.FC<FloatingJobToastProps> = ({
                     )}
                   </div>
                 </div>
+                </>}
               </div>
+              <GripVertical className="h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
             </div>
           </div>
         )
