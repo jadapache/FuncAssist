@@ -8,6 +8,9 @@ import type {
   AgentRunStep,
 } from '../types/agentEvents'
 import type { AgenticPromptResponse } from '../../../api/client'
+import { api } from '../../../api/client'
+import { inferenceService } from '../../ai/services/InferenceService'
+import type { ChatMessage } from '../../ai/types/webLlm'
 
 const INITIAL_RUN_STATE: AgentRunState = {
   runId: null,
@@ -73,6 +76,60 @@ export function useAgentRun() {
       })
 
       try {
+        const settings = await inferenceService.getAiSettings()
+        if (settings?.provider === 'builtin') {
+          const requestedFeature = payload.feature || 'builtin_agent'
+          const [prompt, rubric] = await Promise.all([
+            api.getAiPrompt(requestedFeature).catch(() => api.getAiPrompt('builtin_agent')),
+            api.getAiRubric(requestedFeature).catch(() => null),
+          ])
+          const contextParts = [
+            payload.current_document ? `Documento actual:\n${payload.current_document}` : '',
+            payload.chat_context?.length ? `Conversación reciente:\n${payload.chat_context.join('\n')}` : '',
+            payload.attached_docs?.length
+              ? `Documentos adjuntos:\n${payload.attached_docs.map((doc) => `${doc.filename}:\n${doc.content}`).join('\n\n')}`
+              : '',
+          ].filter(Boolean)
+          const context = contextParts.join('\n\n')
+          const templateValues: Record<string, string> = {
+            query: payload.query,
+            context,
+            chat_context: payload.chat_context?.join('\n') || '',
+            rubric: rubric?.criteria?.map((criterion) => `- ${criterion}`).join('\n') || '',
+          }
+          const userTemplate = prompt.user_template?.trim() || '{query}'
+          const userContent = userTemplate.replace(
+            /\{(query|context|chat_context|rubric)\}/g,
+            (_, key: string) => templateValues[key] || '',
+          )
+          const messages: ChatMessage[] = [
+            {
+              role: 'system',
+              content: prompt.system?.trim() || '',
+            },
+            {
+              role: 'user',
+              content: userContent,
+            },
+          ]
+          const result = await inferenceService.generateMessages(
+            messages,
+            (chunk, accumulated) => onChunk(accumulated, chunk),
+            { maxTokens: 4096, temperature: 0.4 },
+          )
+          const response: AgenticPromptResponse = {
+            answer: result.content,
+            assistant_message: result.content,
+            document_updates: result.content,
+            intent_detected: payload.mode || 'client_builtin',
+            requires_document_mutation: false,
+            operations: [],
+            planned_operations: [],
+            artifacts: [],
+          }
+          setRunState((prev) => ({ ...prev, status: 'completed', activeStatusText: 'Listo' }))
+          return response
+        }
         return await docAgentApi.agenticPromptStream(
           { ...payload, run_id: generatedRunId },
           onChunk,

@@ -67,7 +67,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     default_base_url="http://127.0.0.1:11434",
     default_model="qwen2.5:2b",
     is_local=True,
-    aliases=("builtin", "local"),
+    aliases=("local",),
   ),
   "openrouter": ProviderSpec(
     id="openrouter",
