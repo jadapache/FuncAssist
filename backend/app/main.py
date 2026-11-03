@@ -26,6 +26,59 @@ from app.core.settings import ROOT_DIR, ensure_local_dirs, get_settings
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
 
+async def _preload_local_voice_model() -> None:
+  """Warm up the configured local voice model without blocking app startup."""
+  import asyncio
+  from app.core.storage import load_app_settings
+
+  try:
+    ai_cfg = load_app_settings().get("ai", {})
+    provider = (ai_cfg.get("transcription_provider") or "auto").lower()
+    has_cloud_credentials = bool(
+      ai_cfg.get("transcription_groq_api_key")
+      or ai_cfg.get("transcription_openai_api_key")
+      or os.getenv("GROQ_API_KEY")
+      or os.getenv("OPENAI_API_KEY")
+    )
+    if provider not in ("auto", "local", "builtin"):
+      return
+    if provider == "auto" and has_cloud_credentials:
+      return
+
+    model_id = (ai_cfg.get("transcription_model") or "base").strip()
+    clean_id = (
+      model_id.replace("whisper-", "")
+      .replace("faster-whisper-", "")
+      .replace("fw-", "")
+      .strip()
+    ) or "base"
+
+    # This warm-up targets the openai-whisper local provider. Other local
+    # engines (ONNX/Faster-Whisper/Moonshine) have their own download/lifecycle
+    # controls and should not be forced through the .pt loader.
+    if any(marker in model_id.lower() for marker in ("onnx", "faster-whisper", "fw-", "moonshine", "parakeet", "sense-voice")):
+      return
+
+    from app.features.transcription.whisper_local import (
+      download_model_file,
+      get_whisper_cache_dir,
+      prepare_whisper_download,
+      preload_local_whisper_model,
+    )
+
+    # Register the download so the existing FloatingJobToast can show only
+    # model preparation progress, never the short dictation request itself.
+    model_file = get_whisper_cache_dir() / f"{clean_id}.pt"
+    if not model_file.exists() or model_file.stat().st_size <= 1024 * 1024:
+      prepare_whisper_download(clean_id)
+    await asyncio.to_thread(download_model_file, clean_id)
+    await asyncio.to_thread(preload_local_whisper_model, clean_id)
+  except Exception:
+    # Voice dictation remains available through the normal lazy-loading path.
+    import logging
+    logging.getLogger(__name__).exception("Local voice model preload failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   import asyncio
@@ -48,13 +101,19 @@ async def lifespan(app: FastAPI):
   ensure_ai_files()
 
   refresher_task = asyncio.create_task(run_index_refresher())
+  voice_model_task = asyncio.create_task(_preload_local_voice_model())
 
   try:
     yield
   finally:
     refresher_task.cancel()
+    voice_model_task.cancel()
     try:
       await refresher_task
+    except (asyncio.CancelledError, Exception):
+      pass
+    try:
+      await voice_model_task
     except (asyncio.CancelledError, Exception):
       pass
     await close_redis_client()

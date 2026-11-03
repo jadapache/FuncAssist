@@ -22,11 +22,18 @@ export const VoiceInput = ({
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const waveformFrameRef = useRef<number | null>(null)
+  const [waveform, setWaveform] = useState<number[]>(() => Array.from({ length: 44 }, () => 0.08))
 
   useEffect(() => {
     return () => {
       stopMediaTracks(streamRef.current)
       if (timerRef.current) clearInterval(timerRef.current)
+      if (waveformFrameRef.current) window.cancelAnimationFrame(waveformFrameRef.current)
+      analyserRef.current?.disconnect()
+      void audioContextRef.current?.close()
     }
   }, [])
 
@@ -41,6 +48,30 @@ export const VoiceInput = ({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
       chunksRef.current = []
+
+      const audioContext = new AudioContext()
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 128
+      analyser.smoothingTimeConstant = 0.78
+      audioContext.createMediaStreamSource(stream).connect(analyser)
+      audioContextRef.current = audioContext
+      analyserRef.current = analyser
+      const samples = new Uint8Array(analyser.fftSize)
+      const animateWaveform = () => {
+        analyser.getByteTimeDomainData(samples)
+        const bars = Array.from({ length: 44 }, (_, index) => {
+          const start = Math.floor(index * samples.length / 44)
+          const end = Math.max(start + 1, Math.floor((index + 1) * samples.length / 44))
+          let peak = 0
+          for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+            peak = Math.max(peak, Math.abs(samples[sampleIndex] - 128) / 128)
+          }
+          return Math.max(0.08, Math.min(1, peak * 2.8))
+        })
+        setWaveform(bars)
+        waveformFrameRef.current = window.requestAnimationFrame(animateWaveform)
+      }
+      animateWaveform()
 
       const mimeType = getSupportedMimeType()
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
@@ -73,6 +104,15 @@ export const VoiceInput = ({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     }
+    if (waveformFrameRef.current) {
+      window.cancelAnimationFrame(waveformFrameRef.current)
+      waveformFrameRef.current = null
+    }
+    analyserRef.current?.disconnect()
+    analyserRef.current = null
+    void audioContextRef.current?.close()
+    audioContextRef.current = null
+    setWaveform(Array.from({ length: 44 }, () => 0.08))
     setIsRecording(false)
   }, [])
 
@@ -89,9 +129,17 @@ export const VoiceInput = ({
 
   if (isRecording) {
     return (
-      <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-rose-50 text-rose-800 text-xs font-medium border border-rose-200 animate-in fade-in duration-150 ${className}`}>
-        <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />
-        <span className="font-mono">{formattedTime}</span>
+      <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-xl bg-slate-900 text-white text-xs font-medium border border-slate-700 animate-in fade-in duration-150 ${className}`}>
+        <span className="font-mono text-[11px] tabular-nums text-slate-200">{formattedTime}</span>
+        <div className="flex items-center gap-[2px] h-6 w-44 overflow-hidden" aria-label="Nivel de voz capturada">
+          {waveform.map((level, index) => (
+            <span
+              key={index}
+              className="w-[3px] rounded-full bg-sky-300 transition-[height] duration-75"
+              style={{ height: `${Math.max(3, level * 22)}px` }}
+            />
+          ))}
+        </div>
         <button
           type="button"
           onClick={stopRecording}

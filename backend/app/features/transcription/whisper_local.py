@@ -95,6 +95,8 @@ def get_local_models_info() -> List[Dict[str, Any]]:
 _WHISPER_DOWNLOADS: Dict[str, Dict[str, Any]] = {}
 _WHISPER_CANCEL_EVENTS: Dict[str, threading.Event] = {}
 _WHISPER_LOCK = threading.Lock()
+_WHISPER_MODEL_CACHE: Dict[str, Any] = {}
+_WHISPER_MODEL_CACHE_LOCK = threading.Lock()
 
 
 def get_active_whisper_downloads() -> List[Dict[str, Any]]:
@@ -541,11 +543,20 @@ class WhisperLocalService:
 
   def _get_model(self):
     if self._model is None:
+      cached_model = _WHISPER_MODEL_CACHE.get(self.model_size)
+      if cached_model is not None:
+        self._model = cached_model
+        return self._model
       try:
         import whisper
         cache_dir = get_whisper_cache_dir()
         logger.info(f"Loading local Whisper model: {self.model_size} from {cache_dir}")
-        self._model = whisper.load_model(self.model_size, download_root=str(cache_dir))
+        with _WHISPER_MODEL_CACHE_LOCK:
+          cached_model = _WHISPER_MODEL_CACHE.get(self.model_size)
+          if cached_model is None:
+            cached_model = whisper.load_model(self.model_size, download_root=str(cache_dir))
+            _WHISPER_MODEL_CACHE[self.model_size] = cached_model
+          self._model = cached_model
       except ImportError:
         raise RuntimeError(
           "El paquete 'openai-whisper' no está instalado en el entorno local de Python. "
@@ -561,7 +572,6 @@ class WhisperLocalService:
       return True
     except ImportError:
       return False
-
   def transcribe(
     self,
     audio_path: Path,
@@ -653,3 +663,14 @@ def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
     logger.warning(f"FFmpeg conversion failed: {e}, using original media file.")
 
   return media_path
+
+
+def preload_local_whisper_model(model_id: str = "base") -> None:
+  """Download and load a local Whisper model into the process cache."""
+  clean_id = (
+    model_id.replace("whisper-", "")
+    .replace("faster-whisper-", "")
+    .replace("fw-", "")
+    .strip()
+  ) or "base"
+  WhisperLocalService(model_size=clean_id)._get_model()

@@ -422,6 +422,7 @@ async def dictate_audio(file: UploadFile = File(...)):
       engine.transcribe,
       temp_file,
       model_id=model_id,
+      language="es",
     )
     transcribed_text = res.text.strip() if res else ""
     return {"text": transcribed_text, "filename": file.filename}
