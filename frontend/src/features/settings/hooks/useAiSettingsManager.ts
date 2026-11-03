@@ -174,10 +174,16 @@ export function useAiSettingsManager() {
   const fetchLocalBuiltinModels = useCallback(async () => {
     setFetchingBuiltinModels(true)
     try {
-      const res = await api.listBuiltinModels()
-      if (res.ok && res.models) {
-        setLocalBuiltinModels(res.models)
-      }
+      const webllm = await getWebLLMProvider()
+      const cached = await Promise.all(
+        catalogModels.filter((item) => item.provider === 'builtin').map(async (item) => ({
+          ...item,
+          is_downloaded: await webllm.isModelCached(item.id),
+          disk_size_mb: 0,
+          file_path: null,
+        })),
+      )
+      setLocalBuiltinModels(cached as LocalBuiltinModelInfo[])
     } catch (e) {
       console.error('Error fetching local builtin models:', e)
     } finally {
@@ -317,14 +323,10 @@ export function useAiSettingsManager() {
   const handleDownloadBuiltinModel = async (modelId: string) => {
     registerDownloadJob(modelId, `Descargando ${modelId}`)
     try {
-      const res = await api.downloadBuiltinModel(modelId)
-      if (res.ok) {
-        toast.success(res.message || `Modelo ${modelId} descargado correctamente en tu disco.`)
-        await fetchLocalBuiltinModels()
-        await loadDynamicCatalog(true)
-      } else {
-        toast.error(res.message || `Error al descargar modelo ${modelId}`)
-      }
+      const webllm = await getWebLLMProvider()
+      await webllm.initModel(modelId, () => undefined)
+      toast.success(`Modelo ${modelId} guardado en la caché del navegador.`)
+      await fetchLocalBuiltinModels()
     } catch (err) {
       const isCancelled = err instanceof Error && (err.message.toLowerCase().includes('cancel') || err.message.toLowerCase().includes('abort'))
       if (!isCancelled) {
@@ -347,14 +349,10 @@ export function useAiSettingsManager() {
   const handleDeleteBuiltinModel = async (modelId: string) => {
     setDeletingBuiltinId(modelId)
     try {
-      const res = await api.deleteBuiltinModel(modelId)
-      if (res.ok) {
-        toast.success(res.message || `Modelo ${modelId} eliminado del disco.`)
-        await fetchLocalBuiltinModels()
-        await loadDynamicCatalog(true)
-      } else {
-        toast.error(res.message || `Error al eliminar modelo ${modelId}`)
-      }
+      const webllm = await getWebLLMProvider()
+      await webllm.deleteCachedModel(modelId)
+      toast.success(`Modelo ${modelId} eliminado de la caché del navegador.`)
+      await fetchLocalBuiltinModels()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
     } finally {

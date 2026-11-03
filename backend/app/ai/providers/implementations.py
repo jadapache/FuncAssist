@@ -81,7 +81,7 @@ class LiteLLMProvider(AIProvider):
     prefix = self.spec.litellm_prefix
 
     # Special handling for Ollama
-    if self.spec.id in {"ollama", "builtin", "local"} or prefix == "ollama_chat":
+    if self.spec.id in {"ollama", "local"} or prefix == "ollama_chat":
       if m.startswith("ollama/") or m.startswith("ollama_chat/"):
         return m
       return f"ollama_chat/{m}"

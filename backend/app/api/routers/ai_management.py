@@ -8,24 +8,6 @@ from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import get_ai_settings, resolve_provider
 from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
-from app.features.transcription.whisper_local import (
-    cancel_whisper_download,
-    delete_model_file,
-    download_model_file,
-    get_active_whisper_downloads,
-    get_local_models_info,
-    prepare_whisper_download,
-)
-from app.ai.builtin_local import (
-    cancel_builtin_model_download,
-    delete_builtin_model_file,
-    download_builtin_model_file,
-    get_active_downloads_status,
-    get_builtin_cache_dir,
-    get_builtin_models_info,
-    prepare_builtin_download,
-    resolve_model_meta,
-)
 
 router = APIRouter(
     prefix="/ai",
@@ -107,9 +89,6 @@ async def test_ai_connection(
         return {"ok": False, "message": "No hay ningún proveedor de IA configurado en el sistema."}
     if not model_name:
         return {"ok": False, "message": f"No hay un modelo especificado para el proveedor '{provider_name}'."}
-    if provider_name == "builtin":
-        return _verify_builtin_model(model_name)
-
     api_key = _extract_candidate_api_key(body)
     test_messages = [AIMessage(role="user", content="Hola, responde únicamente con la palabra 'OK'.")]
 
@@ -143,7 +122,9 @@ async def test_ai_connection(
 @handle_grounded_errors
 async def list_ollama_models(base_url: str | None = None) -> dict[str, Any]:
     config = get_ai_settings()
-    target_url = (base_url or config.get("ollama_base_url") or "http://127.0.0.1:11434").rstrip("/")
+    target_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
+    if not target_url:
+        return {"ok": False, "message": "Debes configurar una URL explícita de Ollama."}
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             res = await client.get(f"{target_url}/api/tags")
@@ -159,7 +140,9 @@ async def list_ollama_models(base_url: str | None = None) -> dict[str, Any]:
 @handle_grounded_errors
 async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, Any]:
     config = get_ai_settings()
-    target_url = (body.base_url or config.get("ollama_base_url") or "http://127.0.0.1:11434").rstrip("/")
+    target_url = (body.base_url or config.get("ollama_base_url") or "").rstrip("/")
+    if not target_url:
+        raise HTTPException(status_code=400, detail="Debes configurar una URL explícita de Ollama.")
     try:
         async with httpx.AsyncClient(timeout=600.0) as client:
             res = await client.post(f"{target_url}/api/pull", json={"name": body.name, "stream": False})
@@ -179,7 +162,9 @@ async def pull_ollama_model(body: OllamaPullRequest = Body(...)) -> dict[str, An
 async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = None) -> dict[str, Any]:
     """Delete a local Ollama model to free disk space."""
     config = get_ai_settings()
-    target_url = (base_url or config.get("ollama_base_url") or "http://127.0.0.1:11434").rstrip("/")
+    target_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
+    if not target_url:
+        raise HTTPException(status_code=400, detail="Debes configurar una URL explícita de Ollama.")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             req = client.build_request("DELETE", f"{target_url}/api/delete", json={"name": model_name})
@@ -193,104 +178,3 @@ async def delete_ollama_model_endpoint(model_name: str, base_url: str | None = N
         ) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al eliminar el modelo {model_name} en Ollama: {e}")
-
-
-@router.get("/whisper/models")
-@handle_grounded_errors
-async def list_whisper_models() -> dict[str, Any]:
-    """List all local Whisper built-in models and their download status on disk."""
-    models = get_local_models_info()
-    return {"ok": True, "models": models}
-
-
-@router.post("/whisper/download/{model_id}")
-@handle_grounded_errors
-async def download_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
-    """Download a local Whisper model to disk cache."""
-    clean_id = model_id.replace("whisper-", "").strip().lower()
-    prepare_whisper_download(clean_id)
-    try:
-        path = await asyncio.to_thread(download_model_file, clean_id)
-        return {
-            "ok": True,
-            "model_id": clean_id,
-            "file_path": str(path),
-            "message": f"Modelo {clean_id} descargado y listo para uso local.",
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error descargando modelo Whisper {model_id}: {exc}") from exc
-
-
-@router.delete("/whisper/{model_id}")
-@handle_grounded_errors
-async def delete_whisper_model_endpoint(model_id: str) -> dict[str, Any]:
-    """Delete a downloaded local Whisper model from disk to free space."""
-    try:
-        clean_id = model_id.replace("whisper-", "")
-        deleted = delete_model_file(clean_id)
-        if not deleted:
-            return {"ok": True, "message": f"El modelo {clean_id} no estaba descargado."}
-        return {"ok": True, "message": f"Modelo Whisper {clean_id} eliminado del disco con éxito."}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error eliminando modelo Whisper {model_id}: {exc}") from exc
-
-
-@router.get("/builtin/models")
-@handle_grounded_errors
-async def list_builtin_models() -> dict[str, Any]:
-    """List all local built-in LLM models and their download status on disk (without Ollama)."""
-    models = get_builtin_models_info()
-    return {"ok": True, "models": models}
-
-
-@router.get("/builtin/tasks")
-@handle_grounded_errors
-async def get_builtin_download_tasks() -> dict[str, Any]:
-    """Get active download tasks and progress for all built-in models (LLMs and Whisper)."""
-    llm_tasks = get_active_downloads_status()
-    whisper_tasks = get_active_whisper_downloads()
-    return {"ok": True, "tasks": llm_tasks + whisper_tasks}
-
-
-@router.post("/builtin/cancel/{model_id:path}")
-@handle_grounded_errors
-async def cancel_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
-    """Cancel an ongoing download of a built-in model (LLM or Whisper)."""
-    cancelled = cancel_builtin_model_download(model_id)
-    if not cancelled:
-        cancelled = cancel_whisper_download(model_id)
-    return {
-        "ok": cancelled,
-        "model_id": model_id,
-        "message": "Descarga cancelada correctamente." if cancelled else "No se encontró una descarga activa para cancelar.",
-    }
-
-
-@router.post("/builtin/download/{model_id:path}")
-@handle_grounded_errors
-async def download_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
-    """Download a local built-in LLM model directly from Hugging Face into disk cache without Ollama."""
-    prepare_builtin_download(model_id)
-    try:
-        path = await asyncio.to_thread(download_builtin_model_file, model_id)
-        return {
-            "ok": True,
-            "model_id": model_id,
-            "file_path": str(path),
-            "message": f"Modelo {model_id} descargado y listo para uso local.",
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error descargando modelo built-in {model_id}: {exc}") from exc
-
-
-@router.delete("/builtin/{model_id:path}")
-@handle_grounded_errors
-async def delete_builtin_model_endpoint(model_id: str) -> dict[str, Any]:
-    """Delete a downloaded local built-in LLM model from disk to free space."""
-    try:
-        deleted = delete_builtin_model_file(model_id)
-        if not deleted:
-            return {"ok": True, "message": f"El modelo {model_id} no estaba descargado."}
-        return {"ok": True, "message": f"Modelo {model_id} eliminado del disco con éxito."}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error eliminando modelo built-in {model_id}: {exc}") from exc

@@ -138,7 +138,8 @@ def resolve_model_max_tokens(
   except Exception:
     pass
 
-  default_limit = (spec.default_max_tokens if spec else None) or (8192 if is_stream else 4096)
+  provider_defaults = {"openai": 16384, "claude": 8192, "gemini": 8192}
+  default_limit = (spec.default_max_tokens if spec else None) or provider_defaults.get(prov_clean) or (8192 if is_stream else 4096)
 
   if model_limit is not None:
     if requested_max is not None:
