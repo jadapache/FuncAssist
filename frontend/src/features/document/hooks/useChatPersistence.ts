@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import type { Artifact } from '../../../types/artifacts'
 import { draftsApi } from '../../../features/document/api/draftsApi'
 import { chatSessionsApi } from '../../../features/document/api/chatSessionsApi'
@@ -47,23 +48,62 @@ export interface ThinkingStep {
  */
 export function useChatPersistence(featureSlug: string, userId?: string | null) {
   const [conversations, setConversations] = useState<ChatConversation[]>([])
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
+  const urlSessionId = routeSessionId || searchParams.get('session')
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(urlSessionId || null)
+
+  const syncUrlSession = useCallback(
+    (sessionId: string | null) => {
+      if (routeSessionId) return
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (sessionId) {
+            next.set('session', sessionId)
+          } else {
+            next.delete('session')
+          }
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [routeSessionId, setSearchParams],
+  )
 
   // Load sessions and messages directly from the remote PostgreSQL entity.
   useEffect(() => {
     let isCancelled = false
-    chatSessionsApi.getSessions(featureSlug).then((remoteSessions) => {
-      if (isCancelled) return
-      setConversations(remoteSessions)
-      setActiveConversationId((prev) => prev && remoteSessions.some((c) => c.id === prev) ? prev : remoteSessions[0]?.id ?? null)
-    }).catch((err) => {
-      console.debug('[useChatPersistence] Failed to fetch remote sessions:', err)
-    })
+    chatSessionsApi
+      .getSessions(featureSlug)
+      .then((remoteSessions) => {
+        if (isCancelled) return
+        setConversations(remoteSessions)
+        const matched = urlSessionId ? remoteSessions.find((c) => c.id === urlSessionId) : null
+        const initialId = matched?.id || remoteSessions[0]?.id || null
+        setActiveConversationId(initialId)
+        if (initialId && !urlSessionId) {
+          syncUrlSession(initialId)
+        }
+      })
+      .catch((err) => {
+        console.debug('[useChatPersistence] Failed to fetch remote sessions:', err)
+      })
 
     return () => {
       isCancelled = true
     }
-  }, [featureSlug, userId])
+  }, [featureSlug, userId, urlSessionId, syncUrlSession])
+
+  // Sync state if user changes query param externally or navigates history
+  useEffect(() => {
+    if (urlSessionId && urlSessionId !== activeConversationId) {
+      if (conversations.some((c) => c.id === urlSessionId)) {
+        setActiveConversationId(urlSessionId)
+      }
+    }
+  }, [urlSessionId, conversations, activeConversationId])
 
   // Sync changes to the persisted chat entity whenever conversations change.
   useEffect(() => {
@@ -112,9 +152,10 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
       }
       setConversations((prev) => [newConv, ...prev])
       setActiveConversationId(newConv.id)
+      syncUrlSession(newConv.id)
       return newConv
     },
-    [conversations.length],
+    [conversations.length, syncUrlSession],
   )
 
   /**
@@ -139,7 +180,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
         ),
       )
     },
-    [activeConversationId],
+    [activeConversationId, syncUrlSession],
   )
 
   /**
@@ -159,7 +200,9 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
       setConversations((prev) => {
         const filtered = prev.filter((c) => c.id !== id)
         if (activeConversationId === id) {
-          setActiveConversationId(filtered.length > 0 ? filtered[0].id : null)
+          const nextId = filtered.length > 0 ? filtered[0].id : null
+          setActiveConversationId(nextId)
+          syncUrlSession(nextId)
         }
         return filtered
       })
@@ -176,9 +219,13 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
   /**
    * Switch to an existing conversation.
    */
-  const switchConversation = useCallback((id: string) => {
-    setActiveConversationId(id)
-  }, [])
+  const switchConversation = useCallback(
+    (id: string) => {
+      setActiveConversationId(id)
+      syncUrlSession(id)
+    },
+    [syncUrlSession],
+  )
 
   return {
     conversations,

@@ -80,13 +80,20 @@ export const docAgentApi = {
       })),
     ),
 
-  cancelRun: async (runId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/api/doc-agent/runs/${encodeURIComponent(runId)}/cancel`, {
-      method: 'POST',
-      headers: { ...getAuthHeaders() },
-    })
-    if (!res.ok) {
-      throw new Error(`Failed to cancel run ${runId}`)
+  cancelRun: async (runId: string, conversationId?: string): Promise<void> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/doc-agent/runs/${encodeURIComponent(runId)}/cancel`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders() },
+      })
+      if (!res.ok && conversationId) {
+        await fetch(`${API_BASE}/api/doc-agent/sessions/${encodeURIComponent(conversationId)}/cancel`, {
+          method: 'POST',
+          headers: { ...getAuthHeaders() },
+        })
+      }
+    } catch {
+      // Best-effort cancellation notification; stream aborted locally
     }
   },
 
