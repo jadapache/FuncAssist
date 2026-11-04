@@ -42,10 +42,8 @@ def test_update_ai_settings_endpoints():
         "/api/ai/settings",
         json={"inference_provider": "builtin", "inference_model": "qwen3.5:2b"},
     )
-    assert res_alias.status_code == 200
-    data_alias = res_alias.json()
-    assert data_alias["provider"] == "builtin"
-    assert data_alias["model"] == "qwen3.5:2b"
+    assert res_alias.status_code == 400
+    assert "WebLLM" in res_alias.json()["detail"]
 
 
 def test_ai_models_catalog_endpoint():

@@ -324,36 +324,10 @@ def test_transcription_cancel_and_models(client: TestClient):
   assert cancel_res.json()["ok"] is True
 
 
-def test_retranscribe_endpoint(client: TestClient):
-  # 1. Create dummy media and transcription record
-  dummy_bytes = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.29.100\x00" * 20
-  entry = save_media_file(
-    file_bytes=dummy_bytes,
-    filename="retrans_test.mp3",
-    title="Reunión Retranscribe",
-  )
-  record_id = "test-retrans-record-123"
-  save_transcription_record({
-    "id": record_id,
-    "media_id": entry["id"],
-    "metadata": {"title": "Reunión Retranscribe"},
-    "language": "es",
-    "duration_seconds": 30.0,
-    "created_at": "2026-10-01T10:00:00Z",
-    "segments": [],
-    "text": "Texto inicial",
-  })
-
-  # 2. Call retranscribe
-  retrans_res = client.post(f"/api/transcription/retranscribe/{record_id}", json={"mode": "auto"})
-  assert retrans_res.status_code == 200
-  data = retrans_res.json()
-  assert data["ok"] is True
-  assert data["transcription_id"] == record_id
-
-  # Clean up
-  delete_transcription_record(record_id)
-  delete_transcription_record(entry["id"])
+def test_retranscribe_endpoint_is_removed(client: TestClient):
+  # Retranscribe endpoint has been completely removed in client-first architecture
+  retrans_res = client.post("/api/transcription/retranscribe/test-id-123", json={"mode": "auto"})
+  assert retrans_res.status_code in (404, 405)
 
 
 def test_register_local_path_and_sse_events(client: TestClient, tmp_path: Path):
@@ -540,53 +514,18 @@ def test_guid_folder_layout_and_sidecars():
   assert get_transcription_record(tid) is None
 
 
-def test_providers_registry_and_resolution(monkeypatch):
-  from app.features.transcription.providers import (
-    get_provider,
-    list_all_providers,
-  )
-  from app.features.transcription.service import _resolve_provider
-
-  all_provs = list_all_providers()
-  assert len(all_provs) >= 2  # OpenAIWhisperProvider, FasterWhisperProvider, MoonshineProvider
-  ids = [p.provider_id for p in all_provs]
-  assert "whisper-python" in ids
-  assert "faster-whisper" in ids
-  assert "moonshine" in ids
-
-  # Check openai-whisper
-  whisper_p = get_provider("whisper-python")
-  assert whisper_p is not None
-  assert whisper_p.display_name == "Whisper (openai-whisper)"
-
-  # Check faster-whisper
-  fw_p = get_provider("faster-whisper")
-  assert fw_p is not None
-  assert fw_p.display_name == "Faster Whisper (CTranslate2)"
-
-  # Check moonshine
-  moon_p = get_provider("moonshine")
-  assert moon_p is not None
-  assert "Moonshine" in moon_p.display_name
-
-  # Provider auto-resolution with simulated availability
-  monkeypatch.setattr(fw_p, "is_available", lambda: True)
-  resolved_fw = _resolve_provider("faster-whisper", "fw-tiny")
-  assert resolved_fw.provider_id == "faster-whisper"
-
-  monkeypatch.setattr(whisper_p, "is_available", lambda: True)
-  resolved_py = _resolve_provider("whisper-python", "base")
-  assert resolved_py.provider_id == "whisper-python"
+def test_providers_registry_removed():
+  # Local python whisper providers are removed from backend
+  import sys
+  assert "app.features.transcription.providers" not in sys.modules
 
 
 def test_user_data_dir_resolution():
-  from app.core.settings import _get_user_data_dir, USER_DATA_DIR, WHISPER_MODELS_DIR, BUILTIN_MODELS_DIR, USER_DOCUMENTS_DIR, USER_TRANSCRIPTIONS_DIR
+  from app.core.settings import _get_user_data_dir, USER_DATA_DIR, USER_DOCUMENTS_DIR, USER_TRANSCRIPTIONS_DIR
 
   data_dir = _get_user_data_dir()
   assert data_dir is not None
   assert str(data_dir).endswith("data") or "local" in str(data_dir).lower() or "funcassist" in str(data_dir).lower()
-  assert WHISPER_MODELS_DIR == USER_DATA_DIR / "models" / "whisper"
-  assert BUILTIN_MODELS_DIR == USER_DATA_DIR / "models" / "builtin"
   assert USER_DOCUMENTS_DIR.name == "FuncAssist"
   assert USER_TRANSCRIPTIONS_DIR == USER_DOCUMENTS_DIR / "Transcripciones"
 
@@ -676,13 +615,9 @@ def test_active_jobs_and_transcriptions_persistence():
 
 @pytest.mark.asyncio
 async def test_index_refresher_tasks():
-  from app.core.index_refresher import (
-    _refresh_builtin_model_catalog,
-    _refresh_frontier_models_catalog,
-  )
+  from app.core.index_refresher import _refresh_frontier_models_catalog
 
   # Should run without throwing errors
-  await _refresh_builtin_model_catalog()
   await _refresh_frontier_models_catalog(force=True)
 
 
