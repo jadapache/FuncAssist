@@ -23,8 +23,9 @@ def get_builtin_cache_dir() -> Path:
 def sync_builtin_models_catalog() -> int:
     """Synchronizes built-in models catalog seed into the database repository."""
     try:
-        from app.db.repositories.builtin_model_repository import BuiltinModelRepository
-        repo = BuiltinModelRepository()
+        from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
+        repo = AIModelCatalogRepository()
+        repo.delete_free_models_sync()
         return repo.bulk_upsert_sync(DEFAULT_BUILTIN_MODELS)
     except Exception as exc:
         logger.debug(f"sync_builtin_models_catalog error: {exc}")
@@ -35,12 +36,15 @@ def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str,
     """Loads built-in models from the database repository with in-memory seed fallback."""
     items: List[Dict[str, Any]] = []
     try:
-        from app.db.repositories.builtin_model_repository import BuiltinModelRepository
-        repo = BuiltinModelRepository()
-        items = repo.list_sync(task_type=task_type)
+        from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
+        repo = AIModelCatalogRepository()
+        all_items = repo.list_sync(task_type=task_type)
+        items = [i for i in all_items if i.get("is_free") or i.get("provider") == "builtin"]
         if not items:
+            repo.delete_free_models_sync()
             repo.bulk_upsert_sync(DEFAULT_BUILTIN_MODELS)
-            items = repo.list_sync(task_type=task_type)
+            all_items = repo.list_sync(task_type=task_type)
+            items = [i for i in all_items if i.get("is_free") or i.get("provider") == "builtin"]
     except Exception as exc:
         logger.debug(f"Built-in models database fallback: {exc}")
 
