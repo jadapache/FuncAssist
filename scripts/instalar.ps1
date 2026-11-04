@@ -7,8 +7,8 @@ $ErrorActionPreference = 'Stop'
 function Resolve-SourceFile([string]$FileName) {
   $candidates = @(
     (Join-Path $PSScriptRoot $FileName),
-    (Join-Path $PSScriptRoot "..\" $FileName),
-    (Join-Path $PSScriptRoot "scripts\" $FileName)
+    (Join-Path $PSScriptRoot "..\$FileName"),
+    (Join-Path $PSScriptRoot "scripts\$FileName")
   )
   foreach ($candidate in $candidates) {
     if (Test-Path $candidate) {
@@ -20,7 +20,7 @@ function Resolve-SourceFile([string]$FileName) {
 
 function Copy-DeploymentFile([string]$SourcePath, [string]$TargetDir) {
   $targetPath = Join-Path $TargetDir (Split-Path $SourcePath -Leaf)
-  $resolvedTarget = (Resolve-Path $targetPath -ErrorAction SilentlyContinue)?.Path
+  $resolvedTarget = if (Test-Path $targetPath) { (Resolve-Path $targetPath).Path } else { $null }
   if ($SourcePath -ne $resolvedTarget) {
     Copy-Item $SourcePath $TargetDir -Force
   }
@@ -61,7 +61,9 @@ $updater = Join-Path $InstallDir 'actualizar.ps1'
 $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updater`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 3650)
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$runLevel = if ($isAdmin) { 'Highest' } else { 'Limited' }
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel $runLevel
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($trigger, $repeat) -Principal $principal -Force | Out-Null
 
 Write-Host "Tarea '$taskName' instalada. Las actualizaciones se comprobarán cada $IntervalMinutes minutos."
