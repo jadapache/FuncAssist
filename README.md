@@ -190,7 +190,7 @@ FuncAssist/
 
 ## 🔐 Seguridad y Almacenamiento Centralizado
 
-- **Base de Datos PostgreSQL**: Almacenamiento centralizado, relacional y transaccional mediante SQLAlchemy ORM (PostgreSQL)
+- **Base de Datos PostgreSQL + pgvector**: Almacenamiento centralizado, relacional, transaccional y vectorial mediante SQLAlchemy ORM (PostgreSQL 16 con pgvector)
 - **Secretos Cifrados**: Tokens y PATs encriptados con Fernet y persistidos de forma segura en PostgreSQL
 - **Jerarquía de Claves**: `keyring` → hardware fingerprint → `PMQA_SECRET_KEY`
 - **Desconexión Limpia**: Eliminación segura de credenciales en base de datos al desconectar servicios
