@@ -48,3 +48,31 @@ def test_cancel_active_run_via_api(test_client: TestClient) -> None:
         assert emitter.is_cancelled is True
     finally:
         run_registry.unregister(run_id)
+
+def test_cancel_active_run_via_session_api(test_client: TestClient) -> None:
+    run_id = "run-active-session-test"
+    conv_id = "conv-session-xyz"
+    emitter = AgentRunEmitter(run_id=run_id, conversation_id=conv_id)
+    run_registry.register(emitter)
+
+    try:
+        assert emitter.is_cancelled is False
+        response = test_client.post(f"/api/doc-agent/sessions/{conv_id}/cancel")
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+        assert emitter.is_cancelled is True
+    finally:
+        run_registry.unregister(run_id)
+
+
+def test_cancel_recently_terminated_run_returns_200(test_client: TestClient) -> None:
+    run_id = "run-recently-terminated"
+    emitter = AgentRunEmitter(run_id=run_id, conversation_id="conv-term")
+    run_registry.register(emitter)
+    run_registry.unregister(run_id)
+
+    # Within the 60s window, cancel should be idempotent and succeed
+    response = test_client.post(f"/api/doc-agent/runs/{run_id}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+

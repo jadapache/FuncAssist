@@ -27,10 +27,14 @@ const INITIAL_RUN_STATE: AgentRunState = {
 export function useAgentRun() {
   const [runState, setRunState] = useState<AgentRunState>(INITIAL_RUN_STATE)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const activeRunIdRef = useRef<string | null>(null)
+  const activeConvIdRef = useRef<string | null>(null)
 
   const resetRun = useCallback(() => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
+    activeRunIdRef.current = null
+    activeConvIdRef.current = null
     setRunState(INITIAL_RUN_STATE)
   }, [])
 
@@ -39,26 +43,23 @@ export function useAgentRun() {
   }, [])
 
   const cancelRun = useCallback(async () => {
-    const currentRunId = runState.runId
+    const currentRunId = activeRunIdRef.current || runState.runId
+    const currentConvId = activeConvIdRef.current || runState.conversationId
+
+    // Abort local streaming reader immediately for instant UI responsiveness
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+
     setRunState((prev) => ({
       ...prev,
       status: 'cancelled',
       activeStatusText: 'Cancelado por el usuario',
     }))
+
     if (currentRunId) {
-      try {
-        await docAgentApi.cancelRun(currentRunId)
-      } catch {
-        // Run already terminated on server
-      } finally {
-        abortControllerRef.current?.abort()
-        abortControllerRef.current = null
-      }
-    } else {
-      abortControllerRef.current?.abort()
-      abortControllerRef.current = null
+      await docAgentApi.cancelRun(currentRunId, currentConvId || undefined)
     }
-  }, [runState.runId])
+  }, [runState.runId, runState.conversationId])
 
   const executeRun = useCallback(
     async (
@@ -70,9 +71,14 @@ export function useAgentRun() {
       abortControllerRef.current = controller
 
       const generatedRunId = payload.run_id || `run-${crypto.randomUUID().slice(0, 8)}`
+      const targetConvId = payload.conversation_id || null
+      activeRunIdRef.current = generatedRunId
+      activeConvIdRef.current = targetConvId
+
       setRunState({
         ...INITIAL_RUN_STATE,
         runId: generatedRunId,
+        conversationId: targetConvId,
         status: 'running',
         activeStatusText: 'Iniciando agente...',
       })
@@ -148,6 +154,8 @@ export function useAgentRun() {
         }))
         throw err
       } finally {
+        activeRunIdRef.current = null
+        activeConvIdRef.current = null
         abortControllerRef.current = null
       }
     },

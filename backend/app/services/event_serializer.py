@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Dict, List, Optional
 from app.schemas.agent_events import (
     AgentEvent,
@@ -137,22 +138,39 @@ class RunRegistry:
 
     def __init__(self) -> None:
         self._active_runs: Dict[str, AgentRunEmitter] = {}
+        self._runs_by_conversation: Dict[str, AgentRunEmitter] = {}
+        self._recently_terminated: Dict[str, float] = {}
 
     def register(self, emitter: AgentRunEmitter) -> None:
         self._active_runs[emitter.run_id] = emitter
+        if emitter.conversation_id:
+            self._runs_by_conversation[emitter.conversation_id] = emitter
 
     def unregister(self, run_id: str) -> None:
-        self._active_runs.pop(run_id, None)
+        emitter = self._active_runs.pop(run_id, None)
+        if emitter:
+            if emitter.conversation_id:
+                self._runs_by_conversation.pop(emitter.conversation_id, None)
+            now = time.time()
+            self._recently_terminated[run_id] = now
+            if emitter.conversation_id:
+                self._recently_terminated[emitter.conversation_id] = now
+            cutoff = now - 60.0
+            expired = [k for k, t in self._recently_terminated.items() if t < cutoff]
+            for k in expired:
+                self._recently_terminated.pop(k, None)
 
-    def get(self, run_id: str) -> Optional[AgentRunEmitter]:
-        return self._active_runs.get(run_id)
+    def get(self, identifier: str) -> Optional[AgentRunEmitter]:
+        return self._active_runs.get(identifier) or self._runs_by_conversation.get(identifier)
 
-    def cancel_run(self, run_id: str, reason: str = "User cancelled run") -> bool:
-        emitter = self.get(run_id)
-        if not emitter:
-            return False
-        emitter.request_cancellation(reason)
-        return True
+    def cancel_run(self, identifier: str, reason: str = "User cancelled run") -> bool:
+        emitter = self.get(identifier)
+        if emitter:
+            emitter.request_cancellation(reason)
+            return True
+        if identifier in self._recently_terminated:
+            return True
+        return False
 
 
 run_registry = RunRegistry()

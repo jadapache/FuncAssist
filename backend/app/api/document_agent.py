@@ -827,6 +827,14 @@ async def cancel_agent_run(run_id: str):
     return {"status": "cancelled", "run_id": run_id}
 
 
+@router.post("/sessions/{session_id}/cancel")
+async def cancel_session_run(session_id: str):
+    if not run_registry.cancel_run(session_id, reason="User cancelled run for session"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' has no active run")
+    return {"status": "cancelled", "session_id": session_id}
+
+
 @router.post("/export-docx")
 def export_native_docx(req: ExportDocxRequest):
     """Generates and downloads a native Microsoft Word .docx binary file."""
