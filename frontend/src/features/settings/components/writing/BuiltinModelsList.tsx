@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react'
-import { webLLMProvider } from '../../../ai/providers/WebLLMProvider'
 import {
   WEBLLM_MODELS_CATALOG,
   detectHardwareProfile,
@@ -21,6 +20,15 @@ import type {
   WebLLMModelDefinition,
 } from '../../../ai/types/webLlm'
 import { formatProgressStage } from '../../../../utils/formatProgressStage'
+
+let webLLMProviderPromise: Promise<Awaited<typeof import('../../../ai/providers/WebLLMProvider')>['webLLMProvider']> | null = null
+
+async function getWebLLMProvider() {
+  if (!webLLMProviderPromise) {
+    webLLMProviderPromise = import('../../../ai/providers/WebLLMProvider').then((module) => module.webLLMProvider)
+  }
+  return webLLMProviderPromise
+}
 
 
 export interface BuiltinModelsListProps {
@@ -42,6 +50,7 @@ export const BuiltinModelsList = ({
   const refreshCacheStatus = useCallback(async () => {
     setIsRefreshing(true)
     try {
+      const webLLMProvider = await getWebLLMProvider()
       const nextMap: Record<string, boolean> = {}
       for (const m of WEBLLM_MODELS_CATALOG) {
         nextMap[m.id] = await webLLMProvider.isModelCached(m.id)
@@ -75,6 +84,7 @@ export const BuiltinModelsList = ({
     }))
 
     try {
+      const webLLMProvider = await getWebLLMProvider()
       await webLLMProvider.initModel(modelDef.id, (report) => {
         setProgressState((prev) => ({
           ...prev,
@@ -93,6 +103,7 @@ export const BuiltinModelsList = ({
   const handleDelete = async (modelId: string) => {
     setDeletingId(modelId)
     try {
+      const webLLMProvider = await getWebLLMProvider()
       await webLLMProvider.deleteCachedModel(modelId)
       await refreshCacheStatus()
     } catch (err) {
