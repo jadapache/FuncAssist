@@ -193,3 +193,12 @@ class AIModelCatalogRepository:
         count += 1
       db.commit()
       return count
+
+  def replace_external_sync(self, models: List[dict[str, Any]]) -> int:
+    """Replace the externally managed catalog while preserving browser seeds."""
+    with get_sync_db() as db:
+      db.execute(delete(AIModelCatalogModel).where(
+        AIModelCatalogModel.provider.notin_(["webllm", "browser_asr"])
+      ))
+      db.commit()
+    return self.bulk_upsert_sync(models)

@@ -26,6 +26,8 @@ export interface AgenticPromptPayload {
   template_id?: string
   run_id?: string
   conversation_id?: string
+  provider?: string
+  model?: string
 }
 
 
@@ -122,6 +124,8 @@ export const docAgentApi = {
         templateId: payload.template_id,
         runId: payload.run_id,
         conversationId: payload.conversation_id,
+        provider: payload.provider,
+        model: payload.model,
       }),
     })
 

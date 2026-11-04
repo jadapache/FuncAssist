@@ -7,10 +7,11 @@ import {
   RefreshCw,
   Zap,
 } from 'lucide-react'
-import type { AISettings, LocalBuiltinModelInfo, ModelCatalogItem } from '../../../api/client'
+import type { AISettings, ModelCatalogItem } from '../../../api/client'
 import { BuiltinModelsList } from './writing/BuiltinModelsList'
 import { CloudModelSelector } from './writing/CloudModelSelector'
 import { OllamaManager } from './writing/OllamaManager'
+import { DEFAULT_WEBLLM_MODEL } from '../../ai/catalogs/clientCatalog'
 
 export type WritingModelSectionProps = {
   ai: AISettings | null
@@ -28,18 +29,6 @@ export type WritingModelSectionProps = {
   ollamaModels: string[]
   fetchingModels: boolean
   fetchOllamaModels: (url?: string, isUserAction?: boolean) => Promise<void>
-  isPulling: boolean
-  pullingModelTag: string | null
-  pullStatusMsg: string | null
-  handlePullModel: (tag: string) => Promise<void>
-  localBuiltinModels?: LocalBuiltinModelInfo[]
-  downloadingBuiltinId?: string | null
-  deletingBuiltinId?: string | null
-  fetchingBuiltinModels?: boolean
-  fetchLocalBuiltinModels?: () => Promise<void>
-  handleDownloadBuiltinModel?: (modelId: string) => Promise<void>
-  handleDeleteBuiltinModel?: (modelId: string) => Promise<void>
-  downloadTasks?: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string }>
   catalogModels: ModelCatalogItem[]
   groqKey: string
   setGroqKey: (k: string) => void
@@ -73,10 +62,6 @@ export const WritingModelSection = ({
   ollamaModels,
   fetchingModels,
   fetchOllamaModels,
-  isPulling,
-  pullingModelTag,
-  pullStatusMsg,
-  handlePullModel,
   catalogModels,
   groqKey,
   setGroqKey,
@@ -93,6 +78,9 @@ export const WritingModelSection = ({
   handleAiSave,
   handleTestConnection,
 }: WritingModelSectionProps) => {
+  const isBrowserMode = provider === 'local' || provider === 'builtin' || provider === 'webllm'
+  const isOllamaRemote = provider === 'ollama_remote' || provider === 'ollama'
+
   return (
     <form
       onSubmit={(e) => void handleAiSave(e)}
@@ -109,7 +97,7 @@ export const WritingModelSection = ({
           <div>
             <h3 className="text-lg font-bold text-slate-900">Modelo de Redacción y Chat</h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Modelos de lenguaje optimizados para redacción de historias de usuario, criterios de aceptación Gherkin y chat interactivo.
+              Modelos de lenguaje ejecutados en tu navegador o mediante APIs externas configuradas.
             </p>
           </div>
         </div>
@@ -130,25 +118,20 @@ export const WritingModelSection = ({
 
       {isWritingOpen && (
         <>
-          {/* Selector de Proveedor / Tipo de Modelo */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-800 block">
               Proveedor del Modelo de Inferencia
             </label>
 
             <select
-              value={provider === 'builtin' ? 'local' : provider}
+              value={isBrowserMode ? 'local' : isOllamaRemote ? 'ollama_remote' : provider}
               onChange={(e) => {
                 const newProv = e.target.value
                 setProvider(newProv)
-                if (newProv === 'local' || newProv === 'builtin') {
-                  setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
-                } else if (newProv === 'ollama') {
-                  if (ollamaModels.length > 0) {
-                    setModel(ollamaModels[0])
-                  } else {
-                    setModel('gemma3:1b')
-                  }
+                if (newProv === 'local') {
+                  setModel(DEFAULT_WEBLLM_MODEL)
+                } else if (newProv === 'ollama_remote') {
+                  setModel(ollamaModels.length > 0 ? ollamaModels[0] : 'qwen2.5:2b')
                   void fetchOllamaModels(undefined, false)
                 } else if (newProv === 'groq') {
                   setModel('llama-3.3-70b-versatile')
@@ -162,26 +145,23 @@ export const WritingModelSection = ({
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
             >
-              <option value="local">IA Integrada (Local)</option>
-              <option value="ollama">Ollama (Servidor Local / Remoto)</option>
+              <option value="local">En este navegador (WebLLM / WebGPU)</option>
+              <option value="ollama_remote">Ollama Remoto (HTTPS externo)</option>
               <option value="groq">Groq (API)</option>
-              <option value="gemini">Google (API)</option>
+              <option value="gemini">Google Gemini (API)</option>
               <option value="openai">OpenAI (API)</option>
               <option value="claude">Claude (API)</option>
             </select>
           </div>
 
-          {/* CASO 1: IA INTEGRADA LOCAL */}
-          {(provider === 'local' || provider === 'builtin') && (
+          {isBrowserMode && (
             <BuiltinModelsList
               model={model}
               setModel={setModel}
-              initialCatalogModels={catalogModels}
             />
           )}
 
-          {/* CASO 2: PROVEEDOR OLLAMA */}
-          {provider === 'ollama' && (
+          {isOllamaRemote && (
             <OllamaManager
               model={model}
               setModel={setModel}
@@ -193,15 +173,10 @@ export const WritingModelSection = ({
               ollamaModels={ollamaModels}
               fetchingModels={fetchingModels}
               fetchOllamaModels={fetchOllamaModels}
-              isPulling={isPulling}
-              pullingModelTag={pullingModelTag}
-              pullStatusMsg={pullStatusMsg}
-              handlePullModel={handlePullModel}
             />
           )}
 
-          {/* CASO 3: PROVEEDORES CLOUD (GROQ, GEMINI, OPENAI, CLAUDE) */}
-          {['groq', 'gemini', 'openai', 'claude'].includes(provider) && (
+          {!isBrowserMode && !isOllamaRemote && (
             <CloudModelSelector
               provider={provider}
               model={model}
@@ -221,16 +196,19 @@ export const WritingModelSection = ({
             />
           )}
 
-          {/* Botones Probar Conexión y Guardar */}
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
               disabled={testingConnection || savingAi}
               onClick={() => void handleTestConnection()}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium px-5 py-2.5 shadow-sm transition text-sm disabled:opacity-60 cursor-pointer"
+              className="btn btn-secondary text-xs px-4 py-2 inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
-              {testingConnection ? <RefreshCw className="h-4 w-4 animate-spin text-blue-600" /> : <Zap className="h-4 w-4 text-amber-500" />}
-              <span>{testingConnection ? 'Probando Conexión…' : 'Probar Conexión'}</span>
+              {testingConnection ? (
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Zap className="h-3.5 w-3.5 text-amber-500" />
+              )}
+              <span>Probar Conexión</span>
             </button>
 
             <button
@@ -239,7 +217,7 @@ export const WritingModelSection = ({
               className="bg-[#002777] hover:bg-[#001f5f] text-white font-bold px-6 py-2.5 rounded-xl shadow-xs transition flex items-center gap-2 cursor-pointer text-sm disabled:opacity-50"
             >
               {savingAi ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              <span>Guardar Modelo de Redacción</span>
+              <span>Guardar Configuración</span>
             </button>
           </div>
         </>
@@ -247,4 +225,3 @@ export const WritingModelSection = ({
     </form>
   )
 }
-

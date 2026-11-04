@@ -63,7 +63,9 @@ def test_provider_registry():
     assert find_provider_spec("groq").litellm_prefix == "groq"
     assert find_provider_spec("anthropic").id == "claude"
     assert find_provider_spec("google").id == "gemini"
-    assert find_provider_spec("local").id == "ollama"
+    assert find_provider_spec("ollama_remote").id == "ollama_remote"
+    assert find_provider_spec("ollama").id == "ollama_remote"
+    assert find_provider_spec("local") is None
     assert find_provider_spec("builtin") is None
     assert find_provider_spec("unknown_xyz") is None
 
@@ -74,14 +76,17 @@ def test_resolve_provider_with_registry():
     assert p_groq.id == "groq"
     assert p_groq._format_model_name("llama-3.3-70b-versatile") == "groq/llama-3.3-70b-versatile"
 
-    p_ollama = resolve_provider("ollama", "llama3.2", base_url="http://localhost:11434")
-    assert p_ollama.id == "ollama"
+    p_ollama = resolve_provider("ollama_remote", "llama3.2", base_url="https://ollama.mycorp.com")
+    assert p_ollama.id == "ollama_remote"
     assert p_ollama._format_model_name("llama3.2") == "ollama_chat/llama3.2"
+
+    with pytest.raises(ValueError, match="El endpoint remoto debe utilizar protocolo HTTPS"):
+        resolve_provider("ollama", "llama3.2", base_url="http://localhost:11434")
 
 
 def test_resolve_model_max_tokens():
     from app.ai.providers.registry import resolve_model_max_tokens
-    # Qwen on Groq has 950 limit defined in catalog
+    # Limits are supplied by the persisted catalog after frontier synchronization.
     assert resolve_model_max_tokens("groq", "qwen/qwen3.8-27b", 4096) == 950
     # Small requested max_tokens is preserved
     assert resolve_model_max_tokens("groq", "qwen/qwen3.8-27b", 100) == 100

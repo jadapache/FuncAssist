@@ -1,4 +1,7 @@
-import { api, type ModelCatalogItem } from '../../../api/client'
+import {
+  CLIENT_WEBLLM_MODELS,
+  findClientWebLLMModel,
+} from '../catalogs/clientCatalog'
 import type {
   HardwareProfile,
   ModelEvaluation,
@@ -6,14 +9,12 @@ import type {
   WebLLMModelDefinition,
 } from '../types/webLlm'
 
-let cachedModels: WebLLMModelDefinition[] = []
-
 export function getCachedWebLLMModels(): WebLLMModelDefinition[] {
-  return cachedModels
+  return [...CLIENT_WEBLLM_MODELS]
 }
 
 export function findWebLLMModel(modelId: string): WebLLMModelDefinition | undefined {
-  return cachedModels.find((item) => item.id === modelId)
+  return findClientWebLLMModel(modelId)
 }
 
 interface NavigatorWithMemory extends Navigator {
@@ -30,21 +31,22 @@ function resolveHardwareTier(memoryGB: number, hasWebGPU: boolean): 'low' | 'med
   return 'medium'
 }
 
+function buildFallbackHardwareProfile(nav: NavigatorWithMemory | null, name: string): HardwareProfile {
+  return {
+    hasWebGPU: false,
+    hasShaderF16: false,
+    adapterName: name,
+    deviceMemoryGB: nav?.deviceMemory ?? 4,
+    hardwareConcurrency: nav?.hardwareConcurrency ?? 4,
+    maxBufferSizeMB: 0,
+    tier: 'low',
+  }
+}
+
 export async function detectHardwareProfile(): Promise<HardwareProfile> {
   const nav = typeof navigator !== 'undefined' ? (navigator as NavigatorWithMemory) : null
-  const deviceMemoryGB = nav?.deviceMemory ?? 4
-  const hardwareConcurrency = nav?.hardwareConcurrency ?? 4
-
   if (!nav || !('gpu' in nav) || !nav.gpu) {
-    return {
-      hasWebGPU: false,
-      hasShaderF16: false,
-      adapterName: 'No WebGPU Support',
-      deviceMemoryGB,
-      hardwareConcurrency,
-      maxBufferSizeMB: 0,
-      tier: 'low',
-    }
+    return buildFallbackHardwareProfile(nav, 'No WebGPU Support')
   }
 
   try {
@@ -52,15 +54,7 @@ export async function detectHardwareProfile(): Promise<HardwareProfile> {
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500))
     const adapter = await Promise.race([adapterPromise, timeoutPromise])
     if (!adapter) {
-      return {
-        hasWebGPU: false,
-        hasShaderF16: false,
-        adapterName: 'WebGPU Adapter Unavailable',
-        deviceMemoryGB,
-        hardwareConcurrency,
-        maxBufferSizeMB: 0,
-        tier: 'low',
-      }
+      return buildFallbackHardwareProfile(nav, 'WebGPU Adapter Unavailable')
     }
 
     const gpuAdapter = adapter as GPUAdapter & {
@@ -73,27 +67,19 @@ export async function detectHardwareProfile(): Promise<HardwareProfile> {
       ? await gpuAdapter.requestAdapterInfo().catch(() => null)
       : gpuAdapter.info ?? null
     const adapterName = adapterInfo?.description || adapterInfo?.vendor || 'WebGPU Device'
-    const tier = resolveHardwareTier(deviceMemoryGB, true)
+    const tier = resolveHardwareTier(nav.deviceMemory ?? 4, true)
 
     return {
       hasWebGPU: true,
       hasShaderF16,
       adapterName,
-      deviceMemoryGB,
-      hardwareConcurrency,
+      deviceMemoryGB: nav.deviceMemory ?? 4,
+      hardwareConcurrency: nav.hardwareConcurrency ?? 4,
       maxBufferSizeMB,
       tier,
     }
   } catch {
-    return {
-      hasWebGPU: false,
-      hasShaderF16: false,
-      adapterName: 'Error detecting WebGPU',
-      deviceMemoryGB,
-      hardwareConcurrency,
-      maxBufferSizeMB: 0,
-      tier: 'low',
-    }
+    return buildFallbackHardwareProfile(nav, 'Error detecting WebGPU')
   }
 }
 
@@ -108,15 +94,6 @@ export function evaluateModel(
       isCompatible: false,
       isRecommended: false,
       reason: 'El navegador o dispositivo no cuenta con aceleración WebGPU activa.',
-    }
-  }
-
-  if (false && model.requiredFeatures?.includes('shader-f16') && !profile.hasShaderF16) {
-    return {
-      model,
-      isCompatible: false,
-      isRecommended: false,
-      reason: 'El adaptador gráfico no soporta shader-f16 requerido por este modelo.',
     }
   }
 
@@ -167,33 +144,4 @@ export function selectOptimalModel(
   }
 
   return models[0]
-}
-
-export async function loadWebLLMModelsFromBackend(): Promise<WebLLMModelDefinition[]> {
-  try {
-    const res = await api.getModelCatalog(false, 'local', 'chat_writing')
-    if (res?.models && res.models.length > 0) {
-      cachedModels = res.models.map((m: ModelCatalogItem) => {
-        const vramNum = typeof m.vram_required_mb === 'number' ? m.vram_required_mb : 1630
-        return {
-          id: m.id,
-          name: m.name,
-          tag: m.raw_id || m.id,
-          description: m.description || '',
-          downloadSize: m.size || '~950 MB',
-          vramRequiredMB: vramNum,
-          vramFormatted:
-            m.vram_formatted ||
-            (vramNum < 1000 ? `~${vramNum} MB VRAM` : `~${(vramNum / 1024).toFixed(1)} GB VRAM`),
-          contextWindow: m.context_window || '32.768 tokens',
-          tier: (m.tier as 'speed' | 'balanced' | 'quality') || 'balanced',
-          requiredFeatures: m.required_features || [],
-        }
-      })
-      return cachedModels
-    }
-  } catch {
-    // Return cached models if offline or network error occurs
-  }
-  return cachedModels
 }

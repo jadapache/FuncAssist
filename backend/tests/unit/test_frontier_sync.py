@@ -25,19 +25,15 @@ async def test_fetch_litellm_cost_map_offline_fallback():
 
 
 @pytest.mark.asyncio
-async def test_sync_frontier_models_catalog_execution(tmp_path):
+async def test_sync_frontier_models_catalog_execution():
     """Verify sync_frontier_models_catalog updates and writes valid models with pricing and context."""
-    test_catalog_path = tmp_path / "models_catalog.json"
+    result = await sync_frontier_models_catalog(force_remote=False)
+    assert result["status"] == "success"
+    assert result["models_count"] >= 15
 
-    with patch("app.ai.frontier_sync.CATALOG_FILE", test_catalog_path):
-        result = await sync_frontier_models_catalog(force_remote=False)
-        assert result["status"] == "success"
-        assert result["models_count"] >= 15
-        assert test_catalog_path.exists()
-
-        status = get_frontier_sync_status()
-        assert status["status"] == "success"
-        assert status["models_count"] == result["models_count"]
+    status = get_frontier_sync_status()
+    assert status["status"] == "success"
+    assert status["models_count"] == result["models_count"]
 
 
 def test_sync_api_endpoints():

@@ -8,6 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+FORBIDDEN_BACKEND_PROVIDERS = frozenset([
+    "builtin",
+    "local",
+    "faster-whisper",
+    "moonshine",
+    "onnx",
+])
+
 
 @dataclass(frozen=True)
 class ProviderSpec:
@@ -59,14 +67,14 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     default_model="gpt-4o-mini",
     default_max_tokens=16384,
   ),
-  "ollama": ProviderSpec(
-    id="ollama",
-    name="Ollama",
+  "ollama_remote": ProviderSpec(
+    id="ollama_remote",
+    name="Ollama Remote",
     litellm_prefix="ollama_chat",
     default_base_url=None,
     default_model="qwen2.5:2b",
-    is_local=True,
-    aliases=("local",),
+    is_local=False,
+    aliases=("ollama",),
   ),
   "openrouter": ProviderSpec(
     id="openrouter",
@@ -86,9 +94,8 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
 
 
 def find_provider_spec(identifier: str) -> ProviderSpec | None:
-  """Lookup provider spec by id or alias."""
   clean = (identifier or "").strip().lower()
-  if not clean:
+  if not clean or clean in FORBIDDEN_BACKEND_PROVIDERS:
     return None
 
   if clean in PROVIDER_REGISTRY:
@@ -102,7 +109,6 @@ def find_provider_spec(identifier: str) -> ProviderSpec | None:
 
 
 def register_provider_spec(spec: ProviderSpec) -> None:
-  """Register or override a provider spec dynamically."""
   PROVIDER_REGISTRY[spec.id] = spec
 
 
@@ -112,12 +118,10 @@ def resolve_model_max_tokens(
   requested_max: int | None = None,
   is_stream: bool = False,
 ) -> int:
-  """Resolve effective max_tokens respecting provider and catalog-defined model ceilings."""
   prov_clean = (provider_id or "").strip().lower()
   spec = find_provider_spec(prov_clean)
   model_clean = (model_name or (spec.default_model if spec else "")).strip()
 
-  # Check catalog metadata for model limit
   model_limit = None
   try:
     from app.ai.catalog import load_local_catalog

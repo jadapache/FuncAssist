@@ -200,9 +200,10 @@ export function useTranscriptionActions(
       if (onRetranscribe) {
         await onRetranscribe(transcriptionId, meetingTitle)
       } else {
-        await transcriptionApi.retranscribe(transcriptionId, {
+        await transcriptionApi.startTranscription(transcriptionId, {
           mode: 'auto',
           enable_diarization: true,
+          transcription_id: transcriptionId,
         })
         toast.info('Regeneración de transcripción iniciada.')
         onRefreshData?.()

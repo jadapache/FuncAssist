@@ -302,6 +302,8 @@ class AgenticChatConfig:
     images: list[dict[str, str]] | None = None
     attached_docs: list[dict[str, Any]] | None = None
     user_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
 
 
 async def _build_chat_system_prompt(intent: str, feature: str | None = None) -> str:
@@ -385,7 +387,7 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
     user_message = _assemble_multimodal_message(full_user_text, cfg.images)
     messages = [AIMessage(role="system", content=sys_prompt), user_message]
 
-    provider = resolve_provider(user_id=cfg.user_id)
+    provider = resolve_provider(provider_name=cfg.provider, model_name=cfg.model, user_id=cfg.user_id)
     accumulated_text: list[str] = []
 
     async for chunk in provider.complete_stream(messages, max_tokens=8192):

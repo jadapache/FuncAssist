@@ -28,10 +28,6 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
     ollamaModels,
     fetchingModels,
     fetchOllamaModels,
-    isPulling,
-    pullingModelTag,
-    pullStatusMsg,
-    handlePullModel,
     catalogModels,
     catalogError,
     loadDynamicCatalog,
@@ -62,29 +58,14 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
     isVoiceAudioOpen,
     setIsVoiceAudioOpen,
     handleVoiceAudioSave,
-    localWhisperModels,
-    downloadingWhisperId,
-    deletingWhisperId,
-    fetchingWhisperModels,
-    fetchLocalWhisperModels,
-    handleDownloadWhisperModel,
-    handleDeleteWhisperModel,
-    localBuiltinModels,
-    downloadingBuiltinId,
-    deletingBuiltinId,
-    fetchingBuiltinModels,
-    fetchLocalBuiltinModels,
-    handleDownloadBuiltinModel,
-    handleDeleteBuiltinModel,
-    downloadTasks,
   } = aiManager
 
-  const onWritingSave = async (e?: FormEvent) => {
+  const wrappedHandleAiSave = async (e?: FormEvent) => {
     await handleAiSave(e)
     onSaved?.()
   }
 
-  const onVoiceSave = async (e?: FormEvent) => {
+  const wrappedHandleVoiceAudioSave = async (e?: FormEvent) => {
     await handleVoiceAudioSave(e)
     onSaved?.()
   }
@@ -95,7 +76,13 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
 
   return (
     <div className="space-y-6">
-      {/* Alerta de conexión si el catálogo externo falló */}
+      <div className="space-y-1">
+        <h2 className="text-xl font-bold text-slate-900">Configuración del Modelo de IA</h2>
+        <p className="text-sm text-slate-500">
+          Configura los modelos de IA para chat, redacción y transcripción (en este navegador o APIs externas).
+        </p>
+      </div>
+
       {catalogError && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2.5">
@@ -110,7 +97,7 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
           <button
             type="button"
             onClick={() => void loadDynamicCatalog(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold text-xs transition cursor-pointer shrink-0"
+            className="btn btn-secondary text-xs py-1.5 px-3 shrink-0 inline-flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             <span>Reintentar</span>
@@ -118,7 +105,6 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
         </div>
       )}
 
-      {/* Panel 1: Modelo de Redacción y Chat */}
       <WritingModelSection
         ai={ai}
         provider={provider}
@@ -135,18 +121,6 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
         ollamaModels={ollamaModels}
         fetchingModels={fetchingModels}
         fetchOllamaModels={fetchOllamaModels}
-        isPulling={isPulling}
-        pullingModelTag={pullingModelTag}
-        pullStatusMsg={pullStatusMsg}
-        handlePullModel={handlePullModel}
-        localBuiltinModels={localBuiltinModels}
-        downloadingBuiltinId={downloadingBuiltinId}
-        deletingBuiltinId={deletingBuiltinId}
-        fetchingBuiltinModels={fetchingBuiltinModels}
-        fetchLocalBuiltinModels={fetchLocalBuiltinModels}
-        handleDownloadBuiltinModel={handleDownloadBuiltinModel}
-        handleDeleteBuiltinModel={handleDeleteBuiltinModel}
-        downloadTasks={downloadTasks}
         catalogModels={catalogModels}
         groqKey={groqKey}
         setGroqKey={setGroqKey}
@@ -160,11 +134,10 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
         setShowKey={setShowKey}
         savingAi={savingAi}
         testingConnection={testingConnection}
-        handleAiSave={onWritingSave}
+        handleAiSave={wrappedHandleAiSave}
         handleTestConnection={handleTestConnection}
       />
 
-      {/* Panel 2: Modelo de Transcripción y Comandos de Voz */}
       <VoiceAudioSection
         ai={ai}
         voiceAudioProvider={voiceAudioProvider}
@@ -181,15 +154,7 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
         showTranscriptionKey={showTranscriptionKey}
         setShowTranscriptionKey={setShowTranscriptionKey}
         savingAi={savingAi}
-        handleVoiceAudioSave={onVoiceSave}
-        localWhisperModels={localWhisperModels}
-        downloadingWhisperId={downloadingWhisperId}
-        deletingWhisperId={deletingWhisperId}
-        fetchingWhisperModels={fetchingWhisperModels}
-        fetchLocalWhisperModels={fetchLocalWhisperModels}
-        handleDownloadWhisperModel={handleDownloadWhisperModel}
-        handleDeleteWhisperModel={handleDeleteWhisperModel}
-        downloadTasks={downloadTasks}
+        handleVoiceAudioSave={wrappedHandleVoiceAudioSave}
       />
     </div>
   )

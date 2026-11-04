@@ -22,10 +22,6 @@ export const AiModelsPanel = () => {
     ollamaModels,
     fetchingModels,
     fetchOllamaModels,
-    isPulling,
-    pullingModelTag,
-    pullStatusMsg,
-    handlePullModel,
     catalogModels,
     catalogError,
     loadDynamicCatalog,
@@ -56,23 +52,7 @@ export const AiModelsPanel = () => {
     isVoiceAudioOpen,
     setIsVoiceAudioOpen,
     handleVoiceAudioSave,
-    localWhisperModels,
-    downloadingWhisperId,
-    deletingWhisperId,
-    fetchingWhisperModels,
-    fetchLocalWhisperModels,
-    handleDownloadWhisperModel,
-    handleDeleteWhisperModel,
-    localBuiltinModels,
-    downloadingBuiltinId,
-    deletingBuiltinId,
-    fetchingBuiltinModels,
-    fetchLocalBuiltinModels,
-    handleDownloadBuiltinModel,
-    handleDeleteBuiltinModel,
-    downloadTasks,
   } = useAiSettingsManager()
-
 
   if (loadingAi) {
     return <AiModelsSkeleton />
@@ -83,11 +63,10 @@ export const AiModelsPanel = () => {
       <div className="space-y-1">
         <h2 className="text-xl font-bold text-slate-900">Configuración del Modelo de IA</h2>
         <p className="text-sm text-slate-500">
-          Configura el modelo de IA utilizado para la generación de resúmenes, análisis de QA, transcripción de reuniones y comandos de voz.
+          Configura los modelos de IA para chat, redacción y transcripción (en este navegador o APIs externas).
         </p>
       </div>
 
-      {/* Alerta de conexión si el catálogo externo falló */}
       {catalogError && (
         <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-2.5">
@@ -102,7 +81,7 @@ export const AiModelsPanel = () => {
           <button
             type="button"
             onClick={() => void loadDynamicCatalog(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold text-xs transition cursor-pointer shrink-0"
+            className="btn btn-secondary text-xs py-1.5 px-3 shrink-0 inline-flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             <span>Reintentar</span>
@@ -110,7 +89,6 @@ export const AiModelsPanel = () => {
         </div>
       )}
 
-      {/* Panel 1: Modelo de Redacción y Chat */}
       <WritingModelSection
         ai={ai}
         provider={provider}
@@ -127,18 +105,6 @@ export const AiModelsPanel = () => {
         ollamaModels={ollamaModels}
         fetchingModels={fetchingModels}
         fetchOllamaModels={fetchOllamaModels}
-        isPulling={isPulling}
-        pullingModelTag={pullingModelTag}
-        pullStatusMsg={pullStatusMsg}
-        handlePullModel={handlePullModel}
-        localBuiltinModels={localBuiltinModels}
-        downloadingBuiltinId={downloadingBuiltinId}
-        deletingBuiltinId={deletingBuiltinId}
-        fetchingBuiltinModels={fetchingBuiltinModels}
-        fetchLocalBuiltinModels={fetchLocalBuiltinModels}
-        handleDownloadBuiltinModel={handleDownloadBuiltinModel}
-        handleDeleteBuiltinModel={handleDeleteBuiltinModel}
-        downloadTasks={downloadTasks}
         catalogModels={catalogModels}
         groqKey={groqKey}
         setGroqKey={setGroqKey}
@@ -156,7 +122,6 @@ export const AiModelsPanel = () => {
         handleTestConnection={handleTestConnection}
       />
 
-      {/* Panel 2: Modelo de Transcripción y Comandos de Voz */}
       <VoiceAudioSection
         ai={ai}
         voiceAudioProvider={voiceAudioProvider}
@@ -174,16 +139,7 @@ export const AiModelsPanel = () => {
         setShowTranscriptionKey={setShowTranscriptionKey}
         savingAi={savingAi}
         handleVoiceAudioSave={handleVoiceAudioSave}
-        localWhisperModels={localWhisperModels}
-        downloadingWhisperId={downloadingWhisperId}
-        deletingWhisperId={deletingWhisperId}
-        fetchingWhisperModels={fetchingWhisperModels}
-        fetchLocalWhisperModels={fetchLocalWhisperModels}
-        handleDownloadWhisperModel={handleDownloadWhisperModel}
-        handleDeleteWhisperModel={handleDeleteWhisperModel}
-        downloadTasks={downloadTasks}
       />
     </div>
   )
 }
-

@@ -62,7 +62,7 @@ Guía completa del diseño, patrones y decisiones arquitectónicas de FuncAssist
         ▼          ▼          ▼          ▼
     ┌────────┐ ┌────────┐ ┌──────────┐ ┌─────────┐
     │ Jira   │ │ GitHub │ │ GitLab   │ │ Ollama  │
-    │ OAuth  │ │ PAT    │ │ PAT      │ │ Local   │
+    │ OAuth  │ │ PAT    │ │ PAT      │ │ Remote  │
     │ Sync   │ │        │ │          │ │ OpenAI  │
     └────────┘ └────────┘ └──────────┘ │ Anthropic
                                         └─────────┘
@@ -443,3 +443,21 @@ ArtifactsStudio (panel derecho)
 ---
 
 ¡Para más detalles, consulta [BACKEND.md](./BACKEND.md) y [FRONTEND.md](./FRONTEND.md)!
+
+---
+
+## AI Architecture and Model Execution Boundary
+
+FuncAssist operates under a strict **Client-First** paradigm for local AI capabilities:
+
+1. **Client-Side In-Browser Execution (Zero Backend Weights):**
+   - **Local Chat / Writing:** Executed entirely in the user's browser using `@mlc-ai/web-llm` powered by WebGPU. Model weights are cached directly in the browser cache (Cache API / Origin Private File System).
+   - **Local Speech Recognition (ASR):** Executed in the browser via a dedicated Web Worker running `@huggingface/transformers` (Whisper ONNX runtime via WebGPU/WASM).
+   - The backend server does not download, store, or execute GGUF, Whisper, or ONNX models.
+
+2. **External Cloud Providers:**
+   - External APIs (OpenAI, Anthropic Claude, Google Gemini, Groq Cloud) are routed through the backend via LiteLLM using securely stored API keys.
+   - **Ollama Remote:** Strictly treated as an external remote API over public HTTPS. Loopback addresses (`127.0.0.1`, `localhost`, `::1`) and private IP ranges are rejected by both frontend and backend validators.
+
+3. **Legacy Storage Cleanup:**
+   - Legacy directories on disk (`data/models/whisper`, `data/models/builtin`, `~/.cache/whisper`) can be safely deleted as the server has zero local inference runtime dependencies.

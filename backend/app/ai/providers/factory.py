@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Optional
 
+from app.ai.endpoint_security import validate_remote_endpoint_url
 from app.ai.providers.base import AIProvider
 from app.ai.providers.implementations import LiteLLMProvider
-from app.ai.providers.registry import find_provider_spec
+from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS, find_provider_spec
 from app.core.storage import load_app_settings, load_user_ai_settings
 
 
@@ -40,23 +41,35 @@ def resolve_provider(
 ) -> AIProvider:
   config = get_ai_settings(user_id=user_id)
   target_name = (provider_name or config.get("provider") or "").lower()
-  spec = find_provider_spec(target_name)
 
+  if target_name in FORBIDDEN_BACKEND_PROVIDERS:
+    raise ValueError(
+      f"El proveedor '{target_name}' no se ejecuta en el backend. "
+      "La inferencia local se ejecuta exclusivamente en el navegador mediante WebLLM."
+    )
+
+  chosen_model = model_name or config.get("model") or ""
+  if chosen_model.lower().endswith(".gguf"):
+    raise ValueError("Modelos GGUF no están admitidos en el backend.")
+
+  spec = find_provider_spec(target_name)
   if not spec:
     raise ValueError(
       f"No valid AI provider found for '{target_name}'. "
-      "Configure provider in Settings (groq | gemini | claude | openai | ollama | openrouter | deepseek)."
+      "Configure provider in Settings (groq | gemini | claude | openai | ollama_remote | openrouter | deepseek)."
     )
 
-  chosen_model = model_name or config.get("model") or spec.default_model
+  chosen_model = chosen_model or spec.default_model
 
-  if spec.is_local:
-    target_base_url = base_url or config.get("ollama_base_url") or spec.default_base_url
+  if spec.id == "ollama_remote" or "ollama" in spec.aliases:
+    target_base_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
     if not target_base_url:
-      raise ValueError("Ollama requiere una URL explícita; no se configura un endpoint local por defecto.")
+      raise ValueError("Ollama remoto requiere una URL HTTPS explícita.")
+    ok, err = validate_remote_endpoint_url(target_base_url)
+    if not ok:
+      raise ValueError(f"URL de Ollama remoto no permitida: {err}")
     return LiteLLMProvider(spec, base_url=target_base_url, default_model=chosen_model)
 
-  # Cloud provider
   key = (
     api_key
     or (config.get(spec.config_key) if spec.config_key else None)

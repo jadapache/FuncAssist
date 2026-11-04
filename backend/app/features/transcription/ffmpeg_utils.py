@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 from app.core.settings import BIN_DIR
@@ -7,7 +8,6 @@ _CACHED_FFMPEG_PATH: str | None = None
 
 
 def _ensure_in_path(directory: Path) -> None:
-    """Prepends directory to os.environ['PATH'] if not present."""
     dir_str = str(directory)
     current_path = os.environ.get("PATH", "")
     paths = current_path.split(os.pathsep)
@@ -16,11 +16,6 @@ def _ensure_in_path(directory: Path) -> None:
 
 
 def get_ffmpeg_binary() -> str | None:
-    """
-    Locates FFmpeg executable strictly in the application's bin directory in LOCALAPPDATA:
-      %LOCALAPPDATA%/funcassist/bin/ffmpeg.exe
-    Does not validate or search any other locations.
-    """
     global _CACHED_FFMPEG_PATH
     if _CACHED_FFMPEG_PATH and Path(_CACHED_FFMPEG_PATH).is_file():
         return _CACHED_FFMPEG_PATH
@@ -37,5 +32,35 @@ def get_ffmpeg_binary() -> str | None:
 
 
 def ensure_ffmpeg_in_user_data() -> str | None:
-    """Returns the FFmpeg path in the application bin directory if present."""
     return get_ffmpeg_binary()
+
+
+def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
+    """Extract audio from video or audio file to 16 kHz mono WAV using ffmpeg."""
+    suffix = media_path.suffix.lower()
+    if suffix == ".wav":
+        return media_path
+
+    ffmpeg_cmd = get_ffmpeg_binary()
+    if not ffmpeg_cmd:
+        return media_path
+
+    try:
+        cmd = [
+            ffmpeg_cmd,
+            "-y",
+            "-i",
+            str(media_path),
+            "-vn",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            str(output_wav_path),
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return output_wav_path
+    except Exception:
+        return media_path

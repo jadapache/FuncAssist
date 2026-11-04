@@ -2,7 +2,7 @@
 
 > Asistente local con IA para Analistas Funcionales, Product Owners y QA. Especializado en levantamiento de requerimientos, estructuración de especificaciones, minutas de reunión, búsqueda RAG contextual y suite de documentación ágil con sincronización (Jira, GitHub, GitLab).
 
-**Estado**: 🚀 En desarrollo activo. V0.2.0+  
+**Estado**: 🚀 En desarrollo activo. 
 **Documentación completa**: Consulta [`docs/`](./docs/) para guías detalladas de arquitectura, backend, frontend y despliegue.
 
 ---
@@ -76,7 +76,7 @@ La documentación técnica completa está disponible en **[`docs/`](./docs/)**:
 |------|-----------|---------|
 | **Frontend** | React, TypeScript, Vite, Tailwind CSS v4, React Router | 19 / 6 / 8 / 4 / 7 |
 | **Backend** | Python, FastAPI, Pydantic | 3.11+ / 0.111+ / 2.8+ |
-| **IA & RAG** | LiteLLM, BM25, pypdf, python-docx | 1.35+ / 0.2.2 / 5.4 / 1.1 |
+| **IA & RAG** | WebLLM (Browser WebGPU), Transformers.js (Browser ASR), LiteLLM (Cloud), BM25 | Modern Client-First |
 | **Almacenamiento** | Local JSON (`app.json`), Fernet encryption, local history | JSON-only |
 | **Seguridad & Acceso** | Rol de usuario local (`admin`, `pm`, `funcional`, `dev`, `qa`), cryptography, keyring | 44+ / 25.6+ |
 
@@ -215,3 +215,14 @@ docker build -t qa-mgmt:latest .
 docker run -p 8000:8000 -e VITE_API_BASE=http://localhost:8000 qa-mgmt:latest
 ```
 ---
+
+---
+
+## Modelos de IA e Inferencia Client-First
+
+FuncAssist utiliza una arquitectura **Client-First** para garantizar privacidad, bajo consumo en servidor y cero pesos de modelos en backend:
+
+- **Redaccion y Chat Local:** Ejecutado en el navegador mediante WebLLM y WebGPU (`@mlc-ai/web-llm`). Compatible con Llama 3.2 y Qwen 2.5, almacenados directamente en la cache del navegador.
+- **Transcripcion de Audio Local:** Ejecutada en el navegador mediante un Web Worker con `@huggingface/transformers` (Whisper ONNX sobre WebGPU/WASM).
+- **APIs Cloud y Ollama Remoto:** Proveedores externos como OpenAI, Anthropic, Google Gemini, Groq y Ollama Remoto (sobre HTTPS publico estricto) son canalizados a traves de la API de backend con LiteLLM.
+- **Cero Pesos en Servidor:** El backend no ejecuta GGUF ni Whisper en Python. Los directorios legados en disco (`data/models/whisper`, `data/models/builtin`, `~/.cache/whisper`) pueden eliminarse con total seguridad.

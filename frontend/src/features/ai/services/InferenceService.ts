@@ -1,4 +1,8 @@
 import { api, type AISettings } from '../../../api/client'
+import {
+  DEFAULT_WEBLLM_MODEL,
+  isSupportedWebLLMModel,
+} from '../catalogs/clientCatalog'
 import type {
   ArtifactGenerationRequest,
   ArtifactGenerationResult,
@@ -9,7 +13,6 @@ import type {
 
 export type StreamChunkCallback = (chunk: string, accumulated: string) => void
 
-// Lazy-loaded WebLLM provider to avoid loading heavy AI dependencies on initial app load
 let webLLMProvider: Awaited<typeof import('../providers/WebLLMProvider')>['webLLMProvider'] | null = null
 
 async function getWebLLMProvider() {
@@ -47,12 +50,17 @@ export class InferenceService {
     }
   }
 
-  private resolveProvider(settings: AISettings | null): string {
-    return settings?.provider || 'local'
+  private isBrowserExecution(settings: AISettings | null): boolean {
+    const provider = (settings?.provider || 'local').toLowerCase()
+    return provider === 'local' || provider === 'builtin' || provider === 'webllm'
   }
 
-  private resolveModel(settings: AISettings | null): string {
-    return settings?.model || 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC'
+  private resolveWebLLMModel(settings: AISettings | null): string {
+    const configured = settings?.model || ''
+    if (isSupportedWebLLMModel(configured)) {
+      return configured
+    }
+    return DEFAULT_WEBLLM_MODEL
   }
 
   public async summarize(
@@ -60,12 +68,10 @@ export class InferenceService {
     onChunk?: StreamChunkCallback,
   ): Promise<SummarizeResult> {
     const settings = await this.getAiSettings()
-    const provider = this.resolveProvider(settings)
-    const model = this.resolveModel(settings)
-
     const messages = this.buildSummarizeMessages(request)
 
-    if (provider === 'local' || provider === 'builtin') {
+    if (this.isBrowserExecution(settings)) {
+      const model = this.resolveWebLLMModel(settings)
       const output = await this.executeWebLLM(model, messages, onChunk, {
         maxTokens: request.maxTokens,
         temperature: request.temperature ?? 0.3,
@@ -73,7 +79,9 @@ export class InferenceService {
       return { summary: output, modelUsed: model }
     }
 
-    const output = await this.executeBackendPrompt(messages, onChunk)
+    const provider = settings?.provider || 'groq'
+    const model = settings?.model || 'llama-3.3-70b-versatile'
+    const output = await this.executeBackendPrompt(provider, model, messages, onChunk)
     return { summary: output, modelUsed: `${provider}:${model}` }
   }
 
@@ -82,12 +90,10 @@ export class InferenceService {
     onChunk?: StreamChunkCallback,
   ): Promise<ArtifactGenerationResult> {
     const settings = await this.getAiSettings()
-    const provider = this.resolveProvider(settings)
-    const model = this.resolveModel(settings)
-
     const messages = this.buildArtifactMessages(request)
 
-    if (provider === 'local' || provider === 'builtin') {
+    if (this.isBrowserExecution(settings)) {
+      const model = this.resolveWebLLMModel(settings)
       const output = await this.executeWebLLM(model, messages, onChunk, {
         maxTokens: request.maxTokens ?? 3072,
         temperature: request.temperature ?? 0.5,
@@ -95,30 +101,28 @@ export class InferenceService {
       return { content: output, modelUsed: model }
     }
 
-    const output = await this.executeBackendPrompt(messages, onChunk)
+    const provider = settings?.provider || 'groq'
+    const model = settings?.model || 'llama-3.3-70b-versatile'
+    const output = await this.executeBackendPrompt(provider, model, messages, onChunk)
     return { content: output, modelUsed: `${provider}:${model}` }
   }
 
-  /**
-   * Generates an arbitrary prompt with the selected provider. Built-in models
-   * deliberately stay on this path so their weights and prompts never leave
-   * the browser for the backend/LiteLLM pipeline.
-   */
   public async generateMessages(
     messages: ChatMessage[],
     onChunk?: StreamChunkCallback,
     options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
   ): Promise<{ content: string; modelUsed: string }> {
     const settings = await this.getAiSettings()
-    const provider = this.resolveProvider(settings)
-    const model = this.resolveModel(settings)
 
-    if (provider === 'local' || provider === 'builtin') {
+    if (this.isBrowserExecution(settings)) {
+      const model = this.resolveWebLLMModel(settings)
       const content = await this.executeWebLLM(model, messages, onChunk, options)
       return { content, modelUsed: model }
     }
 
-    const content = await this.executeBackendPrompt(messages, onChunk)
+    const provider = settings?.provider || 'groq'
+    const model = settings?.model || 'llama-3.3-70b-versatile'
+    const content = await this.executeBackendPrompt(provider, model, messages, onChunk)
     return { content, modelUsed: `${provider}:${model}` }
   }
 
@@ -159,7 +163,7 @@ export class InferenceService {
     options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
   ): Promise<string> {
     const provider = await getWebLLMProvider()
-    
+
     if (provider.getActiveModelId() !== modelId) {
       await provider.initModel(modelId)
     }
@@ -171,6 +175,8 @@ export class InferenceService {
   }
 
   private async executeBackendPrompt(
+    provider: string,
+    model: string,
     messages: ChatMessage[],
     onChunk?: StreamChunkCallback,
   ): Promise<string> {
@@ -182,6 +188,8 @@ export class InferenceService {
       {
         query: userMsg,
         current_document: systemMsg,
+        provider,
+        model,
       },
       (acc, chunk) => {
         accumulated = acc

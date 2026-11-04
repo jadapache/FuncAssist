@@ -1,9 +1,10 @@
 import os
 from typing import Any, Optional
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.ai.catalog import get_model_catalog
+from app.ai.catalog import get_model_catalog, has_catalog_model
+from app.ai.endpoint_security import validate_remote_endpoint_url
 from app.ai.frontier_sync import get_frontier_sync_status, sync_frontier_models_catalog
 from app.ai.providers.factory import get_ai_settings
 from app.ai.providers.registry import find_provider_spec
@@ -83,7 +84,7 @@ async def get_settings_endpoint(
     spec = find_provider_spec(provider)
     active_key_set = False
     if spec:
-        if spec.is_local:
+        if spec.id == "ollama_remote" or "ollama" in spec.aliases:
             active_key_set = bool(config.get("ollama_base_url"))
         elif spec.config_key:
             active_key_set = bool(config.get(spec.config_key) or (spec.env_key and os.getenv(spec.env_key)))
@@ -122,17 +123,40 @@ async def update_ai_settings(
     user_id = current_user["id"]
     data = body.model_dump(exclude_none=True)
 
-    # Normalize inference_provider -> provider
     if "inference_provider" in data and "provider" not in data:
         data["provider"] = data.pop("inference_provider")
     elif "inference_provider" in data:
         data.pop("inference_provider")
 
-    # Normalize inference_model -> model
     if "inference_model" in data and "model" not in data:
         data["model"] = data.pop("inference_model")
     elif "inference_model" in data:
         data.pop("inference_model")
+
+    model_candidate = data.get("model") or ""
+    if model_candidate.lower().endswith(".gguf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Los modelos en formato GGUF no están admitidos. Usa WebLLM en navegador o una API externa.",
+        )
+
+    prov = (data.get("provider") or "").lower()
+    if prov in {"ollama", "ollama_remote"}:
+        base_url = (data.get("ollama_base_url") or "").strip()
+        if base_url:
+            ok, err = validate_remote_endpoint_url(base_url)
+            if not ok:
+                raise HTTPException(status_code=400, detail=err)
+
+    if prov in {"local", "builtin", "webllm"} and model_candidate:
+        if not has_catalog_model(model_candidate, prov, "chat_writing"):
+            raise HTTPException(status_code=400, detail="El modelo WebLLM no existe en el catálogo persistido.")
+
+    trans_provider = (data.get("transcription_provider") or "").lower()
+    trans_model = data.get("transcription_model") or ""
+    if trans_provider in {"local", "builtin", "browser_asr"} and trans_model:
+        if not has_catalog_model(trans_model, trans_provider, "transcription"):
+            raise HTTPException(status_code=400, detail="El modelo ASR no existe en el catálogo persistido.")
 
     save_user_ai_settings(user_id, data)
     return await get_settings_endpoint(current_user=current_user)

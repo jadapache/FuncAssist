@@ -12,9 +12,10 @@ import {
 import {
   detectHardwareProfile,
   evaluateModel,
-  loadWebLLMModelsFromBackend,
 } from '../../../ai/policies/modelSelectionPolicy'
-import type { ModelCatalogItem } from '../../../../api/client'
+import {
+  getClientWebLLMModels,
+} from '../../../ai/catalogs/clientCatalog'
 import type {
   HardwareProfile,
   WebLLMInitProgress,
@@ -31,43 +32,16 @@ async function getWebLLMProvider() {
   return webLLMProviderPromise
 }
 
-
 export interface BuiltinModelsListProps {
   model: string
   setModel: (m: string) => void
-  initialCatalogModels?: ModelCatalogItem[]
-}
-
-function mapCatalogToWebLLM(items: ModelCatalogItem[]): WebLLMModelDefinition[] {
-  return items
-    .filter((m) => (m.provider === 'local' || m.provider === 'builtin') && m.task_type === 'chat_writing')
-    .map((m) => {
-      const vramNum = typeof m.vram_required_mb === 'number' ? m.vram_required_mb : 1630
-      return {
-        id: m.id,
-        name: m.name,
-        tag: m.raw_id || m.id,
-        description: m.description || '',
-        downloadSize: m.size || '~950 MB',
-        vramRequiredMB: vramNum,
-        vramFormatted:
-          m.vram_formatted ||
-          (vramNum < 1000 ? '~' + vramNum + ' MB VRAM' : '~' + (vramNum / 1024).toFixed(1) + ' GB VRAM'),
-        contextWindow: m.context_window || '32.768 tokens',
-        tier: (m.tier as 'speed' | 'balanced' | 'quality') || 'balanced',
-        requiredFeatures: m.required_features || [],
-      }
-    })
 }
 
 export const BuiltinModelsList = ({
   model,
   setModel,
-  initialCatalogModels,
 }: BuiltinModelsListProps) => {
-  const initialModels = initialCatalogModels ? mapCatalogToWebLLM(initialCatalogModels) : []
-  const [modelsList, setModelsList] = useState<WebLLMModelDefinition[]>(initialModels)
-  const [isLoadingModels, setIsLoadingModels] = useState(initialModels.length === 0)
+  const modelsList = getClientWebLLMModels()
   const [cachedMap, setCachedMap] = useState<Record<string, boolean>>({})
   const [hardware, setHardware] = useState<HardwareProfile | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -75,56 +49,22 @@ export const BuiltinModelsList = ({
   const [progressState, setProgressState] = useState<Record<string, WebLLMInitProgress>>({})
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const modelsRef = useRef<WebLLMModelDefinition[]>([])
+  const modelsRef = useRef<readonly WebLLMModelDefinition[]>([])
   modelsRef.current = modelsList
 
-  const refreshCacheStatus = useCallback(async (currentModels?: WebLLMModelDefinition[]) => {
+  const refreshCacheStatus = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const webLLMProvider = await getWebLLMProvider()
+      const provider = await getWebLLMProvider()
       const nextMap: Record<string, boolean> = {}
-      const targetList = currentModels ?? modelsRef.current
-      for (const m of targetList) {
-        nextMap[m.id] = await webLLMProvider.isModelCached(m.id)
+      for (const m of modelsRef.current) {
+        nextMap[m.id] = await provider.isModelCached(m.id)
       }
       setCachedMap(nextMap)
     } finally {
       setIsRefreshing(false)
     }
   }, [])
-
-  useEffect(() => {
-    if (initialCatalogModels && initialCatalogModels.length > 0) {
-      const mapped = mapCatalogToWebLLM(initialCatalogModels)
-      if (mapped.length > 0) {
-        setModelsList(mapped)
-        setIsLoadingModels(false)
-        return
-      }
-    }
-
-    let isMounted = true
-    const init = async () => {
-      try {
-        const loadedModels = await loadWebLLMModelsFromBackend()
-        if (!isMounted) return
-        if (loadedModels.length > 0) {
-          setModelsList(loadedModels)
-        }
-      } catch (err) {
-        console.error('Error cargando modelos WebLLM:', err)
-      } finally {
-        if (isMounted) {
-          setIsLoadingModels(false)
-        }
-      }
-    }
-    void init()
-
-    return () => {
-      isMounted = false
-    }
-  }, [initialCatalogModels])
 
   useEffect(() => {
     let isMounted = true
@@ -141,21 +81,19 @@ export const BuiltinModelsList = ({
   }, [])
 
   useEffect(() => {
-    if (modelsList.length > 0) {
-      void refreshCacheStatus(modelsList)
-    }
-  }, [modelsList, refreshCacheStatus])
+    void refreshCacheStatus()
+  }, [refreshCacheStatus])
 
   const handleDownload = async (modelDef: WebLLMModelDefinition) => {
     setDownloadingId(modelDef.id)
     setProgressState((prev) => ({
       ...prev,
-      [modelDef.id]: { progress: 0, text: 'Iniciando conexión con Hugging Face...', timeElapsed: 0 },
+      [modelDef.id]: { progress: 0, text: 'Iniciando descarga en caché del navegador...', timeElapsed: 0 },
     }))
 
     try {
-      const webLLMProvider = await getWebLLMProvider()
-      await webLLMProvider.initModel(modelDef.id, (report) => {
+      const provider = await getWebLLMProvider()
+      await provider.initModel(modelDef.id, (report) => {
         setProgressState((prev) => ({
           ...prev,
           [modelDef.id]: report,
@@ -173,8 +111,8 @@ export const BuiltinModelsList = ({
   const handleDelete = async (modelId: string) => {
     setDeletingId(modelId)
     try {
-      const webLLMProvider = await getWebLLMProvider()
-      await webLLMProvider.deleteCachedModel(modelId)
+      const provider = await getWebLLMProvider()
+      await provider.deleteCachedModel(modelId)
       await refreshCacheStatus()
     } catch (err) {
       console.error(`Error eliminando modelo ${modelId}:`, err)
@@ -189,7 +127,7 @@ export const BuiltinModelsList = ({
         <div>
           <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <HardDrive className="h-4 w-4 text-[#002777]" />
-            <span>Modelos de IA Integrados (Navegador WebGPU)</span>
+            <span>Modelo en este navegador (WebLLM / WebGPU)</span>
           </h4>
           <p className="text-xs text-slate-500 mt-0.5">
             Modelos de lenguaje ejecutados íntegramente en tu navegador mediante WebLLM y WebGPU. Cero consumo en el servidor y total privacidad de datos.
@@ -214,7 +152,7 @@ export const BuiltinModelsList = ({
           <div>
             <span className="font-semibold block">Aceleración WebGPU no detectada</span>
             <span>
-              Tu navegador o hardware no tiene WebGPU habilitado. Se recomienda utilizar Google Chrome o Microsoft Edge actualizado para ejecutar modelos en el navegador.
+              Tu navegador o hardware no tiene WebGPU activo. Te sugerimos seleccionar una API externa (Groq, OpenAI, Gemini, Claude u Ollama Remoto).
             </span>
           </div>
         </div>
@@ -224,7 +162,7 @@ export const BuiltinModelsList = ({
         <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs text-slate-700">
           <div className="flex items-center gap-2">
             <Cpu className="h-4 w-4 text-[#002777]" />
-            <span>Dispositivo detectado: <strong className="font-semibold text-slate-900">{hardware.adapterName}</strong></span>
+            <span>Dispositivo: <strong className="font-semibold text-slate-900">{hardware.adapterName}</strong></span>
           </div>
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
             <CheckCircle2 className="h-3 w-3 text-emerald-600" />
@@ -233,18 +171,8 @@ export const BuiltinModelsList = ({
         </div>
       )}
 
-      {isLoadingModels ? (
-        <div className="flex items-center justify-center py-8 text-slate-400 gap-2 text-xs">
-          <Loader2 className="h-4 w-4 animate-spin text-[#002777]" />
-          <span>Cargando catálogo de modelos disponibles...</span>
-        </div>
-      ) : modelsList.length === 0 ? (
-        <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
-          No hay modelos disponibles en el catálogo en este momento.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {modelsList.map((m) => {
+      <div className="space-y-3">
+        {modelsList.map((m) => {
           const isDownloaded = Boolean(cachedMap[m.id])
           const isSelected = model === m.id
           const isDownloading = downloadingId === m.id
@@ -255,9 +183,7 @@ export const BuiltinModelsList = ({
           return (
             <div
               key={m.id}
-              onClick={() => {
-                setModel(m.id)
-              }}
+              onClick={() => setModel(m.id)}
               className={[
                 'flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl transition-all cursor-pointer',
                 isSelected
@@ -297,9 +223,9 @@ export const BuiltinModelsList = ({
                 <p className="text-xs text-slate-400 font-medium pt-0.5 flex flex-wrap items-center gap-2">
                   <span>Descarga: {m.downloadSize}</span>
                   <span>•</span>
-                  <span>VRAM requerida: {m.vramFormatted}</span>
+                  <span>VRAM estimada: {m.vramFormatted}</span>
                   <span>•</span>
-                  <span>Ventana de Contexto: {m.contextWindow}</span>
+                  <span>Ventana: {m.contextWindow}</span>
                 </p>
 
                 {isDownloading && progressInfo && (
@@ -372,9 +298,8 @@ export const BuiltinModelsList = ({
               </div>
             </div>
           )
-          })}
-        </div>
-      )}
+        })}
+      </div>
     </div>
   )
 }

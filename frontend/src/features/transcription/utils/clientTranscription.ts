@@ -4,6 +4,14 @@ import {
   type TranscriptionResult,
   type TranscriptionSummary,
 } from '../api/transcriptionApi'
+import {
+  browserAsrProvider,
+} from '../providers/BrowserAsrProvider'
+import {
+  DEFAULT_BROWSER_ASR_MODEL,
+  isSupportedBrowserAsrModel,
+} from '../../ai/catalogs/clientCatalog'
+import { inferenceService } from '../../ai/services/InferenceService'
 
 export interface ClientTranscriptionSegment {
   start: number
@@ -40,22 +48,30 @@ export interface ClientTranscriptionResult {
 }
 
 export function resolveClientOnnxModel(configuredModel?: string): string {
-  if (!configuredModel) return 'onnx-community/whisper-tiny'
-  const lower = configuredModel.toLowerCase()
-  if (lower.includes('base')) return 'onnx-community/whisper-base'
-  if (lower.includes('small')) return 'onnx-community/whisper-small'
-  if (lower.includes('large')) return 'onnx-community/whisper-large-v3-turbo'
-  if (lower.includes('tiny')) return 'onnx-community/whisper-tiny'
-  if (lower.startsWith('onnx-community/') || lower.includes('/')) return configuredModel
-  return 'onnx-community/whisper-tiny'
+  if (!configuredModel) return DEFAULT_BROWSER_ASR_MODEL
+  if (isSupportedBrowserAsrModel(configuredModel)) return configuredModel
+  return DEFAULT_BROWSER_ASR_MODEL
 }
 
-/**
- * Orchestrates client-side audio extraction and in-browser transcription via Web Worker.
- * Submits the lightweight transcript text to the backend for functional summarization.
- */
+async function generateBrowserSummary(title: string, text: string): Promise<TranscriptionSummary | undefined> {
+  try {
+    const summaryResult = await inferenceService.summarize({
+      text,
+      instructions: `Genera un resumen ejecutivo estructurado para la reunión titulada "${title}".`,
+      maxTokens: 1024,
+      temperature: 0.3,
+    })
+    return {
+      summary_text: summaryResult.summary,
+      topics: [title],
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export async function runClientTranscription(
-  options: ClientTranscriptionOptions
+  options: ClientTranscriptionOptions,
 ): Promise<ClientTranscriptionResult> {
   const {
     id,
@@ -63,13 +79,12 @@ export async function runClientTranscription(
     title,
     description = '',
     language = 'es',
-    modelId = 'onnx-community/whisper-base',
+    modelId = DEFAULT_BROWSER_ASR_MODEL,
     onProgress,
     onRegisterWorker,
     isCancelled,
   } = options
 
-  // 1. Audio Extraction in browser memory
   onProgress({
     progress: 1,
     stage: 'preprocessing',
@@ -82,85 +97,46 @@ export async function runClientTranscription(
     16000,
     (progressPct, message) => {
       if (isCancelled()) return
+      onProgress({ progress: progressPct, stage: 'preprocessing', message })
+    },
+  )
+
+  if (isCancelled()) {
+    throw new Error('Transcripción cancelada por el usuario.')
+  }
+
+  const effectiveModelId = resolveClientOnnxModel(modelId)
+  const workerResult = await browserAsrProvider.transcribe(
+    {
+      id,
+      audioData,
+      language,
+      modelId: effectiveModelId,
+      duration,
+    },
+    (update) => {
       onProgress({
-        progress: progressPct,
-        stage: 'preprocessing',
-        message,
+        progress: update.progress,
+        stage: 'transcribing',
+        message: update.message,
+        eta: update.eta,
+        live_text: update.live_text,
+        live_segments: update.live_segments,
+        model_info: update.model_info,
       })
-    }
+    },
+    isCancelled,
+    onRegisterWorker,
   )
 
   if (isCancelled()) {
     throw new Error('Transcripción cancelada por el usuario.')
   }
 
-  // 2. Transcribing with Web Worker (WebGPU / CPU Wasm)
-  const worker = new Worker(
-    new URL('../workers/transcription.worker.ts', import.meta.url),
-    { type: 'module' }
-  )
-  onRegisterWorker?.(worker)
-
-  const workerResult = await new Promise<{
-    text: string
-    segments: ClientTranscriptionSegment[]
-    duration: number
-    language: string
-    model_info: string
-  }>((resolve, reject) => {
-    worker.onmessage = (e: MessageEvent) => {
-      if (isCancelled()) {
-        worker.terminate()
-        reject(new Error('Transcripción cancelada por el usuario.'))
-        return
-      }
-
-      const { type, payload } = e.data
-      if (type === 'progress') {
-        onProgress({
-          progress: payload.progress,
-          stage: 'transcribing',
-          message: payload.message,
-          eta: payload.eta,
-          live_text: payload.live_text,
-          live_segments: payload.live_segments,
-          model_info: payload.model_info,
-        })
-      } else if (type === 'complete') {
-        worker.terminate()
-        resolve(payload)
-      } else if (type === 'error') {
-        worker.terminate()
-        reject(new Error(payload.error || 'Error durante la inferencia en navegador.'))
-      }
-    }
-
-    worker.onerror = (err) => {
-      worker.terminate()
-      reject(err)
-    }
-
-    worker.postMessage({
-      type: 'transcribe',
-      payload: {
-        id,
-        audioData,
-        language,
-        modelId,
-        duration,
-      },
-    })
-  })
-
-  if (isCancelled()) {
-    throw new Error('Transcripción cancelada por el usuario.')
-  }
-
-  // 3. Submit lightweight transcript to SaaS backend for summarization
   onProgress({
     progress: 92,
     stage: 'summarizing',
-    message: 'Generando resumen con IA...',
+    message: 'Registrando transcripción en el sistema...',
     model_info: workerResult.model_info,
   })
 
@@ -172,15 +148,23 @@ export async function runClientTranscription(
     segments: workerResult.segments,
     duration_seconds: workerResult.duration,
     language: workerResult.language,
-    generate_summary_now: true,
+    generate_summary_now: false,
   })
 
   if (!submitResponse.ok || !submitResponse.transcription) {
     throw new Error('Error al registrar la transcripción en la plataforma.')
   }
 
+  const generatedSummary = await generateBrowserSummary(title, workerResult.text)
+  if (generatedSummary) {
+    await transcriptionApi.updateTranscriptionSummary(id, generatedSummary).catch(() => null)
+  }
+
   return {
-    transcription: submitResponse.transcription,
-    summary: submitResponse.summary,
+    transcription: {
+      ...submitResponse.transcription,
+      summary: generatedSummary || submitResponse.transcription.summary,
+    },
+    summary: generatedSummary,
   }
 }

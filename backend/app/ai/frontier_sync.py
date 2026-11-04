@@ -8,7 +8,6 @@ Operates safely offline using LiteLLM bundled cost map when remote connectivity 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -27,13 +26,10 @@ litellm.telemetry = False
 litellm.suppress_debug_info = True
 litellm.set_verbose = False
 
-from app.core.settings import ROOT_DIR, USER_DATA_DIR
 from app.models.ai import AIModelInfo
 
 logger = logging.getLogger(__name__)
 
-CATALOG_FILE = USER_DATA_DIR / "ai" / "models_catalog.json"
-FALLBACK_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "models_catalog.json"
 LITELLM_REMOTE_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
 # State tracking for background sync
@@ -499,6 +495,61 @@ def _find_litellm_entry(cost_map: dict[str, Any], model_id: str, provider: str) 
     return None
 
 
+def _discover_litellm_models(cost_map: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build catalog candidates directly from LiteLLM model keys.
+
+    LiteLLM is the discovery source; the curated list only supplies optional
+    presentation metadata for models that are already present in this result.
+    """
+    provider_prefixes = {
+        "groq": "groq",
+        "openai": "openai",
+        "anthropic": "claude",
+        "claude": "claude",
+        "gemini": "gemini",
+        "google": "gemini",
+        "openrouter": "openrouter",
+        "deepseek": "deepseek",
+    }
+    discovered: dict[str, dict[str, Any]] = {}
+    for raw_key, entry in cost_map.items():
+        if not isinstance(raw_key, str) or not isinstance(entry, dict):
+            continue
+        prefix, separator, model_name = raw_key.partition("/")
+        provider = provider_prefixes.get(prefix.lower())
+        if not provider or not separator or not model_name:
+            continue
+        model_id = model_name.strip()
+        lowered = model_id.lower()
+        if model_id in DEPRECATED_MODEL_IDS:
+            continue
+        task_type = "transcription" if any(token in lowered for token in ("whisper", "transcrib", "speech-to-text", "audio")) else "chat_writing"
+        # Do not expose embedding, moderation, image, reranker or text-to-speech entries.
+        if any(token in lowered for token in ("embed", "moderation", "rerank", "image", "vision", "tts")) and task_type != "transcription":
+            continue
+        key = f"{provider}:{model_id}"
+        discovered[key] = {
+            "id": model_id,
+            "raw_id": model_id,
+            "name": model_id,
+            "provider": provider,
+            "provider_name": PROVIDER_META.get(provider, {}).get("name", provider.title()),
+            "description": f"Modelo {provider.title()} descubierto desde LiteLLM.",
+            "context_window": "Audio (hasta 25MB)" if task_type == "transcription" else "128k tokens",
+            "context_length": 0 if task_type == "transcription" else 131072,
+            "badge": PROVIDER_META.get(provider, {}).get("badge_default", provider.title()),
+            "task_type": task_type,
+            "task_label": "Transcripción y Voz" if task_type == "transcription" else "Redacción y Chat",
+            "is_free": bool(PROVIDER_META.get(provider, {}).get("is_free_default", False)),
+            "tier_type": "free" if provider == "groq" else "paid",
+            "pricing_prompt": 0.0,
+            "pricing_completion": 0.0,
+            "pricing_label": "",
+            "rate_limits": "Standard Provider Limits",
+        }
+    return discovered
+
+
 DEPRECATED_MODEL_IDS: set[str] = {
     "gemini-1.5-flash",
     "gemini-1.5-pro",
@@ -522,7 +573,7 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
     """Synchronize frontier model catalog with the latest LiteLLM database.
     
     Enriches context windows, max tokens, and pricing for all frontier models.
-    Saves the updated catalog to USER_DATA_DIR / "ai" / "models_catalog.json".
+    Persists the updated external catalog in AIModelCatalog, preserving browser seeds.
     """
     global _last_sync_result
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -530,46 +581,19 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
     try:
         cost_map, source = await fetch_litellm_cost_map(timeout_seconds=8.0 if force_remote else 5.0)
 
-        target_file = CATALOG_FILE
-        existing_data: list[dict[str, Any]] = []
-
-        try:
-            from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
-            existing_data = AIModelCatalogRepository().list_sync()
-        except Exception:
-            existing_data = []
-
-        if not existing_data and target_file and target_file.exists():
-            try:
-                existing_data = json.loads(target_file.read_text(encoding="utf-8"))
-            except Exception as e:
-                logger.warning(f"Could not parse existing user catalog at {target_file}: {e}")
-
-        if not existing_data and FALLBACK_CATALOG_FILE.exists():
-            try:
-                existing_data = json.loads(FALLBACK_CATALOG_FILE.read_text(encoding="utf-8"))
-            except Exception as e:
-                logger.warning(f"Could not parse fallback catalog: {e}")
-
-        # Index existing models by id (excluding deprecated and builtin models)
-        model_dict: dict[str, dict[str, Any]] = {}
-        for item in existing_data:
-            if isinstance(item, dict) and "id" in item:
-                mid = item["id"]
-                if mid in DEPRECATED_MODEL_IDS:
-                    continue
-                if item.get("provider") not in ("builtin", "local", "faster-whisper", "moonshine", "onnx"):
-                    model_dict[mid] = dict(item)
-
-        # Merge known frontier models if not present
+        # External models are discovered from LiteLLM. Browser models are owned
+        # by catalog.py and preserved by replace_external_sync().
+        model_dict = _discover_litellm_models(cost_map)
         for km in KNOWN_FRONTIER_MODELS:
             mid = km["id"]
-            if mid not in DEPRECATED_MODEL_IDS:
-                if mid not in model_dict:
-                    model_dict[mid] = dict(km)
+            key = f"{km.get('provider')}:{mid}"
+            if mid in DEPRECATED_MODEL_IDS or key not in model_dict:
+                continue
+            model_dict[key].update(km)
 
         # Enrich each frontier model with LiteLLM specs
-        for mid, model_item in model_dict.items():
+        for _, model_item in model_dict.items():
+            mid = model_item["id"]
             prov = model_item.get("provider", "groq")
             task_type = model_item.get("task_type", "chat_writing")
             prov_info = PROVIDER_META.get(prov, {})
@@ -646,17 +670,9 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
         try:
             from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
             _cat_repo = AIModelCatalogRepository()
-            _cat_repo.bulk_upsert_sync(validated_list)
+            _cat_repo.replace_external_sync(validated_list)
         except Exception as db_err:
-            logger.debug(f"Failed to persist frontier models catalog into DB: {db_err}")
-
-        # Also persist to local catalog cache file on disk
-        if target_file:
-            try:
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-                target_file.write_text(json.dumps(validated_list, indent=2, ensure_ascii=False), encoding="utf-8")
-            except Exception as file_err:
-                logger.debug(f"Failed to write catalog file to {target_file}: {file_err}")
+            logger.warning(f"Failed to persist frontier models catalog into DB: {db_err}")
 
         # Invalidate catalog memory cache in catalog module
         try:

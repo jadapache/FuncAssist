@@ -40,7 +40,7 @@ export const aiSettingsApi = {
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<AISettings>(r)),
 
-  updateAiSettings: (payload: Record<string, string>) =>
+  updateAiSettings: (payload: Record<string, unknown>) =>
     fetch(`${API_BASE}/api/ai/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

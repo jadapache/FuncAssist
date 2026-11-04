@@ -1,99 +1,42 @@
 import type { FormEvent } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type AISettings, type LocalBuiltinModelInfo, type LocalWhisperModelInfo, type ModelCatalogItem } from '../../../api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { api, type AISettings, type ModelCatalogItem } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
-import { useBackgroundJobs } from '../../../context/BackgroundJobContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 import { inferenceService } from '../../ai/services/InferenceService'
+import { DEFAULT_BROWSER_ASR_MODEL, DEFAULT_WEBLLM_MODEL, setDynamicClientCatalog } from '../../ai/catalogs/clientCatalog'
 
-// Lazy-load WebLLM provider to avoid bundling AI dependencies in initial load
 let webLLMProviderPromise: Promise<Awaited<typeof import('../../ai/providers/WebLLMProvider')>['webLLMProvider']> | null = null
 
 async function getWebLLMProvider() {
   if (!webLLMProviderPromise) {
-    webLLMProviderPromise = import('../../ai/providers/WebLLMProvider').then(m => m.webLLMProvider)
+    webLLMProviderPromise = import('../../ai/providers/WebLLMProvider').then((m) => m.webLLMProvider)
   }
   return webLLMProviderPromise
 }
 
 export function useAiSettingsManager() {
   const { toast } = useToast()
-  const { jobs, registerDownloadJob, cancelJob, removeJob } = useBackgroundJobs()
 
   const [ai, setAi] = useState<AISettings | null>(null)
   const [loadingAi, setLoadingAi] = useState(true)
 
-  // Provider state: 'builtin' | 'ollama' | 'groq' | 'gemini' | 'openai' | 'claude'
   const [provider, setProvider] = useState<string>('local')
-  const [model, setModel] = useState<string>('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
+  const [model, setModel] = useState<string>(DEFAULT_WEBLLM_MODEL)
 
-  // Collapsible panels
   const [isWritingOpen, setIsWritingOpen] = useState(true)
   const [isVoiceAudioOpen, setIsVoiceAudioOpen] = useState(true)
   const [showEndpointSection, setShowEndpointSection] = useState(true)
 
-  // Dynamic models catalog
   const [catalogModels, setCatalogModels] = useState<ModelCatalogItem[]>([])
   const [catalogError, setCatalogError] = useState<string | null>(null)
 
-  // Voice & Transcription unified state
-  const [voiceAudioProvider, setVoiceAudioProvider] = useState<string>('groq')
-  const [voiceAudioModel, setVoiceAudioModel] = useState<string>('whisper-large-v3')
+  const [voiceAudioProvider, setVoiceAudioProvider] = useState<string>('local')
+  const [voiceAudioModel, setVoiceAudioModel] = useState<string>(DEFAULT_BROWSER_ASR_MODEL)
   const [transcriptionGroqKey, setTranscriptionGroqKey] = useState('')
   const [transcriptionOpenaiKey, setTranscriptionOpenaiKey] = useState('')
   const [showTranscriptionKey, setShowTranscriptionKey] = useState(false)
 
-  // Local Whisper models state
-  const [localWhisperModels] = useState<LocalWhisperModelInfo[]>([])
-  const [deletingWhisperId, setDeletingWhisperId] = useState<string | null>(null)
-  const [fetchingWhisperModels] = useState(false)
-
-  // Local Built-in GGUF models state
-  const [localBuiltinModels, setLocalBuiltinModels] = useState<LocalBuiltinModelInfo[]>([])
-  const [deletingBuiltinId, setDeletingBuiltinId] = useState<string | null>(null)
-  const [fetchingBuiltinModels, setFetchingBuiltinModels] = useState(false)
-
-  const downloadTasks = useMemo(() => {
-    const map: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string; status?: string }> = {}
-    for (const j of jobs) {
-      if (j.type === 'download') {
-        map[j.id] = {
-          progress: j.progress,
-          speedOrSize: j.speedOrSize,
-          stageText: j.stageText,
-          status: j.status,
-        }
-      }
-    }
-    return map
-  }, [jobs])
-
-  const downloadingBuiltinId = useMemo(() => {
-    const active = jobs.find(
-      (j) =>
-        j.type === 'download' &&
-        ['qwen', 'llama', 'deepseek', 'gemma'].some((k) => j.id.includes(k)) &&
-        j.status !== 'complete' &&
-        j.status !== 'failed' &&
-        j.status !== 'cancelled'
-    )
-    return active ? active.id : null
-  }, [jobs])
-
-  const downloadingWhisperId = useMemo(() => {
-    const active = jobs.find(
-      (j) =>
-        j.type === 'download' &&
-        !['qwen', 'llama', 'deepseek', 'gemma'].some((k) => j.id.includes(k)) &&
-        j.status !== 'complete' &&
-        j.status !== 'failed' &&
-        j.status !== 'cancelled'
-    )
-    return active ? active.id : null
-  }, [jobs])
-
-
-  // API Keys & credentials
   const [groqKey, setGroqKey] = useState('')
   const [geminiKey, setGeminiKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
@@ -101,31 +44,24 @@ export function useAiSettingsManager() {
   const [ollamaUrl, setOllamaUrl] = useState('')
   const [showKey, setShowKey] = useState(false)
 
-  // Local Ollama models & pull state
   const [ollamaOnline, setOllamaOnline] = useState<boolean | null>(null)
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
-  const [isPulling, setIsPulling] = useState(false)
-  const [pullingModelTag, setPullingModelTag] = useState<string | null>(null)
-  const [deletingModelTag, setDeletingModelTag] = useState<string | null>(null)
-  const [pullStatusMsg, setPullStatusMsg] = useState<string | null>(null)
   const [fetchingModels, setFetchingModels] = useState(false)
 
-  // Feedback states
   const [savingAi, setSavingAi] = useState(false)
   const [testingConnection, setTestingConnection] = useState(false)
+  const [configuredCreds, setConfiguredCreds] = useState<string[]>([])
 
   const loadDynamicCatalog = useCallback(async (forceRefresh = false) => {
     try {
       const res = await api.getModelCatalog(forceRefresh)
-      if (res.error) {
-        setCatalogError(res.error)
-      } else {
-        setCatalogError(null)
-      }
+      setCatalogError(res.error || null)
       setCatalogModels(res.models || [])
-    } catch (e) {
-      console.error('Error al cargar catálogo de modelos:', e)
-      setCatalogError('Error de conexión, no se pudo obtener los modelos')
+      if (res.models) {
+        setDynamicClientCatalog(res.models)
+      }
+    } catch {
+      setCatalogError('Error de conexión al cargar catálogo externo.')
       setCatalogModels([])
     }
   }, [])
@@ -137,51 +73,21 @@ export function useAiSettingsManager() {
       const res = await api.listOllamaModels(target)
       setOllamaOnline(res.online)
       setOllamaModels(res.models || [])
-      if (!res.online) {
-        if (isUserAction) {
-          toast.error(`No se pudo conectar con el servidor Ollama en "${target}". Asegúrate de que Ollama esté ejecutándose en tu equipo o verifica la dirección del endpoint.`)
-        }
-      } else {
-        if (isUserAction) {
-          toast.success(`Conexión exitosa: Se encontraron ${res.models?.length || 0} modelo(s) en tu servidor Ollama.`)
-        }
+      if (!res.online && isUserAction) {
+        toast.error(`No se pudo conectar con el servidor Ollama remoto en "${target}".`)
+      } else if (res.online && isUserAction) {
+        toast.success(`Conexión exitosa con servidor Ollama remoto (${res.models?.length || 0} modelos disponibles).`)
       }
     } catch (err) {
       setOllamaOnline(false)
       setOllamaModels([])
       if (isUserAction) {
-        toast.error(`Error al consultar modelos en Ollama (${target}): ${err instanceof Error ? err.message : 'No se pudo conectar con el servidor'}`)
+        toast.error(`Error de conexión con Ollama remoto: ${err instanceof Error ? err.message : 'Error desconocido'}`)
       }
     } finally {
       setFetchingModels(false)
     }
   }, [ollamaUrl, toast])
-
-  const fetchLocalWhisperModels = useCallback(async () => {
-    // Modelos locales cargados directamente desde catalogModels
-  }, [])
-
-  const fetchLocalBuiltinModels = useCallback(async () => {
-    setFetchingBuiltinModels(true)
-    try {
-      const webllm = await getWebLLMProvider()
-      const cached = await Promise.all(
-        catalogModels.filter((item) => item.provider === 'local' || item.provider === 'builtin').map(async (item) => ({
-          ...item,
-          is_downloaded: await webllm.isModelCached(item.id),
-          disk_size_mb: 0,
-          file_path: null,
-        })),
-      )
-      setLocalBuiltinModels(cached as LocalBuiltinModelInfo[])
-    } catch (e) {
-      console.error('Error fetching local builtin models:', e)
-    } finally {
-      setFetchingBuiltinModels(false)
-    }
-  }, [])
-
-  const [configuredCreds, setConfiguredCreds] = useState<string[]>([])
 
   useEffect(() => {
     let isMounted = true
@@ -196,68 +102,28 @@ export function useAiSettingsManager() {
         ])
         if (!isMounted) return
         setAi(settings)
-
-        const creds = credsList.map((c) => c.provider.toLowerCase())
-        setConfiguredCreds(creds)
-
-        const isFirstTimeSetup = !settings.provider && !settings.transcription_provider
-
-        const prov = userPrefs?.inference_provider || settings.provider || 'local'
-        setProvider(prov)
+        setConfiguredCreds(credsList.map((c) => c.provider.toLowerCase()))
+        const rawProv = userPrefs?.inference_provider || settings.provider || 'local'
+        const effectiveProv = rawProv === 'builtin' ? 'local' : rawProv === 'ollama' ? 'ollama_remote' : rawProv
+        setProvider(effectiveProv)
 
         const activeModel = userPrefs?.inference_model || settings.model
-        if (activeModel) {
-          setModel(activeModel)
-        } else if (isFirstTimeSetup) {
-          if (prov === 'groq') setModel('qwen3.8-27b')
-          else if (prov === 'local' || prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
-          else if (prov === 'gemini') setModel('gemini-2.5-flash')
-          else if (prov === 'openai') setModel('gpt-4o-mini')
-          else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
-          else setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
-        } else {
-          if (prov === 'groq') setModel('qwen3.8-27b')
-          else if (prov === 'local' || prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
-          else if (prov === 'gemini') setModel('gemini-2.5-flash')
-          else if (prov === 'openai') setModel('gpt-4o-mini')
-          else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
-        }
+        setModel(activeModel || (effectiveProv === 'local' ? DEFAULT_WEBLLM_MODEL : 'llama-3.3-70b-versatile'))
 
-        const activeTransProv = userPrefs?.transcription_provider || settings.transcription_provider
-        if (activeTransProv) {
-          setVoiceAudioProvider(activeTransProv)
+        const rawTransProv = userPrefs?.transcription_provider || settings.transcription_provider || 'local'
+        const effectiveTransProv = rawTransProv === 'builtin' || rawTransProv === 'browser_asr' ? 'local' : rawTransProv
+        setVoiceAudioProvider(effectiveTransProv)
 
-          const savedModel = userPrefs?.transcription_model || settings.transcription_model
-          if (savedModel) {
-            setVoiceAudioModel(savedModel)
-          } else {
-            const defaultTransModel =
-              activeTransProv === 'groq'
-                ? 'whisper-large-v3'
-                : activeTransProv === 'openai'
-                  ? 'whisper-1'
-                  : 'base'
-            setVoiceAudioModel(defaultTransModel)
-          }
-        } else if (isFirstTimeSetup) {
-          setVoiceAudioProvider('groq')
-          setVoiceAudioModel('whisper-large-v3')
-        }
+        const savedTransModel = userPrefs?.transcription_model || settings.transcription_model
+        setVoiceAudioModel(savedTransModel || (effectiveTransProv === 'local' ? DEFAULT_BROWSER_ASR_MODEL : 'whisper-large-v3'))
 
         if (settings.ollama_base_url) {
           setOllamaUrl(settings.ollama_base_url)
-        } else {
-          setOllamaUrl('')
-        }
-
-        // Fetch local Ollama, Whisper and Built-in models silently in background
-        if (settings.ollama_base_url) {
           void fetchOllamaModels(settings.ollama_base_url, false)
         }
-        void fetchLocalBuiltinModels()
       } catch (err) {
         if (isMounted) {
-          toast.error(err instanceof Error ? err.message : 'Error al cargar la configuración del sistema')
+          toast.error(err instanceof Error ? err.message : 'Error al cargar configuración.')
         }
       } finally {
         if (isMounted) {
@@ -270,134 +136,10 @@ export function useAiSettingsManager() {
     return () => {
       isMounted = false
     }
-  }, [fetchLocalBuiltinModels, fetchLocalWhisperModels, fetchOllamaModels, loadDynamicCatalog, toast])
+  }, [fetchOllamaModels, loadDynamicCatalog, toast])
 
-  const handleDownloadWhisperModel = async (modelId: string) => {
-    const cleanId = modelId.replace('whisper-', '').trim()
-    registerDownloadJob(cleanId, `Descargando Whisper ${cleanId.toUpperCase()}`)
-    try {
-      toast.info(`Iniciando descarga de Whisper ${cleanId}... Esto puede demorar según tu conexión.`)
-      const res = await api.downloadWhisperModel(cleanId)
-      if (res.ok) {
-        toast.success(res.message || `Modelo Whisper ${cleanId} descargado correctamente.`)
-        await fetchLocalWhisperModels()
-        await loadDynamicCatalog(true)
-      }
-    } catch (err) {
-      const isCancelled = err instanceof Error && (err.message.toLowerCase().includes('cancel') || err.message.toLowerCase().includes('abort'))
-      if (!isCancelled) {
-        toast.error(err instanceof Error ? err.message : `Error descargando modelo ${cleanId}`)
-      }
-    }
-  }
-
-  const handleDeleteWhisperModel = async (modelId: string) => {
-    setDeletingWhisperId(modelId)
-    try {
-      const res = await api.deleteWhisperModel(modelId)
-      if (res.ok) {
-        toast.success(res.message || `Modelo Whisper ${modelId} eliminado del disco.`)
-        await fetchLocalWhisperModels()
-        await loadDynamicCatalog(true)
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
-    } finally {
-      setDeletingWhisperId(null)
-    }
-  }
-
-  const handleDownloadBuiltinModel = async (modelId: string) => {
-    registerDownloadJob(modelId, `Descargando ${modelId}`)
-    try {
-      const webllm = await getWebLLMProvider()
-      await webllm.initModel(modelId, () => undefined)
-      toast.success(`Modelo ${modelId} guardado en la caché del navegador.`)
-      await fetchLocalBuiltinModels()
-    } catch (err) {
-      const isCancelled = err instanceof Error && (err.message.toLowerCase().includes('cancel') || err.message.toLowerCase().includes('abort'))
-      if (!isCancelled) {
-        toast.error(err instanceof Error ? err.message : `Error descargando modelo ${modelId}`)
-      }
-    }
-  }
-
-  const handleCancelBuiltinDownload = useCallback(async (modelId: string) => {
-    await cancelJob(modelId)
-    void fetchLocalBuiltinModels()
-    void fetchLocalWhisperModels()
-  }, [cancelJob, fetchLocalBuiltinModels, fetchLocalWhisperModels])
-
-  const handleDismissDownloadTask = useCallback((taskId: string) => {
-    removeJob(taskId)
-  }, [removeJob])
-
-
-  const handleDeleteBuiltinModel = async (modelId: string) => {
-    setDeletingBuiltinId(modelId)
-    try {
-      const webllm = await getWebLLMProvider()
-      await webllm.deleteCachedModel(modelId)
-      toast.success(`Modelo ${modelId} eliminado de la caché del navegador.`)
-      await fetchLocalBuiltinModels()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Error al eliminar modelo ${modelId}`)
-    } finally {
-      setDeletingBuiltinId(null)
-    }
-  }
-
-  const handlePullModel = async (targetModelTag: string) => {
-    setIsPulling(true)
-    setPullingModelTag(targetModelTag)
-    setPullStatusMsg(`Descargando "${targetModelTag}" desde el registro de Ollama…`)
-
-    const effectiveTargetUrl = normalizeOllamaUrl(ollamaUrl)
-
-    try {
-      await api.pullOllamaModel(targetModelTag, effectiveTargetUrl)
-      const successMsg = `¡Modelo "${targetModelTag}" descargado con éxito!`
-      setPullStatusMsg(successMsg)
-      toast.success(successMsg)
-      setModel(targetModelTag)
-      void fetchOllamaModels(effectiveTargetUrl, false)
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : `Error al descargar el modelo ${targetModelTag}`
-      toast.error(errMsg)
-      setPullStatusMsg(null)
-    } finally {
-      setIsPulling(false)
-      setPullingModelTag(null)
-    }
-  }
-
-  const handleDeleteModel = async (targetModelTag: string) => {
-    setDeletingModelTag(targetModelTag)
-    const effectiveTargetUrl = normalizeOllamaUrl(ollamaUrl)
-
-    try {
-      await api.deleteOllamaModel(targetModelTag, effectiveTargetUrl)
-      toast.success(`Modelo "${targetModelTag}" eliminado de Ollama correctamente.`)
-      void fetchOllamaModels(effectiveTargetUrl, false)
-      await loadDynamicCatalog(true)
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : `Error al eliminar el modelo ${targetModelTag}`
-      toast.error(errMsg)
-    } finally {
-      setDeletingModelTag(null)
-    }
-  }
-
-  const isModelDownloaded = (modelTag: string) => {
-    return ollamaModels.some((m) => m === modelTag || m.startsWith(`${modelTag}:`))
-  }
-
-  const checkIsKeyConfigured = (p: string) => {
-    const pLower = p.toLowerCase()
-    const hasCred =
-      configuredCreds.includes(pLower) ||
-      (pLower === 'claude' && configuredCreds.includes('anthropic'))
-    if (hasCred) return true
+  const checkIsKeyConfigured = (p: string): boolean => {
+    if (configuredCreds.includes(p)) return true
     if (p === 'groq') return Boolean(ai?.groq_api_key_set)
     if (p === 'gemini') return Boolean(ai?.gemini_api_key_set)
     if (p === 'openai') return Boolean(ai?.openai_api_key_set)
@@ -425,7 +167,6 @@ export function useAiSettingsManager() {
     }
 
     setSavingAi(true)
-
     const payload: Record<string, string> = {
       provider,
       model: model.trim(),
@@ -453,9 +194,9 @@ export function useAiSettingsManager() {
       setGeminiKey('')
       setOpenaiKey('')
       setClaudeKey('')
-      toast.success('Configuración del modelo de redacción y chat guardada exitosamente.')
+      toast.success('Configuración guardada exitosamente.')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al guardar la configuración de IA')
+      toast.error(err instanceof Error ? err.message : 'Error al guardar la configuración.')
     } finally {
       setSavingAi(false)
     }
@@ -479,22 +220,21 @@ export function useAiSettingsManager() {
     }
 
     setTestingConnection(true)
-
     if (provider === 'local' || provider === 'builtin') {
       try {
-        const provider = await getWebLLMProvider()
-        const isCached = await provider.isModelCached(model)
+        const webllm = await getWebLLMProvider()
+        const isCached = await webllm.isModelCached(model)
         if (!isCached) {
-          toast.error(`El modelo ${model} no se encuentra descargado en la caché del navegador.`)
+          toast.error(`El modelo ${model} no está descargado en la caché del navegador.`)
           return
         }
-        await provider.initModel(model)
-        const answer = await provider.complete([
+        await webllm.initModel(model)
+        const answer = await webllm.complete([
           { role: 'user', content: 'Responde únicamente con OK.' },
         ], { maxTokens: 10 })
         toast.success(`Prueba exitosa con WebLLM (${model}): ${answer}`)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Error al probar modelo WebLLM en navegador.')
+        toast.error(err instanceof Error ? err.message : 'Error al probar modelo en navegador.')
       } finally {
         setTestingConnection(false)
       }
@@ -515,12 +255,12 @@ export function useAiSettingsManager() {
     try {
       const res = await api.testAiConnection(payload)
       if (res.ok || res.status === 'ok') {
-        toast.success(res.message || 'Prueba de conexión exitosa con el modelo de IA.')
+        toast.success(res.message || 'Prueba de conexión exitosa.')
       } else {
-        toast.error(res.message || 'La prueba de conexión con el modelo ha fallado.')
+        toast.error(res.message || 'La prueba de conexión ha fallado.')
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al realizar la prueba de conexión con el modelo.')
+      toast.error(err instanceof Error ? err.message : 'Error al probar conexión.')
     } finally {
       setTestingConnection(false)
     }
@@ -551,9 +291,9 @@ export function useAiSettingsManager() {
       }).catch(() => null)
       setTranscriptionGroqKey('')
       setTranscriptionOpenaiKey('')
-      toast.success('Configuración del motor de transcripción y voz guardada exitosamente.')
+      toast.success('Configuración de transcripción guardada.')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al guardar el modelo de voz y transcripción')
+      toast.error(err instanceof Error ? err.message : 'Error al guardar configuración.')
     } finally {
       setSavingAi(false)
     }
@@ -568,13 +308,31 @@ export function useAiSettingsManager() {
     setModel,
     isWritingOpen,
     setIsWritingOpen,
-    isVoiceAudioOpen,
-    setIsVoiceAudioOpen,
     showEndpointSection,
     setShowEndpointSection,
+    ollamaUrl,
+    setOllamaUrl,
+    ollamaOnline,
+    ollamaModels,
+    fetchingModels,
+    fetchOllamaModels,
     catalogModels,
     catalogError,
     loadDynamicCatalog,
+    groqKey,
+    setGroqKey,
+    geminiKey,
+    setGeminiKey,
+    openaiKey,
+    setOpenaiKey,
+    claudeKey,
+    setClaudeKey,
+    showKey,
+    setShowKey,
+    savingAi,
+    testingConnection,
+    handleAiSave,
+    handleTestConnection,
     voiceAudioProvider,
     setVoiceAudioProvider,
     voiceAudioModel,
@@ -585,53 +343,8 @@ export function useAiSettingsManager() {
     setTranscriptionOpenaiKey,
     showTranscriptionKey,
     setShowTranscriptionKey,
-    groqKey,
-    setGroqKey,
-    geminiKey,
-    setGeminiKey,
-    openaiKey,
-    setOpenaiKey,
-    claudeKey,
-    setClaudeKey,
-    ollamaUrl,
-    setOllamaUrl,
-    showKey,
-    setShowKey,
-    ollamaOnline,
-    ollamaModels,
-    isPulling,
-    pullingModelTag,
-    deletingModelTag,
-    pullStatusMsg,
-    fetchingModels,
-    fetchOllamaModels,
-    handlePullModel,
-    handleDeleteModel,
-    isModelDownloaded,
-    localWhisperModels,
-    downloadingWhisperId,
-    deletingWhisperId,
-    fetchingWhisperModels,
-    fetchLocalWhisperModels,
-    handleDownloadWhisperModel,
-    handleDeleteWhisperModel,
-    localBuiltinModels,
-    downloadingBuiltinId,
-    deletingBuiltinId,
-    fetchingBuiltinModels,
-    fetchLocalBuiltinModels,
-    handleDownloadBuiltinModel,
-    handleDeleteBuiltinModel,
-    handleCancelBuiltinDownload,
-    handleDismissDownloadTask,
-    downloadTasks,
-    savingAi,
-    testingConnection,
-    handleAiSave,
-    handleTestConnection,
+    isVoiceAudioOpen,
+    setIsVoiceAudioOpen,
     handleVoiceAudioSave,
-    configuredCreds,
-    setConfiguredCreds,
   }
 }
-

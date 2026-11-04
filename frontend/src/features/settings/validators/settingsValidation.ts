@@ -3,10 +3,25 @@ export type ValidationResult = {
   error?: string
 }
 
+export function validateRemoteEndpointUrl(urlString: string, allowHttp = false): ValidationResult {
+  const trimmed = urlString.trim()
+  if (!trimmed) return { isValid: false, error: 'La URL del endpoint remoto es obligatoria.' }
+  let parsed: URL
+  try { parsed = new URL(trimmed) } catch { return { isValid: false, error: 'Formato de URL inválido.' } }
+  if (parsed.protocol !== 'https:' && (!allowHttp || parsed.protocol !== 'http:')) {
+    return { isValid: false, error: 'El endpoint remoto debe utilizar protocolo HTTPS.' }
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  const privateIpv4 = /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)
+  if (host === 'localhost' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.internal') || privateIpv4) {
+    return { isValid: false, error: 'Endpoints locales y redes privadas no están permitidos.' }
+  }
+  return { isValid: true }
+}
+
 export function normalizeOllamaUrl(url?: string): string {
   if (!url) return ''
-  const trimmed = url.trim()
-  return trimmed
+  return url.trim()
 }
 
 export function isValidHttpUrl(stringUrl: string): boolean {
@@ -43,17 +58,24 @@ export function validateAiSettingsPayload(params: AiSettingsValidationParams): V
     }
   }
 
-  if (provider === 'ollama' && ollamaUrl) {
+  if (model.toLowerCase().endsWith('.gguf')) {
+    return {
+      isValid: false,
+      error: 'Los modelos en formato GGUF no están admitidos. Usa WebLLM en navegador o una API externa.',
+    }
+  }
+
+  if (provider === 'ollama' || provider === 'ollama_remote') {
     const target = normalizeOllamaUrl(ollamaUrl)
-    if (!isValidHttpUrl(target)) {
+    const urlCheck = validateRemoteEndpointUrl(target, false)
+    if (!urlCheck.isValid) {
       return {
         isValid: false,
-    error: 'Debes indicar la URL del servidor Ollama.',
+        error: urlCheck.error || 'Debes indicar una URL remota HTTPS válida para Ollama.',
       }
     }
   }
 
-  // Key check for cloud providers if no key has been saved and input is empty
   if (['groq', 'gemini', 'openai', 'claude'].includes(provider)) {
     let key = ''
     if (provider === 'groq') key = groqKey || ''
