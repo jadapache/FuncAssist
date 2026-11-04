@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, List, Optional
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, or_, select
 
 from app.db.database import get_db, get_sync_db
 from app.db.models import AIModelCatalogModel, CorporateTemplateModel
@@ -89,11 +89,25 @@ class AIModelCatalogRepository:
   """PostgreSQL ORM repository for AI model catalog."""
 
   def get_sync(self, model_id: str) -> Optional[dict[str, Any]]:
+    clean = model_id.strip()
     with get_sync_db() as db:
-      stmt = select(AIModelCatalogModel).where(AIModelCatalogModel.id == model_id)
+      stmt = select(AIModelCatalogModel).where(AIModelCatalogModel.id == clean)
       result = db.execute(stmt)
       row = result.scalar_one_or_none()
-      return row.to_dict() if row else None
+      if row:
+        return row.to_dict()
+      # Search in aliases / filenames / tag within payload
+      stmt_all = select(AIModelCatalogModel)
+      for r in db.execute(stmt_all).scalars().all():
+        d = r.to_dict()
+        aliases = [a.lower() for a in d.get("aliases", [])]
+        if (
+          clean.lower() in aliases
+          or clean.lower() == d.get("filename", "").lower()
+          or clean.lower() == d.get("tag", "").lower()
+        ):
+          return d
+      return None
 
   def list_sync(self, task_type: Optional[str] = None) -> List[dict[str, Any]]:
     with get_sync_db() as db:
@@ -104,6 +118,29 @@ class AIModelCatalogRepository:
       result = db.execute(stmt)
       items = result.scalars().all()
       return [item.to_dict() for item in items]
+
+  async def list(self, task_type: Optional[str] = None) -> List[dict[str, Any]]:
+    async with get_db() as db:
+      stmt = select(AIModelCatalogModel)
+      if task_type:
+        stmt = stmt.where(AIModelCatalogModel.task_type == task_type)
+      stmt = stmt.order_by(AIModelCatalogModel.name.asc())
+      result = await db.execute(stmt)
+      items = result.scalars().all()
+      return [item.to_dict() for item in items]
+
+  def delete_free_models_sync(self) -> int:
+    with get_sync_db() as db:
+      stmt = delete(AIModelCatalogModel).where(
+        or_(
+          AIModelCatalogModel.is_free == True,
+          AIModelCatalogModel.tier_type == "free",
+          AIModelCatalogModel.provider == "builtin",
+        )
+      )
+      res = db.execute(stmt)
+      db.commit()
+      return res.rowcount
 
   def bulk_upsert_sync(self, models: List[dict[str, Any]]) -> int:
     with get_sync_db() as db:
@@ -117,6 +154,12 @@ class AIModelCatalogRepository:
         name = m.get("name", mid)
         is_free = bool(m.get("is_free", False))
         tier_type = m.get("tier_type", "free" if is_free else "paid")
+        vram_mb = m.get("vram_required_mb") or m.get("vramRequiredMB")
+        context_win = m.get("context_window") or m.get("contextWindow") or m.get("tokens")
+        down_size = m.get("download_size") or m.get("downloadSize") or m.get("size")
+        tier = m.get("tier")
+        req_features = m.get("required_features") or m.get("requiredFeatures") or []
+        req_features_json = json.dumps(req_features) if req_features else None
         payload_json = json.dumps(m, ensure_ascii=False)
 
         stmt = select(AIModelCatalogModel).where(AIModelCatalogModel.id == mid)
@@ -131,6 +174,11 @@ class AIModelCatalogRepository:
             name=name,
             is_free=is_free,
             tier_type=tier_type,
+            vram_required_mb=vram_mb,
+            context_window=context_win,
+            download_size=down_size,
+            tier=tier,
+            required_features=req_features_json,
             payload_json=payload_json,
           )
           db.add(row)
@@ -140,6 +188,11 @@ class AIModelCatalogRepository:
           row.name = name
           row.is_free = is_free
           row.tier_type = tier_type
+          row.vram_required_mb = vram_mb
+          row.context_window = context_win
+          row.download_size = down_size
+          row.tier = tier
+          row.required_features = req_features_json
           row.payload_json = payload_json
         count += 1
       db.commit()

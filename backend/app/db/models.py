@@ -839,6 +839,11 @@ class AIModelCatalogModel(Base):
   is_free: Mapped[bool] = mapped_column(Boolean, default=False)
   tier_type: Mapped[str] = mapped_column(String, default="paid")
   payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+  vram_required_mb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+  context_window: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  download_size: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  tier: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  required_features: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
   updated_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=func.now()
   )
@@ -848,7 +853,13 @@ class AIModelCatalogModel(Base):
       parsed = json.loads(self.payload_json)
     except Exception:
       parsed = {}
-    return {
+    features = []
+    if self.required_features:
+      try:
+        features = json.loads(self.required_features)
+      except Exception:
+        features = []
+    res = {
       "id": self.id,
       "provider": self.provider,
       "task_type": self.task_type,
@@ -857,5 +868,21 @@ class AIModelCatalogModel(Base):
       "tier_type": self.tier_type,
       **parsed,
     }
+    if self.vram_required_mb is not None:
+      res["vram_required_mb"] = self.vram_required_mb
+      res["vramRequiredMB"] = self.vram_required_mb
+      res["vram_formatted"] = f"~{self.vram_required_mb} MB VRAM" if self.vram_required_mb < 1000 else f"~{round(self.vram_required_mb / 1024, 1)} GB VRAM"
+    if self.context_window is not None:
+      res["context_window"] = self.context_window
+      res["contextWindow"] = self.context_window
+    if self.download_size is not None:
+      res["download_size"] = self.download_size
+      res["downloadSize"] = self.download_size
+    if self.tier is not None:
+      res["tier"] = self.tier
+    if self.required_features is not None:
+      res["required_features"] = features
+      res["requiredFeatures"] = features
+    return res
 
 

@@ -45,13 +45,14 @@ def _resolve_context_length(tokens_str: str) -> int:
 
 def _build_builtin_chat_model(item: dict[str, Any]) -> AIModelInfo:
     model_id = item["id"]
-    tokens_str = item.get("tokens", "32.768 tokens")
+    tokens_str = item.get("context_window") or item.get("tokens", "32.768 tokens")
+    vram_fmt = item.get("vram_formatted") or (f"~{item.get('vram_required_mb')} MB VRAM" if item.get("vram_required_mb") else "WebGPU")
     return AIModelInfo(
         id=model_id,
-        raw_id=item.get("filename", model_id),
+        raw_id=item.get("tag", model_id),
         name=item.get("name", model_id),
         provider="builtin",
-        provider_name="Built-in (Local)",
+        provider_name="Built-in (Navegador WebGPU)",
         description=item.get("description", ""),
         context_window=tokens_str,
         context_length=_resolve_context_length(tokens_str),
@@ -60,11 +61,11 @@ def _build_builtin_chat_model(item: dict[str, Any]) -> AIModelInfo:
         tier_type="free",
         pricing_prompt=0.0,
         pricing_completion=0.0,
-        pricing_label="Gratis (Local)",
-        rate_limits="Sin límite (Local)",
-        badge="Built-in (Sin Ollama)",
+        pricing_label="Gratis (Navegador)",
+        rate_limits="Sin límite (Navegador)",
+        badge=vram_fmt,
         is_free=True,
-        size=item.get("size"),
+        size=item.get("download_size") or item.get("size"),
     )
 
 
@@ -110,7 +111,7 @@ def _load_builtin_model_infos() -> list[AIModelInfo]:
         data = list(load_builtin_catalog(task_type=None).values())
     except Exception as exc:
         logger.debug(f"Built-in catalog file load failed: {exc}")
-        data = list(DEFAULT_BUILTIN_MODELS.values())
+        data = list(DEFAULT_BUILTIN_MODELS)
 
     builtin_models: list[AIModelInfo] = []
     for item in data:
@@ -119,6 +120,8 @@ def _load_builtin_model_infos() -> list[AIModelInfo]:
         task_type = item.get("task_type", "chat_writing")
         if task_type == "transcription":
             builtin_models.append(_build_builtin_transcription_model(item))
+        elif task_type == "chat_writing":
+            builtin_models.append(_build_builtin_chat_model(item))
     return builtin_models
 
 
