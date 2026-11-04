@@ -44,9 +44,9 @@ export function useAiSettingsManager() {
   const [showTranscriptionKey, setShowTranscriptionKey] = useState(false)
 
   // Local Whisper models state
-  const [localWhisperModels, setLocalWhisperModels] = useState<LocalWhisperModelInfo[]>([])
+  const [localWhisperModels] = useState<LocalWhisperModelInfo[]>([])
   const [deletingWhisperId, setDeletingWhisperId] = useState<string | null>(null)
-  const [fetchingWhisperModels, setFetchingWhisperModels] = useState(false)
+  const [fetchingWhisperModels] = useState(false)
 
   // Local Built-in GGUF models state
   const [localBuiltinModels, setLocalBuiltinModels] = useState<LocalBuiltinModelInfo[]>([])
@@ -158,17 +158,7 @@ export function useAiSettingsManager() {
   }, [ollamaUrl, toast])
 
   const fetchLocalWhisperModels = useCallback(async () => {
-    setFetchingWhisperModels(true)
-    try {
-      const res = await api.listWhisperModels()
-      if (res.ok && res.models) {
-        setLocalWhisperModels(res.models)
-      }
-    } catch (e) {
-      console.error('Error fetching local whisper models:', e)
-    } finally {
-      setFetchingWhisperModels(false)
-    }
+    // Modelos locales cargados directamente desde catalogModels
   }, [])
 
   const fetchLocalBuiltinModels = useCallback(async () => {
@@ -264,7 +254,6 @@ export function useAiSettingsManager() {
         if (settings.ollama_base_url) {
           void fetchOllamaModels(settings.ollama_base_url, false)
         }
-        void fetchLocalWhisperModels()
         void fetchLocalBuiltinModels()
       } catch (err) {
         if (isMounted) {

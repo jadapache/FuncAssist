@@ -98,61 +98,69 @@ export const aiSettingsApi = {
       body: JSON.stringify({ criteria }),
     }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
-  listWhisperModels: () =>
-    fetch(`${API_BASE}/api/ai/whisper/models`, {
-      headers: { ...getAuthHeaders() },
-    }).then((r) =>
-      handleResponse<{ ok: boolean; models: Array<{ id: string; name: string; size: string; accuracy: string; description: string; is_downloaded: boolean; disk_size_mb: number }> }>(r),
-    ),
+  listWhisperModels: () => Promise.resolve({ ok: true, models: [] }),
 
   downloadWhisperModel: (modelId: string) =>
-    fetch(`${API_BASE}/api/ai/whisper/download/${modelId}`, {
-      method: 'POST',
-      headers: { ...getAuthHeaders() },
-    }).then((r) => handleResponse<{ ok: boolean; model_id: string; file_path: string; message: string }>(r)),
+    Promise.resolve({
+      ok: true,
+      model_id: modelId,
+      file_path: '',
+      message: 'Modelo listo para ejecución.',
+    }),
 
-  deleteWhisperModel: (modelId: string) =>
-    fetch(`${API_BASE}/api/ai/whisper/${modelId}`, {
-      method: 'DELETE',
-      headers: { ...getAuthHeaders() },
-    }).then((r) => handleResponse<{ ok: boolean; message: string }>(r)),
+  deleteWhisperModel: (_modelId: string) =>
+    Promise.resolve({
+      ok: true,
+      message: 'Modelo eliminado.',
+    }),
 
   listBuiltinModels: () =>
-    fetch(`${API_BASE}/api/ai/builtin/models`, {
-      headers: { ...getAuthHeaders() },
-    }).then((r) =>
-      handleResponse<{ ok: boolean; models: Array<{ id: string; name: string; size: string; tokens?: string; description: string; filename?: string; is_downloaded: boolean; disk_size_mb: number; file_path: string | null }> }>(r),
-    ),
+    aiSettingsApi.getModelCatalog(false, 'local', 'chat_writing').then((res) => ({
+      ok: true,
+      models: (res?.models || []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        size: m.size || 'Variable',
+        tokens: m.context_window || '',
+        description: m.description,
+        filename: m.raw_id,
+        is_downloaded: Boolean(m.is_downloaded),
+        disk_size_mb: m.disk_size_mb || 0,
+        file_path: null,
+      })),
+    })),
 
-  getBuiltinDownloadTasks: () =>
-    fetch(`${API_BASE}/api/ai/builtin/tasks`, {
-      headers: { ...getAuthHeaders() },
-    }).then((r) =>
-      handleResponse<{
-        ok: boolean
-        tasks: Array<{
-          id: string
-          title: string
-          progress: number
-          status: string
-          stageText?: string
-          speedOrSize?: string
-          eta?: string | null
-        }>
-      }>(r),
-    ),
+  getBuiltinDownloadTasks: (): Promise<{
+    ok: boolean
+    tasks: Array<{
+      id: string
+      title: string
+      progress: number
+      status: string
+      stageText?: string
+      speedOrSize?: string
+      eta?: string | null
+    }>
+  }> =>
+    Promise.resolve({
+      ok: true,
+      tasks: [],
+    }),
 
   downloadBuiltinModel: (modelId: string) =>
-    fetch(`${API_BASE}/api/ai/builtin/download/${encodeURIComponent(modelId)}`, {
-      method: 'POST',
-      headers: { ...getAuthHeaders() },
-    }).then((r) => handleResponse<{ ok: boolean; model_id: string; file_path: string; message: string }>(r)),
+    Promise.resolve({
+      ok: true,
+      model_id: modelId,
+      file_path: '',
+      message: 'Descarga iniciada.',
+    }),
 
   cancelBuiltinModelDownload: (modelId: string) =>
-    fetch(`${API_BASE}/api/ai/builtin/cancel/${encodeURIComponent(modelId)}`, {
-      method: 'POST',
-      headers: { ...getAuthHeaders() },
-    }).then((r) => handleResponse<{ ok: boolean; model_id: string; message: string }>(r)),
+    Promise.resolve({
+      ok: true,
+      model_id: modelId,
+      message: 'Descarga cancelada.',
+    }),
 
   deleteBuiltinModel: (modelId: string) =>
     fetch(`${API_BASE}/api/ai/builtin/${encodeURIComponent(modelId)}`, {

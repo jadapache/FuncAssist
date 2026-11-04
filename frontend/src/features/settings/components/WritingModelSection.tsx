@@ -176,6 +176,7 @@ export const WritingModelSection = ({
             <BuiltinModelsList
               model={model}
               setModel={setModel}
+              initialCatalogModels={catalogModels}
             />
           )}
 

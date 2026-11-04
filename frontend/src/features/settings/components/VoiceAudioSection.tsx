@@ -55,71 +55,26 @@ export const VoiceAudioSection = ({
   savingAi,
   handleVoiceAudioSave,
 }: VoiceAudioSectionProps) => {
-  const DEFAULT_ONNX_MODELS: LocalVoiceModelItem[] = [
-    {
-      id: 'whisper-tiny',
-      name: 'Whisper Tiny (ONNX Web / Ultra Rápido)',
-      tag: 'onnx:whisper-tiny',
-      description: 'Modelo Whisper optimizado para ONNX Web Runtime. Ultraligero (~40 MB), ideal para CPU WASM o transcribir con mínimo consumo.',
-      size: '~40 MB',
-      accuracy: 'Básica (Ultra Rápido)',
-      provider: 'onnx',
-      engine: 'onnxruntime-web',
-    },
-    {
-      id: 'whisper-base',
-      name: 'Whisper Base (ONNX Web / Recomendado)',
-      tag: 'onnx:whisper-base',
-      description: 'Excelente balance entre velocidad y precisión para reuniones estándar. Funciona de manera fluida en WebGPU y CPU.',
-      size: '~75 MB',
-      accuracy: 'Estándar (Recomendado)',
-      provider: 'onnx',
-      engine: 'onnxruntime-web',
-    },
-    {
-      id: 'whisper-small',
-      name: 'Whisper Small (ONNX Web / Alta Precisión)',
-      tag: 'onnx:whisper-small',
-      description: 'Mayor fidelidad y precisión con acentos en español y terminología técnica. Recomendado con aceleración WebGPU.',
-      size: '~250 MB',
-      accuracy: 'Alta',
-      provider: 'onnx',
-      engine: 'onnxruntime-web',
-    },
-    {
-      id: 'whisper-large-v3-turbo',
-      name: 'Whisper Large v3 Turbo (ONNX Web / Máxima Precisión)',
-      tag: 'onnx:whisper-large-v3-turbo',
-      description: 'Modelo de máxima fidelidad multilingüe optimizado en ONNX para WebGPU.',
-      size: '~800 MB',
-      accuracy: 'Máxima',
-      provider: 'onnx',
-      engine: 'onnxruntime-web',
-    },
-  ]
-
   const localVoiceModelsList = useMemo<LocalVoiceModelItem[]>(() => {
-    const fromCatalog = catalogModels.filter(
-      (m) =>
-        m.task_type === 'transcription' &&
-        (m.provider === 'local' || m.provider === 'builtin' || m.is_free),
-    )
-    if (fromCatalog.length > 0) {
-      return fromCatalog.map((m) => ({
+    return catalogModels
+      .filter(
+        (m) =>
+          m.task_type === 'transcription' &&
+          (m.provider === 'local' || m.provider === 'builtin' || m.is_free),
+      )
+      .map((m) => ({
         id: m.id,
         name: m.name,
         tag: m.raw_id || m.id,
         description: m.description,
         size: m.size || 'Variable',
         accuracy: m.accuracy || 'Estándar',
-        provider: m.provider,
-        engine: m.provider === 'onnx' ? 'onnxruntime-web' : m.provider,
-        badge: m.badge,
+        provider: 'local',
+        engine: 'local',
+        badge: m.badge || 'Local',
         is_downloaded: m.is_downloaded,
         disk_size_mb: m.disk_size_mb,
       }))
-    }
-    return DEFAULT_ONNX_MODELS
   }, [catalogModels])
 
   const isBuiltIn =

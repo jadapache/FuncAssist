@@ -14,6 +14,7 @@ import {
   evaluateModel,
   loadWebLLMModelsFromBackend,
 } from '../../../ai/policies/modelSelectionPolicy'
+import type { ModelCatalogItem } from '../../../../api/client'
 import type {
   HardwareProfile,
   WebLLMInitProgress,
@@ -34,14 +35,39 @@ async function getWebLLMProvider() {
 export interface BuiltinModelsListProps {
   model: string
   setModel: (m: string) => void
+  initialCatalogModels?: ModelCatalogItem[]
+}
+
+function mapCatalogToWebLLM(items: ModelCatalogItem[]): WebLLMModelDefinition[] {
+  return items
+    .filter((m) => (m.provider === 'local' || m.provider === 'builtin') && m.task_type === 'chat_writing')
+    .map((m) => {
+      const vramNum = typeof m.vram_required_mb === 'number' ? m.vram_required_mb : 1630
+      return {
+        id: m.id,
+        name: m.name,
+        tag: m.raw_id || m.id,
+        description: m.description || '',
+        downloadSize: m.size || '~950 MB',
+        vramRequiredMB: vramNum,
+        vramFormatted:
+          m.vram_formatted ||
+          (vramNum < 1000 ? '~' + vramNum + ' MB VRAM' : '~' + (vramNum / 1024).toFixed(1) + ' GB VRAM'),
+        contextWindow: m.context_window || '32.768 tokens',
+        tier: (m.tier as 'speed' | 'balanced' | 'quality') || 'balanced',
+        requiredFeatures: m.required_features || [],
+      }
+    })
 }
 
 export const BuiltinModelsList = ({
   model,
   setModel,
+  initialCatalogModels,
 }: BuiltinModelsListProps) => {
-  const [modelsList, setModelsList] = useState<WebLLMModelDefinition[]>([])
-  const [isLoadingModels, setIsLoadingModels] = useState(true)
+  const initialModels = initialCatalogModels ? mapCatalogToWebLLM(initialCatalogModels) : []
+  const [modelsList, setModelsList] = useState<WebLLMModelDefinition[]>(initialModels)
+  const [isLoadingModels, setIsLoadingModels] = useState(initialModels.length === 0)
   const [cachedMap, setCachedMap] = useState<Record<string, boolean>>({})
   const [hardware, setHardware] = useState<HardwareProfile | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -68,20 +94,25 @@ export const BuiltinModelsList = ({
   }, [])
 
   useEffect(() => {
+    if (initialCatalogModels && initialCatalogModels.length > 0) {
+      const mapped = mapCatalogToWebLLM(initialCatalogModels)
+      if (mapped.length > 0) {
+        setModelsList(mapped)
+        setIsLoadingModels(false)
+        return
+      }
+    }
+
     let isMounted = true
     const init = async () => {
-      setIsLoadingModels(true)
       try {
-        const [profile, loadedModels] = await Promise.all([
-          detectHardwareProfile(),
-          loadWebLLMModelsFromBackend(),
-        ])
+        const loadedModels = await loadWebLLMModelsFromBackend()
         if (!isMounted) return
-        setHardware(profile)
-        setModelsList(loadedModels)
-        await refreshCacheStatus(loadedModels)
+        if (loadedModels.length > 0) {
+          setModelsList(loadedModels)
+        }
       } catch (err) {
-        console.error('Error cargando modelos:', err)
+        console.error('Error cargando modelos WebLLM:', err)
       } finally {
         if (isMounted) {
           setIsLoadingModels(false)
@@ -89,10 +120,31 @@ export const BuiltinModelsList = ({
       }
     }
     void init()
+
     return () => {
       isMounted = false
     }
-  }, [refreshCacheStatus])
+  }, [initialCatalogModels])
+
+  useEffect(() => {
+    let isMounted = true
+    void detectHardwareProfile()
+      .then((profile) => {
+        if (isMounted) setHardware(profile)
+      })
+      .catch((err) => {
+        console.warn('Hardware profile detection failed:', err)
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (modelsList.length > 0) {
+      void refreshCacheStatus(modelsList)
+    }
+  }, [modelsList, refreshCacheStatus])
 
   const handleDownload = async (modelDef: WebLLMModelDefinition) => {
     setDownloadingId(modelDef.id)

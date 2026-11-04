@@ -42,7 +42,7 @@ export const LocalVoiceModelCard = ({ item, isSelected, onSelect }: ModelCardPro
           <h5 className="font-bold text-slate-900 text-base">{item.name}</h5>
           <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-[#002777] border border-blue-200">
             <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-            {item.badge || (item.provider === 'faster-whisper' ? 'CTranslate2 Local' : item.provider === 'moonshine' ? 'Moonshine Local' : 'ONNX Runtime Web')}
+            {item.badge || 'Local'}
           </span>
           {isSelected && (
             <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-[#002777]">
@@ -95,7 +95,7 @@ export const LocalVoiceModelsList = ({
         <div>
           <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <HardDrive className="h-4 w-4 text-[#002777]" />
-            <span>Modelos de IA Integrados (ONNX Runtime Web)</span>
+            <span>Modelos de IA Integrados (Locales)</span>
           </h4>
           <p className="text-xs text-slate-500 mt-0.5">
             Modelos de transcripción ejecutados directamente en tu navegador (WebGPU / CPU Wasm). Sin enviar audio a servidores externos ni descargas en el backend.
@@ -103,25 +103,31 @@ export const LocalVoiceModelsList = ({
         </div>
       </div>
 
-      <div className="space-y-3">
-        {localVoiceModelsList.map((m) => {
-          const isSelected =
-            model === m.id ||
-            model === `whisper-${m.id}` ||
-            (model === 'base' && m.id === 'whisper-base') ||
-            (model === 'tiny' && m.id === 'whisper-tiny') ||
-            (model === 'small' && m.id === 'whisper-small') ||
-            (model === 'large-v3-turbo' && m.id === 'whisper-large-v3-turbo')
-          return (
-            <LocalVoiceModelCard
-              key={m.id}
-              item={m}
-              isSelected={isSelected}
-              onSelect={() => setModel(m.id)}
-            />
-          )
-        })}
-      </div>
+      {localVoiceModelsList.length === 0 ? (
+        <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+          No hay modelos de transcripción disponibles en el catálogo en este momento.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {localVoiceModelsList.map((m) => {
+            const isSelected =
+              model === m.id ||
+              model === `whisper-${m.id}` ||
+              (model === 'base' && m.id === 'whisper-base') ||
+              (model === 'tiny' && m.id === 'whisper-tiny') ||
+              (model === 'small' && m.id === 'whisper-small') ||
+              (model === 'large-v3-turbo' && m.id === 'whisper-large-v3-turbo')
+            return (
+              <LocalVoiceModelCard
+                key={m.id}
+                item={m}
+                isSelected={isSelected}
+                onSelect={() => setModel(m.id)}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
