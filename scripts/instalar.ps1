@@ -56,9 +56,9 @@ if (-not (Test-Path $envFile)) {
   Write-Warning "Configure los secretos en $envFile antes de iniciar la aplicación."
 }
 
-$taskName = 'FuncAssist - actualización automática'
+$taskName = 'FuncAssist - Update'
 $updater = Join-Path $InstallDir 'actualizar.ps1'
-$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updater`""
+$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$updater`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 3650)
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
