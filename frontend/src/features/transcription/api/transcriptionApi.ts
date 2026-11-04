@@ -162,15 +162,16 @@ export const transcriptionApi = {
   },
 
   async retranscribe(transcriptionId: string, options?: TranscribeOptions): Promise<{ ok: boolean; status: string; transcription_id: string; message: string }> {
-    const response = await fetch(`${API_BASE}/api/transcription/retranscribe/${transcriptionId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify(options || {}),
+    const res = await this.startTranscription(transcriptionId, {
+      ...options,
+      transcription_id: transcriptionId,
     })
-    return handleResponse(response)
+    return {
+      ok: res.ok,
+      status: res.status,
+      transcription_id: res.transcription_id,
+      message: 'Regeneración iniciada.',
+    }
   },
 
   async getTranscriptionStatus(transcriptionId: string): Promise<TranscriptionProgress> {

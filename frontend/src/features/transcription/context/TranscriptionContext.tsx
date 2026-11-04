@@ -887,9 +887,11 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
         onDismiss: () => handleDismissJob(transcriptionId),
       })
 
-      await transcriptionApi.retranscribe(transcriptionId, {
+      const targetMediaId = recent?.media_id || transcriptionId
+      await transcriptionApi.startTranscription(targetMediaId, {
         mode: 'auto',
         enable_diarization: true,
+        transcription_id: transcriptionId,
       })
       toast.info('Regeneración de transcripción iniciada.')
     } catch (err: any) {
