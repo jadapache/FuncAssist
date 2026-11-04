@@ -45,6 +45,19 @@ jobs:
             type=sha
             type=ref,event=branch
       - uses: docker/build-push-action@v6
-        with: { context: ., file: Dockerfile, push: true, tags: '${{ env.IMAGE_PREFIX }}-frontend:latest,${{ env.IMAGE_PREFIX }}-frontend:sha-${{ github.sha }}' }
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: '${{ env.IMAGE_PREFIX }}-frontend:latest,${{ env.IMAGE_PREFIX }}-frontend:sha-${{ github.sha }}'
+          # GHCR can reject the extra OCI attestation manifest as "unknown blob".
+          provenance: false
+          sbom: false
       - uses: docker/build-push-action@v6
-        with: { context: ., file: backend/Dockerfile, push: true, tags: '${{ env.IMAGE_PREFIX }}-backend:latest,${{ env.IMAGE_PREFIX }}-backend:sha-${{ github.sha }}' }
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: '${{ env.IMAGE_PREFIX }}-backend:latest,${{ env.IMAGE_PREFIX }}-backend:sha-${{ github.sha }}'
+          provenance: false
+          sbom: false
