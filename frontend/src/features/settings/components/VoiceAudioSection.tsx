@@ -1,4 +1,4 @@
-import { useMemo, type FormEvent } from 'react'
+import type { FormEvent } from 'react'
 import {
   Check,
   ChevronDown,
@@ -6,9 +6,10 @@ import {
   Mic,
   RefreshCw,
 } from 'lucide-react'
-import type { AISettings, LocalWhisperModelInfo, ModelCatalogItem } from '../../../api/client'
-import { LocalVoiceModelsList, type LocalVoiceModelItem } from './voice/LocalVoiceModelsList'
+import type { AISettings, ModelCatalogItem } from '../../../api/client'
+import { LocalVoiceModelsList } from './voice/LocalVoiceModelsList'
 import { CloudVoiceModelSelector } from './voice/CloudVoiceModelSelector'
+import { DEFAULT_BROWSER_ASR_MODEL } from '../../ai/catalogs/clientCatalog'
 
 export type VoiceAudioSectionProps = {
   ai: AISettings | null
@@ -27,14 +28,6 @@ export type VoiceAudioSectionProps = {
   setShowTranscriptionKey: (show: boolean) => void
   savingAi: boolean
   handleVoiceAudioSave: (e?: FormEvent) => Promise<void>
-  localWhisperModels?: LocalWhisperModelInfo[]
-  downloadingWhisperId?: string | null
-  deletingWhisperId?: string | null
-  fetchingWhisperModels?: boolean
-  fetchLocalWhisperModels?: () => Promise<void>
-  handleDownloadWhisperModel?: (modelId: string) => Promise<void>
-  handleDeleteWhisperModel?: (modelId: string) => Promise<void>
-  downloadTasks?: Record<string, { progress: number; speedOrSize?: string | null; stageText?: string }>
 }
 
 export const VoiceAudioSection = ({
@@ -55,32 +48,10 @@ export const VoiceAudioSection = ({
   savingAi,
   handleVoiceAudioSave,
 }: VoiceAudioSectionProps) => {
-  const localVoiceModelsList = useMemo<LocalVoiceModelItem[]>(() => {
-    return catalogModels
-      .filter(
-        (m) =>
-          m.task_type === 'transcription' &&
-          (m.provider === 'local' || m.provider === 'builtin' || m.is_free),
-      )
-      .map((m) => ({
-        id: m.id,
-        name: m.name,
-        tag: m.raw_id || m.id,
-        description: m.description,
-        size: m.size || 'Variable',
-        accuracy: m.accuracy || 'Estándar',
-        provider: 'local',
-        engine: 'local',
-        badge: m.badge || 'Local',
-        is_downloaded: m.is_downloaded,
-        disk_size_mb: m.disk_size_mb,
-      }))
-  }, [catalogModels])
-
-  const isBuiltIn =
-    voiceAudioProvider === 'builtin' ||
+  const isBrowserMode =
+    voiceAudioProvider === 'browser_asr' ||
     voiceAudioProvider === 'local' ||
-    voiceAudioProvider === 'onnx'
+    voiceAudioProvider === 'builtin'
 
   return (
     <form
@@ -98,7 +69,7 @@ export const VoiceAudioSection = ({
           <div>
             <h3 className="text-lg font-bold text-slate-900">Modelos de Transcripción y Comandos de Voz</h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Configura el motor de transcripción (ONNX Runtime, Faster Whisper, Moonshine, Whisper o Cloud) y gestiona los modelos offline instalados en tu equipo.
+              Configura la ejecución en el navegador (WebGPU / Web Worker) o mediante APIs en la nube.
             </p>
           </div>
         </div>
@@ -119,20 +90,17 @@ export const VoiceAudioSection = ({
 
       {isVoiceAudioOpen && (
         <>
-          {/* Selector de Proveedor del Motor de Transcripción */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-800 block">
-              Proveedor del Motor de Transcripción
+              Entorno de Ejecución de Transcripción
             </label>
             <select
-              value={isBuiltIn ? 'local' : voiceAudioProvider}
+              value={isBrowserMode ? 'local' : voiceAudioProvider}
               onChange={(e) => {
                 const newP = e.target.value
                 setVoiceAudioProvider(newP)
-                if (newP === 'local' || newP === 'builtin') {
-                  if (!voiceAudioModel || voiceAudioModel.startsWith('whisper-large') || voiceAudioModel === 'whisper-1') {
-                    setVoiceAudioModel('base')
-                  }
+                if (newP === 'local') {
+                  setVoiceAudioModel(DEFAULT_BROWSER_ASR_MODEL)
                 } else if (newP === 'groq') {
                   setVoiceAudioModel('whisper-large-v3')
                 } else if (newP === 'openai') {
@@ -141,22 +109,19 @@ export const VoiceAudioSection = ({
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
             >
-              <option value="local">IA Integrada (Local)</option>
-              <option value="groq">Groq (API)</option>
-              <option value="openai">OpenAI (API)</option>
+              <option value="local">En este navegador (Transformers.js / WebGPU)</option>
+              <option value="groq">Groq (API externa)</option>
+              <option value="openai">OpenAI (API externa)</option>
             </select>
           </div>
 
-          {/* CASO 1: MODELOS INTEGRADOS LOCALES */}
-          {isBuiltIn && (
+          {isBrowserMode && (
             <LocalVoiceModelsList
-              localVoiceModelsList={localVoiceModelsList}
               model={voiceAudioModel}
               setModel={setVoiceAudioModel}
             />
           )}
 
-          {/* CASO 2: PROVEEDORES CLOUD (GROQ, OPENAI) */}
           {['groq', 'openai'].includes(voiceAudioProvider) && (
             <CloudVoiceModelSelector
               provider={voiceAudioProvider}
@@ -173,7 +138,6 @@ export const VoiceAudioSection = ({
             />
           )}
 
-          {/* Botón Guardar */}
           <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button
               type="submit"

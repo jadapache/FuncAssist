@@ -1,27 +1,16 @@
 import { HardDrive } from 'lucide-react'
-
-export interface LocalVoiceModelItem {
-  id: string
-  name: string
-  tag?: string
-  description: string
-  size: string
-  accuracy?: string
-  provider?: string
-  engine?: string
-  badge?: string
-  is_downloaded?: boolean
-  disk_size_mb?: number
-}
+import {
+  getClientAsrModels,
+  type ClientAsrModelDefinition,
+} from '../../../ai/catalogs/clientCatalog'
 
 export interface LocalVoiceModelsListProps {
-  localVoiceModelsList: LocalVoiceModelItem[]
   model: string
   setModel: (m: string) => void
 }
 
 interface ModelCardProps {
-  item: LocalVoiceModelItem
+  item: ClientAsrModelDefinition
   isSelected: boolean
   onSelect: () => void
 }
@@ -42,7 +31,7 @@ export const LocalVoiceModelCard = ({ item, isSelected, onSelect }: ModelCardPro
           <h5 className="font-bold text-slate-900 text-base">{item.name}</h5>
           <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-[#002777] border border-blue-200">
             <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-            {item.badge || 'Local'}
+            {item.badge}
           </span>
           {isSelected && (
             <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-[#002777]">
@@ -56,13 +45,9 @@ export const LocalVoiceModelCard = ({ item, isSelected, onSelect }: ModelCardPro
         </p>
 
         <p className="text-xs text-slate-400 font-medium pt-0.5 flex items-center gap-2">
-          <span>Tamaño estimado: {item.size || 'Variable'}</span>
-          {item.accuracy && (
-            <>
-              <span>•</span>
-              <span>Precisión: {item.accuracy}</span>
-            </>
-          )}
+          <span>Tamaño estimado: {item.downloadSize}</span>
+          <span>•</span>
+          <span>Precisión: {item.accuracy}</span>
         </p>
       </div>
 
@@ -85,7 +70,6 @@ export const LocalVoiceModelCard = ({ item, isSelected, onSelect }: ModelCardPro
 }
 
 export const LocalVoiceModelsList = ({
-  localVoiceModelsList,
   model,
   setModel,
 }: LocalVoiceModelsListProps) => {
@@ -95,39 +79,27 @@ export const LocalVoiceModelsList = ({
         <div>
           <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <HardDrive className="h-4 w-4 text-[#002777]" />
-            <span>Modelos de IA Integrados (Locales)</span>
+            <span>Transcripción en este navegador (Transformers.js / WebGPU)</span>
           </h4>
           <p className="text-xs text-slate-500 mt-0.5">
-            Modelos de transcripción ejecutados directamente en tu navegador (WebGPU / CPU Wasm). Sin enviar audio a servidores externos ni descargas en el backend.
+            El reconocimiento de voz se realiza directamente en un Web Worker en tu dispositivo. El archivo de audio nunca sale de tu navegador.
           </p>
         </div>
       </div>
 
-      {localVoiceModelsList.length === 0 ? (
-        <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
-          No hay modelos de transcripción disponibles en el catálogo en este momento.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {localVoiceModelsList.map((m) => {
-            const isSelected =
-              model === m.id ||
-              model === `whisper-${m.id}` ||
-              (model === 'base' && m.id === 'whisper-base') ||
-              (model === 'tiny' && m.id === 'whisper-tiny') ||
-              (model === 'small' && m.id === 'whisper-small') ||
-              (model === 'large-v3-turbo' && m.id === 'whisper-large-v3-turbo')
-            return (
-              <LocalVoiceModelCard
-                key={m.id}
-                item={m}
-                isSelected={isSelected}
-                onSelect={() => setModel(m.id)}
-              />
-            )
-          })}
-        </div>
-      )}
+      <div className="space-y-3">
+        {getClientAsrModels().map((m) => {
+          const isSelected = model === m.id
+          return (
+            <LocalVoiceModelCard
+              key={m.id}
+              item={m}
+              isSelected={isSelected}
+              onSelect={() => setModel(m.id)}
+            />
+          )
+        })}
+      </div>
     </div>
   )
 }
