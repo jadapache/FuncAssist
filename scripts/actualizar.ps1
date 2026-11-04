@@ -1,4 +1,13 @@
-param([string]$ComposeFile = (Join-Path $PSScriptRoot '..\compose.yaml'), [switch]$Force)
+param(
+  [string]$ComposeFile = $(
+    if (Test-Path (Join-Path $PSScriptRoot 'compose.yaml')) {
+      Join-Path $PSScriptRoot 'compose.yaml'
+    } else {
+      Join-Path $PSScriptRoot '..\compose.yaml'
+    }
+  ),
+  [switch]$Force
+)
 $ErrorActionPreference = 'Stop'; $root = Split-Path $ComposeFile -Parent; Set-Location $root
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker no está instalado.' }
 $envFile = Join-Path $root '.env'; $composeArgs = @('--env-file', $envFile, '-f', $ComposeFile)

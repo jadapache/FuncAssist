@@ -3,17 +3,53 @@ param(
   [int]$IntervalMinutes = 15
 )
 $ErrorActionPreference = 'Stop'
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Instale Docker Desktop antes de continuar.' }
+
+function Resolve-SourceFile([string]$FileName) {
+  $candidates = @(
+    (Join-Path $PSScriptRoot $FileName),
+    (Join-Path $PSScriptRoot "..\" $FileName),
+    (Join-Path $PSScriptRoot "scripts\" $FileName)
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      return (Resolve-Path $candidate).Path
+    }
+  }
+  throw "No se encontró el archivo fuente: $FileName"
+}
+
+function Copy-DeploymentFile([string]$SourcePath, [string]$TargetDir) {
+  $targetPath = Join-Path $TargetDir (Split-Path $SourcePath -Leaf)
+  $resolvedTarget = (Resolve-Path $targetPath -ErrorAction SilentlyContinue)?.Path
+  if ($SourcePath -ne $resolvedTarget) {
+    Copy-Item $SourcePath $TargetDir -Force
+  }
+}
+
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+  throw 'Instale Docker Desktop antes de continuar.'
+}
 docker info | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Docker Desktop debe estar iniciado antes de instalar FuncAssist.' }
+if ($LASTEXITCODE -ne 0) {
+  throw 'Docker Desktop debe estar iniciado antes de instalar FuncAssist.'
+}
 
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
-Copy-Item (Join-Path $PSScriptRoot '..\compose.yaml') $InstallDir -Force
-Copy-Item (Join-Path $PSScriptRoot 'actualizar.ps1') $InstallDir -Force
-Copy-Item (Join-Path $PSScriptRoot 'estado.ps1') $InstallDir -Force
+
+$composeSource = Resolve-SourceFile 'compose.yaml'
+$actualizarSource = Resolve-SourceFile 'actualizar.ps1'
+$estadoSource = Resolve-SourceFile 'estado.ps1'
+$envExampleSource = Resolve-SourceFile '.env.example'
+
+Copy-DeploymentFile $composeSource $InstallDir
+Copy-DeploymentFile $actualizarSource $InstallDir
+Copy-DeploymentFile $estadoSource $InstallDir
 
 $envExample = Join-Path $InstallDir '.env.example'
-if (-not (Test-Path $envExample)) { Copy-Item (Join-Path $PSScriptRoot '..\.env.example') $envExample }
+if (-not (Test-Path $envExample)) {
+  Copy-DeploymentFile $envExampleSource $InstallDir
+}
+
 $envFile = Join-Path $InstallDir '.env'
 if (-not (Test-Path $envFile)) {
   Copy-Item $envExample $envFile
