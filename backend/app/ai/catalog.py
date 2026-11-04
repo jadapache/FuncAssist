@@ -1,135 +1,167 @@
 """AI Model Catalog Service.
 
-Loads model metadata (rate limits, pricing, context windows, and tasks)
-directly from declarative JSON catalog or PostgreSQL repository with resilient fallbacks.
+Publishes metadata for external API providers and client browser models directly from DB entity AIModelCatalog.
+Rejects forbidden server-side local execution runtimes (GGUF, whisper-python, faster-whisper, moonshine).
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-from app.core.settings import ROOT_DIR, USER_DATA_DIR, WHISPER_MODELS_DIR
 from app.models import AIModelInfo, ModelCatalogResponse
-from app.ai.builtin_local import get_builtin_cache_dir, load_builtin_catalog, resolve_model_meta
-from app.ai.builtin_seeds import DEFAULT_BUILTIN_MODELS
-from app.ai.frontier_sync import KNOWN_FRONTIER_MODELS
 from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
 
 logger = logging.getLogger(__name__)
 
-CATALOG_FILE = USER_DATA_DIR / "ai" / "models_catalog.json"
-FALLBACK_CATALOG_FILE = ROOT_DIR / "local" / "ai" / "models_catalog.json"
-
 _catalog_cache: list[AIModelInfo] | None = None
 _catalog_cache_ts: float = 0.0
 _CACHE_TTL_SECONDS = 300
-_BUILTIN_PROVIDERS = ("builtin", "local", "faster-whisper", "moonshine", "onnx")
+_FORBIDDEN_PROVIDERS = frozenset(["builtin", "local", "faster-whisper", "moonshine", "onnx"])
+
+KNOWN_BROWSER_MODELS: list[dict[str, Any]] = [
+    {
+        "id": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+        "raw_id": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+        "name": "Qwen 2.5 1.5B Instruct (Equilibrado)",
+        "provider": "webllm",
+        "provider_name": "WebLLM (In-Browser WebGPU)",
+        "description": "Gran capacidad de razonamiento en español y seguimiento de instrucciones en el navegador.",
+        "context_window": "4k tokens",
+        "context_length": 4096,
+        "badge": "Recomendado Navegador",
+        "task_type": "chat_writing",
+        "task_label": "Redacción y Chat",
+        "is_free": True,
+        "tier_type": "free",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "$0.00 (Navegador WebGPU)",
+        "rate_limits": "Ilimitado (Local)",
+        "max_output_tokens": 2048,
+        "vram_required_mb": 1200,
+        "download_size": "1.2 GB",
+    },
+    {
+        "id": "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+        "raw_id": "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+        "name": "Llama 3.2 1B Instruct (Ultra Ligero)",
+        "provider": "webllm",
+        "provider_name": "WebLLM (In-Browser WebGPU)",
+        "description": "Excelente para máquinas con recursos reducidos y laptops ligeras sin GPU dedicada.",
+        "context_window": "4k tokens",
+        "context_length": 4096,
+        "badge": "Ultra Ligero Navegador",
+        "task_type": "chat_writing",
+        "task_label": "Redacción y Chat",
+        "is_free": True,
+        "tier_type": "free",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "$0.00 (Navegador WebGPU)",
+        "rate_limits": "Ilimitado (Local)",
+        "max_output_tokens": 2048,
+        "vram_required_mb": 880,
+        "download_size": "880 MB",
+    },
+    {
+        "id": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+        "raw_id": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+        "name": "Llama 3.2 3B Instruct (Alta Capacidad)",
+        "provider": "webllm",
+        "provider_name": "WebLLM (In-Browser WebGPU)",
+        "description": "Mayor calidad sintáctica y argumentativa. Requiere WebGPU y GPU dedicada o Apple Silicon.",
+        "context_window": "4k tokens",
+        "context_length": 4096,
+        "badge": "Alta Calidad Navegador",
+        "task_type": "chat_writing",
+        "task_label": "Redacción y Chat",
+        "is_free": True,
+        "tier_type": "free",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "$0.00 (Navegador WebGPU)",
+        "rate_limits": "Ilimitado (Local)",
+        "max_output_tokens": 2048,
+        "vram_required_mb": 2200,
+        "download_size": "2.2 GB",
+    },
+    {
+        "id": "onnx-community/whisper-base",
+        "raw_id": "onnx-community/whisper-base",
+        "name": "Whisper Base (ONNX WebGPU)",
+        "provider": "browser_asr",
+        "provider_name": "Transformers.js (Browser ASR)",
+        "description": "Transcripción equilibrada en español con buen balance entre velocidad y precisión.",
+        "context_window": "Audio (Web Worker)",
+        "context_length": 0,
+        "badge": "Recomendado Voz",
+        "task_type": "transcription",
+        "task_label": "Transcripción de Audio",
+        "is_free": True,
+        "tier_type": "free",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "$0.00 (Navegador Web Worker)",
+        "rate_limits": "Ilimitado (Local)",
+        "download_size": "145 MB",
+        "accuracy": "Buena precisión general",
+    },
+    {
+        "id": "onnx-community/whisper-tiny",
+        "raw_id": "onnx-community/whisper-tiny",
+        "name": "Whisper Tiny (ONNX WebGPU)",
+        "provider": "browser_asr",
+        "provider_name": "Transformers.js (Browser ASR)",
+        "description": "Transcripción ultra rápida con descarga mínima para entornos de bajo ancho de banda.",
+        "context_window": "Audio (Web Worker)",
+        "context_length": 0,
+        "badge": "Ultra Rápido Voz",
+        "task_type": "transcription",
+        "task_label": "Transcripción de Audio",
+        "is_free": True,
+        "tier_type": "free",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "$0.00 (Navegador Web Worker)",
+        "rate_limits": "Ilimitado (Local)",
+        "download_size": "75 MB",
+        "accuracy": "Aceptable en audio claro",
+    },
+    {
+        "id": "onnx-community/whisper-small",
+        "raw_id": "onnx-community/whisper-small",
+        "name": "Whisper Small (ONNX WebGPU)",
+        "provider": "browser_asr",
+        "provider_name": "Transformers.js (Browser ASR)",
+        "description": "Transcripción de alta fidelidad para reuniones técnicas extensas.",
+        "context_window": "Audio (Web Worker)",
+        "context_length": 0,
+        "badge": "Alta Fidelidad Voz",
+        "task_type": "transcription",
+        "task_label": "Transcripción de Audio",
+        "is_free": True,
+        "tier_type": "free",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "$0.00 (Navegador Web Worker)",
+        "rate_limits": "Ilimitado (Local)",
+        "download_size": "480 MB",
+        "accuracy": "Alta fidelidad en reuniones extensas",
+    },
+]
 
 
-def _resolve_context_length(tokens_str: str) -> int:
-    if "131" in tokens_str:
-        return 131072
-    if "65" in tokens_str:
-        return 65536
-    if "8" in tokens_str:
-        return 8192
-    return 32768
-
-
-def _build_builtin_chat_model(item: dict[str, Any]) -> AIModelInfo:
-    model_id = item["id"]
-    tokens_str = item.get("context_window") or item.get("tokens", "32.768 tokens")
-    vram_fmt = item.get("vram_formatted") or (f"~{item.get('vram_required_mb')} MB VRAM" if item.get("vram_required_mb") else "WebGPU")
-    return AIModelInfo(
-        id=model_id,
-        raw_id=item.get("tag", model_id),
-        name=item.get("name", model_id),
-        provider="local",
-        provider_name="Local (Navegador WebGPU)",
-        description=item.get("description", ""),
-        context_window=tokens_str,
-        context_length=_resolve_context_length(tokens_str),
-        task_type="chat_writing",
-        task_label="Redacción y Chat",
-        tier_type="free",
-        pricing_prompt=0.0,
-        pricing_completion=0.0,
-        pricing_label="Gratis (Navegador)",
-        rate_limits="Sin límite (Navegador)",
-        badge=vram_fmt,
-        is_free=True,
-        size=item.get("download_size") or item.get("size"),
-        vram_required_mb=item.get("vram_required_mb"),
-        vram_formatted=vram_fmt,
-        tier=item.get("tier"),
-        required_features=item.get("required_features") or [],
-    )
-
-
-def _resolve_transcription_provider_info(item: dict[str, Any], model_id: str) -> tuple[str, str, str]:
-    badge = item.get("badge")
-    if not badge:
-        if "onnx" in model_id or "parakeet" in model_id or "sense-voice" in model_id:
-            badge = "ONNX Runtime Web"
-        elif model_id.startswith("fw-") or "faster-whisper" in model_id:
-            badge = "CTranslate2 Local"
-        elif model_id.startswith("moonshine"):
-            badge = "Moonshine Local"
-        else:
-            badge = "Whisper Local"
-    return ("local", "Local (Audio)", badge)
-
-
-def _build_builtin_transcription_model(item: dict[str, Any]) -> AIModelInfo:
-    model_id = item["id"]
-    prov_id, prov_name, badge = _resolve_transcription_provider_info(item, model_id)
-    return AIModelInfo(
-        id=model_id,
-        raw_id=item.get("tag", model_id),
-        name=item.get("name", model_id),
-        provider="local",
-        provider_name=prov_name,
-        description=item.get("description", ""),
-        context_window="Audio local",
-        context_length=0,
-        task_type="transcription",
-        task_label="Transcripción y Voz",
-        tier_type="free",
-        pricing_prompt=0.0,
-        pricing_completion=0.0,
-        pricing_label="Gratis (Local)",
-        rate_limits="Sin límite (Local)",
-        badge=badge,
-        is_free=True,
-        size=item.get("download_size") or item.get("size"),
-        accuracy=item.get("accuracy"),
-    )
-
-
-def _load_builtin_model_infos() -> list[AIModelInfo]:
+def _ensure_catalog_seeded() -> None:
     try:
-        data = list(load_builtin_catalog(task_type=None).values())
+        repo = AIModelCatalogRepository()
+        repo.bulk_upsert_sync(KNOWN_BROWSER_MODELS)
     except Exception as exc:
-        logger.debug(f"Built-in catalog file load failed: {exc}")
-        data = list(DEFAULT_BUILTIN_MODELS)
-
-    builtin_models: list[AIModelInfo] = []
-    for item in data:
-        if not isinstance(item, dict) or "id" not in item:
-            continue
-        task_type = item.get("task_type", "chat_writing")
-        if task_type == "transcription":
-            builtin_models.append(_build_builtin_transcription_model(item))
-        elif task_type == "chat_writing":
-            builtin_models.append(_build_builtin_chat_model(item))
-    return builtin_models
+        logger.debug("Failed ensuring catalog seeded in DB: %s", exc)
 
 
 def _load_frontier_from_db() -> list[dict[str, Any]]:
@@ -138,33 +170,23 @@ def _load_frontier_from_db() -> list[dict[str, Any]]:
         items = repo.list_sync()
         return items if isinstance(items, list) else []
     except Exception as exc:
-        logger.debug(f"DB load frontier models fallback: {exc}")
+        logger.debug("DB load frontier models fallback: %s", exc)
         return []
 
 
-def _load_frontier_from_file(file_path: Path) -> list[dict[str, Any]]:
-    if not file_path.exists():
-        return []
-    try:
-        parsed = json.loads(file_path.read_text(encoding="utf-8"))
-        return parsed if isinstance(parsed, list) else []
-    except Exception as exc:
-        logger.debug(f"File load failed for {file_path}: {exc}")
-        return []
-
-
-def _filter_non_builtin(items: list[dict[str, Any]]) -> list[AIModelInfo]:
-    frontier: list[AIModelInfo] = []
+def _filter_catalog_items(items: list[dict[str, Any]]) -> list[AIModelInfo]:
+    models: list[AIModelInfo] = []
     for item in items:
         if not isinstance(item, dict) or "id" not in item:
             continue
-        if item.get("provider") in _BUILTIN_PROVIDERS:
+        provider = (item.get("provider") or "").lower()
+        if provider in _FORBIDDEN_PROVIDERS or item.get("id", "").lower().endswith(".gguf"):
             continue
         try:
-            frontier.append(AIModelInfo(**item))
+            models.append(AIModelInfo(**item))
         except Exception as exc:
-            logger.debug(f"Failed to validate frontier model {item.get('id')}: {exc}")
-    return frontier
+            logger.debug("Failed to validate model %s: %s", item.get("id"), exc)
+    return models
 
 
 def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
@@ -173,85 +195,29 @@ def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
     if not refresh and _catalog_cache is not None and (now - _catalog_cache_ts) < _CACHE_TTL_SECONDS:
         return _catalog_cache
 
+    _ensure_catalog_seeded()
     raw_items = _load_frontier_from_db()
-    if not raw_items:
-        raw_items = _load_frontier_from_file(CATALOG_FILE)
-    if not raw_items:
-        raw_items = _load_frontier_from_file(FALLBACK_CATALOG_FILE)
-    if not raw_items:
-        raw_items = KNOWN_FRONTIER_MODELS
-
-    frontier_models = _filter_non_builtin(raw_items)
-    builtin_models = _load_builtin_model_infos()
-    combined = frontier_models + builtin_models
-
-    _catalog_cache = combined
+    _catalog_cache = _filter_catalog_items(raw_items)
     _catalog_cache_ts = now
     return _catalog_cache
 
 
-def _get_transcription_disk_state(model: AIModelInfo, cache_dir: Path) -> tuple[bool, float]:
-    clean_id = model.id.replace("whisper-", "")
-    if model.provider == "onnx" or "parakeet" in model.id or "sense-voice" in model.id:
-        o_dir = cache_dir / f"onnx-{model.id}"
-        files = list(o_dir.glob("*.onnx")) if o_dir.exists() else []
-        is_dl = len(files) > 0 and sum(f.stat().st_size for f in files) > 1024 * 1024
-        return is_dl, round(sum(f.stat().st_size for f in files) / (1024 * 1024), 1) if is_dl else 0.0
-
-    if model.provider == "faster-whisper" or model.id.startswith("fw-"):
-        fw_clean = clean_id.replace("fw-", "").replace("faster-whisper-", "")
-        m_bin = cache_dir / f"faster-whisper-{fw_clean}" / "model.bin"
-        is_dl = m_bin.exists() and m_bin.stat().st_size > 1024 * 1024
-        return is_dl, round(m_bin.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
-
-    if model.provider == "moonshine" or model.id.startswith("moonshine"):
-        m_dir = cache_dir / model.id
-        is_dl = m_dir.exists() and any(m_dir.iterdir()) if m_dir.exists() else False
-        return is_dl, 90.0 if ("tiny" in model.id) else (360.0 if is_dl else 0.0)
-
-    target_pt = cache_dir / f"{clean_id}.pt"
-    if not target_pt.exists():
-        legacy_pt = Path.home() / ".cache" / "whisper" / f"{clean_id}.pt"
-        if legacy_pt.exists():
-            target_pt = legacy_pt
-    is_dl = target_pt.exists() and target_pt.stat().st_size > 1024 * 1024
-    return is_dl, round(target_pt.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
-
-
-def _enrich_transcription_models(models: list[AIModelInfo]) -> None:
-    for m in models:
-        if m.task_type == "transcription" and m.provider in _BUILTIN_PROVIDERS:
-            try:
-                is_dl, size_mb = _get_transcription_disk_state(m, WHISPER_MODELS_DIR)
-                m.is_downloaded = is_dl
-                m.disk_size_mb = size_mb
-            except Exception as exc:
-                logger.debug(f"Transcription state check failed for {m.id}: {exc}")
-
-
-def _enrich_chat_models(models: list[AIModelInfo]) -> None:
-    cache_dir = get_builtin_cache_dir()
-    for m in models:
-        if m.provider == "builtin" and m.task_type == "chat_writing":
-            try:
-                meta = resolve_model_meta(m.id)
-                if meta:
-                    gguf = cache_dir / meta["filename"]
-                    is_dl = gguf.exists() and gguf.stat().st_size > 10 * 1024 * 1024
-                    m.is_downloaded = is_dl
-                    m.disk_size_mb = round(gguf.stat().st_size / (1024 * 1024), 1) if is_dl else 0.0
-            except Exception as exc:
-                logger.debug(f"Chat model state check failed for {m.id}: {exc}")
+def has_catalog_model(model_id: str, provider: str, task_type: str) -> bool:
+    """Validate a model against the persisted catalog, never a compiled allow-list."""
+    normalized_provider = {"local": "webllm", "builtin": "webllm"}.get(provider.lower(), provider.lower())
+    return any(
+        item.id == model_id
+        and item.provider.lower() == normalized_provider
+        and item.task_type.lower() == task_type.lower()
+        for item in load_local_catalog()
+    )
 
 
 def _filter_catalog_models(models: list[AIModelInfo], provider: str, task_type: str) -> list[AIModelInfo]:
     filtered = models
     if provider and provider != "all":
         p_key = provider.lower()
-        if p_key in ("builtin", "local"):
-            filtered = [m for m in filtered if m.provider.lower() in ("local", "builtin")]
-        else:
-            filtered = [m for m in filtered if m.provider.lower() == p_key]
+        filtered = [m for m in filtered if m.provider.lower() == p_key]
     if task_type and task_type != "all":
         t_key = task_type.lower()
         filtered = [m for m in filtered if m.task_type.lower() == t_key]
@@ -263,28 +229,19 @@ async def get_model_catalog(
     provider: str = "all",
     task_type: str = "all",
 ) -> ModelCatalogResponse:
-    try:
-        models = load_local_catalog(refresh=refresh)
-    except Exception as exc:
-        logger.error(f"Catalog loading raised exception: {exc}")
-        models = []
+    all_models = load_local_catalog(refresh=refresh)
+    filtered = _filter_catalog_models(all_models, provider, task_type)
 
-    source = "local_json"
-    error_msg = None
-    if not models:
-        error_msg = "Error de conexión, no se pudo obtener los modelos"
-        source = "error"
+    providers_set: set[str] = set()
+    for m in all_models:
+        providers_set.add(m.provider)
 
-    _enrich_transcription_models(models)
-    _enrich_chat_models(models)
-
-    filtered_models = _filter_catalog_models(models, provider, task_type)
-    all_providers = sorted(list(set(m.provider for m in filtered_models))) if filtered_models else []
-
+    now_iso = datetime.now(timezone.utc).isoformat()
+    err = "Error de conexión, no se pudo obtener los modelos" if not all_models else None
     return ModelCatalogResponse(
-        updated_at=datetime.now(timezone.utc).isoformat(),
-        source=source,
-        providers=all_providers,
-        models=filtered_models,
-        error=error_msg,
+        updated_at=now_iso,
+        source="ai_models_catalog_db",
+        providers=sorted(list(providers_set)),
+        models=filtered,
+        error=err,
     )
