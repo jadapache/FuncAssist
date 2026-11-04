@@ -168,6 +168,8 @@ class AgenticPromptRequest(CamelModel):
     template_id: Optional[str] = Field(None, alias="templateId")
     run_id: Optional[str] = Field(None, alias="runId")
     conversation_id: Optional[str] = Field(None, alias="conversationId")
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
     @property
@@ -446,6 +448,18 @@ async def handle_agentic_prompt(
     elif prompt_str.startswith("/plantilla"):
         query_text = prompt_str[10:].strip()
 
+    from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS
+    if req.provider and req.provider.lower() in FORBIDDEN_BACKEND_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail="Los modelos locales se ejecutan exclusivamente en el navegador mediante WebLLM.",
+        )
+    if req.model and req.model.lower().endswith(".gguf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Modelos GGUF no están admitidos en el backend.",
+        )
+
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
@@ -457,6 +471,8 @@ async def handle_agentic_prompt(
         images=req.images,
         attached_docs=req.attached_docs,
         user_id=user_id,
+        provider=req.provider,
+        model=req.model,
     )
 
     try:
@@ -571,6 +587,18 @@ async def handle_agentic_prompt_stream(
     elif prompt_str.startswith("/plantilla"):
         query_text = prompt_str[10:].strip()
 
+    from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS
+    if req.provider and req.provider.lower() in FORBIDDEN_BACKEND_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail="Los modelos locales se ejecutan exclusivamente en el navegador mediante WebLLM.",
+        )
+    if req.model and req.model.lower().endswith(".gguf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Modelos GGUF no están admitidos en el backend.",
+        )
+
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
@@ -582,6 +610,8 @@ async def handle_agentic_prompt_stream(
         images=req.images,
         attached_docs=req.attached_docs,
         user_id=user_id,
+        provider=req.provider,
+        model=req.model,
     )
 
     run_id = req.run_id or f"run-{uuid.uuid4().hex[:12]}"
