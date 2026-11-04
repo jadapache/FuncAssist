@@ -53,9 +53,14 @@ class FakePGCursor:
       q.startswith("CREATE EXTENSION")
       or q.startswith("CREATE TABLE")
       or q.startswith("CREATE INDEX")
+      or q.startswith("ALTER TABLE")
       or q.startswith("REINDEX")
     ):
       self._last_result = []
+      return
+
+    if "information_schema.columns" in q:
+      self._last_result = [{"udt_name": "vector"}]
       return
 
     if "INSERT INTO db_meta" in q:

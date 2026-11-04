@@ -66,6 +66,9 @@ def is_postgres_configured() -> bool:
   return bool(url and url.strip())
 
 
+_SCHEMA_INITIALIZED: bool = False
+
+
 def _get_pg_connection():
   import psycopg
   from psycopg.rows import dict_row
@@ -78,22 +81,30 @@ def _get_pg_connection():
     )
 
   conn = psycopg.connect(url, row_factory=dict_row, autocommit=False)
+  if _PGVECTOR_AVAILABLE:
+    _register_vector_adapter(conn)
   return conn
 
 
-def _ensure_pg_schema(conn) -> None:
+def _register_vector_adapter(conn) -> None:
+  try:
+    from pgvector.psycopg import register_vector
+    register_vector(conn)
+  except Exception as exc:
+    logger.warning("Could not register pgvector with psycopg: %s", exc)
+
+
+def _init_extensions(conn) -> None:
   global _PGVECTOR_AVAILABLE
   cur = conn.cursor()
-
-  # 1. Try enabling pgvector and unaccent
   try:
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
     conn.commit()
     _PGVECTOR_AVAILABLE = True
-  except Exception as e:
+  except Exception as exc:
     conn.rollback()
     _PGVECTOR_AVAILABLE = False
-    logger.info("pgvector extension not enabled/available in PostgreSQL: %s", e)
+    logger.info("pgvector extension not enabled or available in PostgreSQL: %s", exc)
 
   try:
     cur.execute("CREATE EXTENSION IF NOT EXISTS unaccent;")
@@ -101,71 +112,118 @@ def _ensure_pg_schema(conn) -> None:
   except Exception:
     conn.rollback()
 
-  # 2. Register vector types in psycopg if available
   if _PGVECTOR_AVAILABLE:
-    try:
-      from pgvector.psycopg import register_vector
-      register_vector(conn)
-    except Exception as e:
-      logger.warning("Could not register pgvector with psycopg: %s", e)
+    _register_vector_adapter(conn)
 
-  # 3. Create tables
-  cur.execute("""
-      CREATE TABLE IF NOT EXISTS documents (
-          id          VARCHAR(64) PRIMARY KEY,
-          filename    TEXT NOT NULL,
-          stored_as   TEXT NOT NULL,
-          tags        JSONB NOT NULL DEFAULT '[]'::jsonb,
-          chunk_count INTEGER NOT NULL DEFAULT 0,
-          char_count  INTEGER NOT NULL DEFAULT 0,
-          uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-  """)
 
-  vector_col = "embedding vector(1536)," if _PGVECTOR_AVAILABLE else "embedding JSONB,"
-  cur.execute(f"""
-      CREATE TABLE IF NOT EXISTS chunks (
-          chunk_id     VARCHAR(128) PRIMARY KEY,
-          document_id  VARCHAR(64) NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-          filename     TEXT NOT NULL,
-          tags         JSONB NOT NULL DEFAULT '[]'::jsonb,
-          chunk_index  INTEGER NOT NULL DEFAULT 0,
-          text         TEXT NOT NULL,
-          tsv          tsvector GENERATED ALWAYS AS (to_tsvector('spanish', text)) STORED,
-          {vector_col}
-          uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-  """)
+def _init_tables(conn) -> None:
+  cur = conn.cursor()
+  try:
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id          VARCHAR(64) PRIMARY KEY,
+            filename    TEXT NOT NULL,
+            stored_as   TEXT NOT NULL,
+            tags        JSONB NOT NULL DEFAULT '[]'::jsonb,
+            chunk_count INTEGER NOT NULL DEFAULT 0,
+            char_count  INTEGER NOT NULL DEFAULT 0,
+            uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    vector_col = "embedding vector(1536)," if _PGVECTOR_AVAILABLE else "embedding JSONB,"
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS chunks (
+            chunk_id     VARCHAR(128) PRIMARY KEY,
+            document_id  VARCHAR(64) NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            filename     TEXT NOT NULL,
+            tags         JSONB NOT NULL DEFAULT '[]'::jsonb,
+            chunk_index  INTEGER NOT NULL DEFAULT 0,
+            text         TEXT NOT NULL,
+            tsv          tsvector GENERATED ALWAYS AS (to_tsvector('spanish', text)) STORED,
+            {vector_col}
+            uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.commit()
+  except Exception:
+    conn.rollback()
+    raise
 
-  # 4. Create Indexes
-  cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING gin(tsv);")
-  cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(document_id);")
-  cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tags ON chunks USING gin(tags);")
+
+def _init_vector_column(conn) -> None:
+  if not _PGVECTOR_AVAILABLE:
+    return
+  cur = conn.cursor()
+  try:
+    cur.execute("""
+        SELECT udt_name
+        FROM information_schema.columns
+        WHERE table_name = 'chunks' AND column_name = 'embedding';
+    """)
+    row = cur.fetchone()
+    if row and row.get("udt_name") != "vector":
+      cur.execute(
+        "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(1536) USING NULL;"
+      )
+    conn.commit()
+  except Exception as exc:
+    conn.rollback()
+    logger.warning("Could not migrate chunks embedding column to vector: %s", exc)
+
+
+def _init_indexes(conn) -> None:
+  cur = conn.cursor()
+  try:
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING gin(tsv);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(document_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_tags ON chunks USING gin(tags);")
+    conn.commit()
+  except Exception:
+    conn.rollback()
 
   if _PGVECTOR_AVAILABLE:
     try:
       cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);"
       )
-    except Exception:
-      pass
+      conn.commit()
+    except Exception as exc:
+      conn.rollback()
+      logger.warning("Could not create vector hnsw index: %s", exc)
 
-  cur.execute("""
-      CREATE TABLE IF NOT EXISTS db_meta (
-          key   VARCHAR(64) PRIMARY KEY,
-          value TEXT NOT NULL
-      );
-      INSERT INTO db_meta (key, value) VALUES ('schema_version', '2')
-      ON CONFLICT (key) DO NOTHING;
-  """)
-  conn.commit()
+
+def _init_metadata(conn) -> None:
+  cur = conn.cursor()
+  try:
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS db_meta (
+            key   VARCHAR(64) PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        INSERT INTO db_meta (key, value) VALUES ('schema_version', '2')
+        ON CONFLICT (key) DO NOTHING;
+    """)
+    conn.commit()
+  except Exception:
+    conn.rollback()
+
+
+def _ensure_pg_schema(conn) -> None:
+  _init_extensions(conn)
+  _init_tables(conn)
+  _init_vector_column(conn)
+  _init_indexes(conn)
+  _init_metadata(conn)
 
 
 @contextmanager
 def _db() -> Generator[Any, None, None]:
   """PostgreSQL DB context manager."""
+  global _SCHEMA_INITIALIZED
   conn = _get_pg_connection()
-  _ensure_pg_schema(conn)
+  if not _SCHEMA_INITIALIZED:
+    _ensure_pg_schema(conn)
+    _SCHEMA_INITIALIZED = True
   try:
     yield conn
     conn.commit()
@@ -559,6 +617,8 @@ def search_chunks_vector(
     return []
 
   with _db() as conn:
+    if not _PGVECTOR_AVAILABLE:
+      return []
     cur = conn.cursor()
     try:
       cur.execute(
@@ -639,6 +699,7 @@ def get_db_status() -> dict[str, Any]:
       status["chunk_count"] = cur.fetchone()["c"]
       status["host"] = params["host"] or (conn.info.host if hasattr(conn.info, "host") else "remote")
       status["database"] = params["database"] or (conn.info.dbname if hasattr(conn.info, "dbname") else "")
+      status["pgvector_enabled"] = bool(_PGVECTOR_AVAILABLE)
       status["connected"] = True
   except Exception as exc:
     logger.exception("Error al consultar el estado de la base de datos de conocimiento: %s", exc)
