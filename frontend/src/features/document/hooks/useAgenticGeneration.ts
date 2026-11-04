@@ -39,7 +39,7 @@ interface UseAgenticGenerationOptions {
   onError?: (
     errorMessage: string,
     isAuthError: boolean,
-    errorCategory?: 'auth' | 'rate_limit' | 'context' | 'general',
+    errorCategory?: 'auth' | 'rate_limit' | 'context' | 'gpu' | 'general',
   ) => void
 }
 
@@ -529,7 +529,12 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         onSetDocPanelCollapsed(false)
       } catch (err) {
         console.error('Error in agentic pipeline:', err)
-        const errMsg = err instanceof Error ? err.message : 'Error desconocido'
+        const errMsg = err instanceof Error ? err.message : String(err || 'Error desconocido')
+
+        const isGpuError =
+          /device\s*(was\s*)?lost|gpu|dxgi|device_hung|0x887a0006|already\s*been\s*disposed|insufficient\s*memory|vram|memoria.*gr[aá]fica/i.test(
+            errMsg,
+          )
 
         const isAuthError =
           /api\s*key|autenticaci[oó]n|authentication|unauthorized|401|forbidden|403|invalid_api_key/i.test(errMsg)
@@ -540,18 +545,24 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         const isContextMissingError =
           /not found in connected sources|no matching chunks|no documents uploaded|sin coincidencias en el contexto|no se encontr[oó] informaci[oó]n/i.test(errMsg)
 
-        let errorCategory: 'auth' | 'rate_limit' | 'context' | 'general' = 'general'
-        if (isAuthError) errorCategory = 'auth'
+        let errorCategory: 'auth' | 'rate_limit' | 'context' | 'gpu' | 'general' = 'general'
+        if (isGpuError) errorCategory = 'gpu'
+        else if (isAuthError) errorCategory = 'auth'
         else if (isRateLimitError) errorCategory = 'rate_limit'
         else if (isContextMissingError) errorCategory = 'context'
 
         let displayMsg = errMsg
-        if (isAuthError) {
+        if (isGpuError) {
+          displayMsg =
+            'La GPU se quedó sin memoria (VRAM) o se desconectó al ejecutar el modelo en el navegador. Te recomendamos seleccionar un modelo más ligero (ej. Llama 3.2 1B) en Configuración o utilizar un proveedor externo (Ollama o API en la nube).'
+        } else if (isAuthError) {
           displayMsg = 'Error: La API key guardada no es válida. Por favor actualízala en Configuración.'
         } else if (isRateLimitError) {
           displayMsg = 'La solicitud supera el límite de tokens de salida para este modelo.'
         } else if (isContextMissingError) {
           displayMsg = 'No se encontró contexto suficiente en las fuentes para procesar la consulta.'
+        } else if (!displayMsg || displayMsg === 'Error desconocido') {
+          displayMsg = 'Ocurrió un error inesperado al procesar la solicitud. Por favor intenta nuevamente.'
         }
 
         const failureMessage: ChatPersistMessage = {

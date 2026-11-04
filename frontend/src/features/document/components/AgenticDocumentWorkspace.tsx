@@ -489,10 +489,18 @@ export const AgenticDocumentWorkspace = ({
       setUserResizedHeight(null)
       setIsMaximized(false)
       setTextareaHeight(BASE_TEXTAREA_HEIGHT)
+      if (editorBodyRef.current) {
+        editorBodyRef.current.innerText = ''
+      }
+      if (editorRef.current) {
+        editorRef.current.innerText = ''
+      }
     },
     onError: (errMsg, isAuthError, errorCategory) => {
       let title = 'Error del Modelo LLM'
-      if (isAuthError || errorCategory === 'auth') {
+      if (errorCategory === 'gpu') {
+        title = 'Memoria de GPU Insuficiente'
+      } else if (isAuthError || errorCategory === 'auth') {
         title = 'Error de Autenticación'
       } else if (errorCategory === 'context') {
         title = 'Contexto Insuficiente'
@@ -505,9 +513,11 @@ export const AgenticDocumentWorkspace = ({
 
   const isCurrentChatGenerating = isGenerating && generatingConversationId === activeConversationId
 
-  const handleSubmitForm = (e: FormEvent) => {
-    e.preventDefault()
-    const query = selectedFeature ? `/${selectedFeature}${draft.trim() ? ` ${draft.trim()}` : ''}` : draft
+  const handleSubmitForm = (e?: FormEvent) => {
+    e?.preventDefault()
+    const textFromDom = editorBodyRef.current?.innerText?.trim() || editorRef.current?.innerText?.trim() || ''
+    const effectiveDraft = draft.trim() || textFromDom
+    const query = selectedFeature ? `/${selectedFeature}${effectiveDraft ? ` ${effectiveDraft}` : ''}` : effectiveDraft
     if ((!query.trim() && attachedImages.length === 0 && uploadedDocs.length === 0) || isGenerating) return
     const imagesToSend = [...attachedImages]
     const docsToSend = [...uploadedDocs]
@@ -972,8 +982,7 @@ export const AgenticDocumentWorkspace = ({
                     <button
                       type={isGenerating ? 'button' : 'submit'}
                       onClick={isGenerating ? () => void handleCancelRun() : undefined}
-                      disabled={!isGenerating && !draft.trim() && !selectedFeature}
-                      className="h-8 w-8 rounded-full flex items-center justify-center transition shrink-0 shadow-xs ml-1 bg-[#002777] text-white hover:bg-[#003399] disabled:opacity-30 disabled:hover:bg-[#002777] cursor-pointer"
+                      className="h-8 w-8 rounded-full flex items-center justify-center transition shrink-0 shadow-xs ml-1 bg-[#002777] text-white hover:bg-[#003399] cursor-pointer"
                       title={isGenerating ? 'Cancelar generación' : 'Enviar consulta'}
                     >
                       {isGenerating ? (

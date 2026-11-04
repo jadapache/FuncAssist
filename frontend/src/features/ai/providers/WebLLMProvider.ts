@@ -25,6 +25,21 @@ function resolveGenerationBudget(modelId: string, messages: ChatMessage[], reque
   return Math.max(512, Math.min(requested ?? modelSafeLimit, modelSafeLimit))
 }
 
+export function formatWebLLMError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err || '')
+  if (
+    /device\s*(was\s*)?lost|gpu\s*device\s*lost|dxgi_error|device_hung|0x887a0006|already\s*been\s*disposed|insufficient\s*memory|out\s*of\s*memory/i.test(
+      message,
+    )
+  ) {
+    return 'La tarjeta gráfica (GPU/VRAM) se quedó sin memoria o se desconectó al ejecutar el modelo en el navegador. Por favor selecciona un modelo más ligero (ej. Llama 3.2 1B) en Configuración o utiliza un proveedor externo (Ollama o API en la nube).'
+  }
+  if (/webgpu/i.test(message) && /not\s*supported|unsupported|unavailable/i.test(message)) {
+    return 'Tu navegador o dispositivo no cuenta con aceleración WebGPU activa para ejecutar modelos locales.'
+  }
+  return message || 'Error al ejecutar el modelo de lenguaje en el navegador.'
+}
+
 export class WebLLMProvider {
   private static instance: WebLLMProvider | null = null
   private worker: Worker | null = null
@@ -70,6 +85,9 @@ export class WebLLMProvider {
     try {
       await this.ensureEngine(modelId, onProgress)
       this.loadedModelId = modelId
+    } catch (err) {
+      await this.unload()
+      throw new Error(formatWebLLMError(err))
     } finally {
       this.isInitializing = false
     }
@@ -109,14 +127,19 @@ export class WebLLMProvider {
       throw new Error('El motor de WebLLM no está inicializado. Descarga y selecciona un modelo primero.')
     }
 
-    const response = await this.engine.chat.completions.create({
-      messages,
-      max_tokens: resolveGenerationBudget(this.loadedModelId || '', messages, options?.maxTokens),
-      temperature: options?.temperature ?? 0.7,
-      stream: false,
-    })
+    try {
+      const response = await this.engine.chat.completions.create({
+        messages,
+        max_tokens: resolveGenerationBudget(this.loadedModelId || '', messages, options?.maxTokens),
+        temperature: options?.temperature ?? 0.7,
+        stream: false,
+      })
 
-    return response.choices[0]?.message?.content || ''
+      return response.choices[0]?.message?.content || ''
+    } catch (err) {
+      await this.unload()
+      throw new Error(formatWebLLMError(err))
+    }
   }
 
   public async streamComplete(
@@ -132,44 +155,53 @@ export class WebLLMProvider {
     let accumulated = ''
     let continuationMessages = messages
 
-    for (let attempt = 0; attempt <= (options?.autoContinue ? maxContinuations : 0); attempt += 1) {
-      const stream = await this.engine.chat.completions.create({
-        messages: continuationMessages,
-        max_tokens: resolveGenerationBudget(this.loadedModelId || '', continuationMessages, options?.maxTokens),
-        temperature: options?.temperature ?? 0.7,
-        stream: true,
-      })
+    try {
+      for (let attempt = 0; attempt <= (options?.autoContinue ? maxContinuations : 0); attempt += 1) {
+        const stream = await this.engine.chat.completions.create({
+          messages: continuationMessages,
+          max_tokens: resolveGenerationBudget(this.loadedModelId || '', continuationMessages, options?.maxTokens),
+          temperature: options?.temperature ?? 0.7,
+          stream: true,
+        })
 
-      let finishReason: string | null = null
-      for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
-        finishReason = chunk.choices[0]?.finish_reason || finishReason
-        const delta = chunk.choices[0]?.delta?.content || ''
-        if (delta) {
-          accumulated += delta
-          onChunk(delta, accumulated)
+        let finishReason: string | null = null
+        for await (const chunk of stream as AsyncIterable<ChatCompletionChunk>) {
+          finishReason = chunk.choices[0]?.finish_reason || finishReason
+          const delta = chunk.choices[0]?.delta?.content || ''
+          if (delta) {
+            accumulated += delta
+            onChunk(delta, accumulated)
+          }
         }
+
+        if (finishReason !== 'length' || attempt >= maxContinuations) {
+          break
+        }
+
+        continuationMessages = [
+          ...messages,
+          { role: 'assistant', content: accumulated } as ChatMessage,
+          {
+            role: 'user',
+            content: 'Continúa exactamente desde el último punto sin repetir contenido. Finaliza el documento completo.',
+          },
+        ]
       }
 
-      if (finishReason !== 'length' || attempt >= maxContinuations) {
-        break
-      }
-
-      continuationMessages = [
-        ...messages,
-        { role: 'assistant', content: accumulated } as ChatMessage,
-        {
-          role: 'user',
-          content: 'Continúa exactamente desde el último punto sin repetir contenido. Finaliza el documento completo.',
-        },
-      ]
+      return accumulated
+    } catch (err) {
+      await this.unload()
+      throw new Error(formatWebLLMError(err))
     }
-
-    return accumulated
   }
 
   public async unload(): Promise<void> {
     if (this.engine) {
-      await this.engine.unload()
+      try {
+        await this.engine.unload()
+      } catch {
+        // Engine already disposed
+      }
       this.engine = null
     }
     if (this.worker) {
