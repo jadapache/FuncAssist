@@ -70,6 +70,10 @@ export type ModelCatalogItem = {
   accuracy?: string
   is_downloaded?: boolean
   disk_size_mb?: number
+  vram_required_mb?: number
+  vram_formatted?: string
+  tier?: string
+  required_features?: string[]
 }
 
 export type LocalWhisperModelInfo = {

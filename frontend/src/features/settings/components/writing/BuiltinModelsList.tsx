@@ -10,9 +10,9 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import {
-  WEBLLM_MODELS_CATALOG,
   detectHardwareProfile,
   evaluateModel,
+  loadWebLLMModelsFromBackend,
 } from '../../../ai/policies/modelSelectionPolicy'
 import type {
   HardwareProfile,
@@ -40,6 +40,8 @@ export const BuiltinModelsList = ({
   model,
   setModel,
 }: BuiltinModelsListProps) => {
+  const [modelsList, setModelsList] = useState<WebLLMModelDefinition[]>([])
+  const [isLoadingModels, setIsLoadingModels] = useState(true)
   const [cachedMap, setCachedMap] = useState<Record<string, boolean>>({})
   const [hardware, setHardware] = useState<HardwareProfile | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -47,28 +49,39 @@ export const BuiltinModelsList = ({
   const [progressState, setProgressState] = useState<Record<string, WebLLMInitProgress>>({})
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const refreshCacheStatus = useCallback(async () => {
+  const refreshCacheStatus = useCallback(async (currentModels?: WebLLMModelDefinition[]) => {
     setIsRefreshing(true)
     try {
       const webLLMProvider = await getWebLLMProvider()
       const nextMap: Record<string, boolean> = {}
-      for (const m of WEBLLM_MODELS_CATALOG) {
+      const targetList = currentModels ?? modelsList
+      for (const m of targetList) {
         nextMap[m.id] = await webLLMProvider.isModelCached(m.id)
       }
       setCachedMap(nextMap)
     } finally {
       setIsRefreshing(false)
     }
-  }, [])
+  }, [modelsList])
 
   useEffect(() => {
     let isMounted = true
     const init = async () => {
-      const profile = await detectHardwareProfile()
-      if (isMounted) {
-        setHardware(profile)
+      try {
+        const [profile, loadedModels] = await Promise.all([
+          detectHardwareProfile(),
+          loadWebLLMModelsFromBackend(),
+        ])
+        if (isMounted) {
+          setHardware(profile)
+          setModelsList(loadedModels)
+          await refreshCacheStatus(loadedModels)
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingModels(false)
+        }
       }
-      await refreshCacheStatus()
     }
     void init()
     return () => {
@@ -163,8 +176,18 @@ export const BuiltinModelsList = ({
         </div>
       )}
 
-      <div className="space-y-3">
-        {WEBLLM_MODELS_CATALOG.map((m) => {
+      {isLoadingModels ? (
+        <div className="flex items-center justify-center py-8 text-slate-400 gap-2 text-xs">
+          <Loader2 className="h-4 w-4 animate-spin text-[#002777]" />
+          <span>Cargando catálogo de modelos disponibles...</span>
+        </div>
+      ) : modelsList.length === 0 ? (
+        <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+          No hay modelos disponibles en el catálogo en este momento.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {modelsList.map((m) => {
           const isDownloaded = Boolean(cachedMap[m.id])
           const isSelected = model === m.id
           const isDownloading = downloadingId === m.id
@@ -292,8 +315,9 @@ export const BuiltinModelsList = ({
               </div>
             </div>
           )
-        })}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   )
 }

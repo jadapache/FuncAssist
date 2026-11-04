@@ -7,7 +7,7 @@ import {
   type ChatCompletionChunk,
 } from '@mlc-ai/web-llm'
 import type { ChatMessage, WebLLMInitProgress } from '../types/webLlm'
-import { WEBLLM_MODELS_CATALOG } from '../policies/modelSelectionPolicy'
+import { findWebLLMModel } from '../policies/modelSelectionPolicy'
 
 type CompletionOptions = {
   maxTokens?: number
@@ -17,7 +17,7 @@ type CompletionOptions = {
 }
 
 function resolveGenerationBudget(modelId: string, messages: ChatMessage[], requested?: number): number {
-  const model = WEBLLM_MODELS_CATALOG.find((item) => item.id === modelId)
+  const model = findWebLLMModel(modelId)
   const contextWindow = Number.parseInt(model?.contextWindow.replace(/[^0-9]/g, '') || '8192', 10)
   const inputTokens = Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 4)
   const availableTokens = Math.max(512, contextWindow - inputTokens - 256)
