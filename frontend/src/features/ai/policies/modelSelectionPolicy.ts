@@ -171,7 +171,7 @@ export async function loadWebLLMModelsFromBackend(): Promise<WebLLMModelDefiniti
   try {
     const res = await api.getModelCatalog(false, 'builtin', 'chat_writing')
     if (res?.models && res.models.length > 0) {
-      return res.models.map((m: ModelCatalogItem) => {
+      cachedModels = res.models.map((m: ModelCatalogItem) => {
         const vramNum = typeof m.vram_required_mb === 'number' ? m.vram_required_mb : 1630
         return {
           id: m.id,
@@ -188,6 +188,7 @@ export async function loadWebLLMModelsFromBackend(): Promise<WebLLMModelDefiniti
           requiredFeatures: m.required_features || [],
         }
       })
+      return cachedModels
     }
   } catch {
     // Return cached models if offline or network error occurs
