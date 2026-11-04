@@ -39,12 +39,12 @@ def load_builtin_catalog(task_type: Optional[str] = "chat_writing") -> Dict[str,
         from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
         repo = AIModelCatalogRepository()
         all_items = repo.list_sync(task_type=task_type)
-        items = [i for i in all_items if i.get("is_free") or i.get("provider") == "builtin"]
+        items = [i for i in all_items if i.get("provider") in ("builtin", "local")]
         if not items:
             repo.delete_free_models_sync()
             repo.bulk_upsert_sync(DEFAULT_BUILTIN_MODELS)
             all_items = repo.list_sync(task_type=task_type)
-            items = [i for i in all_items if i.get("is_free") or i.get("provider") == "builtin"]
+            items = [i for i in all_items if i.get("provider") in ("builtin",  "local")]
     except Exception as exc:
         logger.debug(f"Built-in models database fallback: {exc}")
 

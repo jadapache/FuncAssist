@@ -132,11 +132,7 @@ class AIModelCatalogRepository:
   def delete_free_models_sync(self) -> int:
     with get_sync_db() as db:
       stmt = delete(AIModelCatalogModel).where(
-        or_(
-          AIModelCatalogModel.is_free == True,
-          AIModelCatalogModel.tier_type == "free",
-          AIModelCatalogModel.provider == "builtin",
-        )
+        AIModelCatalogModel.provider.in_(["builtin", "local"])
       )
       res = db.execute(stmt)
       db.commit()

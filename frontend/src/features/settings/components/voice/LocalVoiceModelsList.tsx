@@ -9,6 +9,7 @@ export interface LocalVoiceModelItem {
   accuracy?: string
   provider?: string
   engine?: string
+  badge?: string
   is_downloaded?: boolean
   disk_size_mb?: number
 }
@@ -41,7 +42,7 @@ export const LocalVoiceModelCard = ({ item, isSelected, onSelect }: ModelCardPro
           <h5 className="font-bold text-slate-900 text-base">{item.name}</h5>
           <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-[#002777] border border-blue-200">
             <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-            ONNX Runtime Web
+            {item.badge || (item.provider === 'faster-whisper' ? 'CTranslate2 Local' : item.provider === 'moonshine' ? 'Moonshine Local' : 'ONNX Runtime Web')}
           </span>
           {isSelected && (
             <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-[#002777]">

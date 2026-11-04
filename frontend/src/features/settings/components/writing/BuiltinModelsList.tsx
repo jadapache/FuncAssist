@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Cpu,
   Download,
@@ -49,12 +49,15 @@ export const BuiltinModelsList = ({
   const [progressState, setProgressState] = useState<Record<string, WebLLMInitProgress>>({})
   const [isRefreshing, setIsRefreshing] = useState(false)
 
+  const modelsRef = useRef<WebLLMModelDefinition[]>([])
+  modelsRef.current = modelsList
+
   const refreshCacheStatus = useCallback(async (currentModels?: WebLLMModelDefinition[]) => {
     setIsRefreshing(true)
     try {
       const webLLMProvider = await getWebLLMProvider()
       const nextMap: Record<string, boolean> = {}
-      const targetList = currentModels ?? modelsList
+      const targetList = currentModels ?? modelsRef.current
       for (const m of targetList) {
         nextMap[m.id] = await webLLMProvider.isModelCached(m.id)
       }
@@ -62,21 +65,23 @@ export const BuiltinModelsList = ({
     } finally {
       setIsRefreshing(false)
     }
-  }, [modelsList])
+  }, [])
 
   useEffect(() => {
     let isMounted = true
     const init = async () => {
+      setIsLoadingModels(true)
       try {
         const [profile, loadedModels] = await Promise.all([
           detectHardwareProfile(),
           loadWebLLMModelsFromBackend(),
         ])
-        if (isMounted) {
-          setHardware(profile)
-          setModelsList(loadedModels)
-          await refreshCacheStatus(loadedModels)
-        }
+        if (!isMounted) return
+        setHardware(profile)
+        setModelsList(loadedModels)
+        await refreshCacheStatus(loadedModels)
+      } catch (err) {
+        console.error('Error cargando modelos:', err)
       } finally {
         if (isMounted) {
           setIsLoadingModels(false)

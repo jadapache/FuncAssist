@@ -137,11 +137,11 @@ export const WritingModelSection = ({
             </label>
 
             <select
-              value={provider}
+              value={provider === 'builtin' ? 'local' : provider}
               onChange={(e) => {
                 const newProv = e.target.value
                 setProvider(newProv)
-                if (newProv === 'builtin') {
+                if (newProv === 'local' || newProv === 'builtin') {
                   setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
                 } else if (newProv === 'ollama') {
                   if (ollamaModels.length > 0) {
@@ -162,7 +162,7 @@ export const WritingModelSection = ({
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
             >
-              <option value="builtin">IA Integrada (Local)</option>
+              <option value="local">IA Integrada (Local)</option>
               <option value="ollama">Ollama (Servidor Local / Remoto)</option>
               <option value="groq">Groq (API)</option>
               <option value="gemini">Google (API)</option>
@@ -172,7 +172,7 @@ export const WritingModelSection = ({
           </div>
 
           {/* CASO 1: IA INTEGRADA LOCAL */}
-          {provider === 'builtin' && (
+          {(provider === 'local' || provider === 'builtin') && (
             <BuiltinModelsList
               model={model}
               setModel={setModel}

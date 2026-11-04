@@ -51,8 +51,8 @@ def _build_builtin_chat_model(item: dict[str, Any]) -> AIModelInfo:
         id=model_id,
         raw_id=item.get("tag", model_id),
         name=item.get("name", model_id),
-        provider="builtin",
-        provider_name="Built-in (Navegador WebGPU)",
+        provider="local",
+        provider_name="Local (Navegador WebGPU)",
         description=item.get("description", ""),
         context_window=tokens_str,
         context_length=_resolve_context_length(tokens_str),
@@ -66,18 +66,25 @@ def _build_builtin_chat_model(item: dict[str, Any]) -> AIModelInfo:
         badge=vram_fmt,
         is_free=True,
         size=item.get("download_size") or item.get("size"),
+        vram_required_mb=item.get("vram_required_mb"),
+        vram_formatted=vram_fmt,
+        tier=item.get("tier"),
+        required_features=item.get("required_features") or [],
     )
 
 
 def _resolve_transcription_provider_info(item: dict[str, Any], model_id: str) -> tuple[str, str, str]:
-    prov = item.get("provider", "builtin")
-    if prov == "onnx" or item.get("engine") == "onnxruntime" or "parakeet" in model_id or "sense-voice" in model_id:
-        return ("onnx", "ONNX Runtime (Offline)", "ONNX Runtime")
-    if prov == "faster-whisper" or model_id.startswith("fw-"):
-        return ("faster-whisper", "Faster Whisper (CTranslate2)", "CTranslate2 Local")
-    if prov == "moonshine" or model_id.startswith("moonshine"):
-        return ("moonshine", "Moonshine (Useful Sensors)", "Moonshine Local")
-    return ("builtin", "Whisper Local (CPU/GPU)", "Whisper Local")
+    badge = item.get("badge")
+    if not badge:
+        if "onnx" in model_id or "parakeet" in model_id or "sense-voice" in model_id:
+            badge = "ONNX Runtime Web"
+        elif model_id.startswith("fw-") or "faster-whisper" in model_id:
+            badge = "CTranslate2 Local"
+        elif model_id.startswith("moonshine"):
+            badge = "Moonshine Local"
+        else:
+            badge = "Whisper Local"
+    return ("local", "Local (Audio)", badge)
 
 
 def _build_builtin_transcription_model(item: dict[str, Any]) -> AIModelInfo:
@@ -87,7 +94,7 @@ def _build_builtin_transcription_model(item: dict[str, Any]) -> AIModelInfo:
         id=model_id,
         raw_id=item.get("tag", model_id),
         name=item.get("name", model_id),
-        provider=prov_id,
+        provider="local",
         provider_name=prov_name,
         description=item.get("description", ""),
         context_window="Audio local",
@@ -101,7 +108,7 @@ def _build_builtin_transcription_model(item: dict[str, Any]) -> AIModelInfo:
         rate_limits="Sin límite (Local)",
         badge=badge,
         is_free=True,
-        size=item.get("size"),
+        size=item.get("download_size") or item.get("size"),
         accuracy=item.get("accuracy"),
     )
 
@@ -241,7 +248,10 @@ def _filter_catalog_models(models: list[AIModelInfo], provider: str, task_type: 
     filtered = models
     if provider and provider != "all":
         p_key = provider.lower()
-        filtered = [m for m in filtered if m.provider.lower() == p_key]
+        if p_key in ("builtin", "local"):
+            filtered = [m for m in filtered if m.provider.lower() in ("local", "builtin")]
+        else:
+            filtered = [m for m in filtered if m.provider.lower() == p_key]
     if task_type and task_type != "all":
         t_key = task_type.lower()
         filtered = [m for m in filtered if m.task_type.lower() == t_key]

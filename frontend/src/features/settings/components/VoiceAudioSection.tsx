@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react'
+import { useMemo, type FormEvent } from 'react'
 import {
   Check,
   ChevronDown,
@@ -98,7 +98,29 @@ export const VoiceAudioSection = ({
     },
   ]
 
-  const localVoiceModelsList = DEFAULT_ONNX_MODELS
+  const localVoiceModelsList = useMemo<LocalVoiceModelItem[]>(() => {
+    const fromCatalog = catalogModels.filter(
+      (m) =>
+        m.task_type === 'transcription' &&
+        (m.provider === 'local' || m.provider === 'builtin' || m.is_free),
+    )
+    if (fromCatalog.length > 0) {
+      return fromCatalog.map((m) => ({
+        id: m.id,
+        name: m.name,
+        tag: m.raw_id || m.id,
+        description: m.description,
+        size: m.size || 'Variable',
+        accuracy: m.accuracy || 'Estándar',
+        provider: m.provider,
+        engine: m.provider === 'onnx' ? 'onnxruntime-web' : m.provider,
+        badge: m.badge,
+        is_downloaded: m.is_downloaded,
+        disk_size_mb: m.disk_size_mb,
+      }))
+    }
+    return DEFAULT_ONNX_MODELS
+  }, [catalogModels])
 
   const isBuiltIn =
     voiceAudioProvider === 'builtin' ||
@@ -148,11 +170,11 @@ export const VoiceAudioSection = ({
               Proveedor del Motor de Transcripción
             </label>
             <select
-              value={isBuiltIn ? 'builtin' : voiceAudioProvider}
+              value={isBuiltIn ? 'local' : voiceAudioProvider}
               onChange={(e) => {
                 const newP = e.target.value
                 setVoiceAudioProvider(newP)
-                if (newP === 'builtin') {
+                if (newP === 'local' || newP === 'builtin') {
                   if (!voiceAudioModel || voiceAudioModel.startsWith('whisper-large') || voiceAudioModel === 'whisper-1') {
                     setVoiceAudioModel('base')
                   }
@@ -164,7 +186,7 @@ export const VoiceAudioSection = ({
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
             >
-              <option value="builtin">IA Integrada (Local)</option>
+              <option value="local">IA Integrada (Local)</option>
               <option value="groq">Groq (API)</option>
               <option value="openai">OpenAI (API)</option>
             </select>

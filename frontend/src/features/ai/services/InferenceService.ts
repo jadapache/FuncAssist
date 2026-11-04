@@ -48,7 +48,7 @@ export class InferenceService {
   }
 
   private resolveProvider(settings: AISettings | null): string {
-    return settings?.provider || 'builtin'
+    return settings?.provider || 'local'
   }
 
   private resolveModel(settings: AISettings | null): string {
@@ -65,7 +65,7 @@ export class InferenceService {
 
     const messages = this.buildSummarizeMessages(request)
 
-    if (provider === 'builtin') {
+    if (provider === 'local' || provider === 'builtin') {
       const output = await this.executeWebLLM(model, messages, onChunk, {
         maxTokens: request.maxTokens,
         temperature: request.temperature ?? 0.3,
@@ -87,7 +87,7 @@ export class InferenceService {
 
     const messages = this.buildArtifactMessages(request)
 
-    if (provider === 'builtin') {
+    if (provider === 'local' || provider === 'builtin') {
       const output = await this.executeWebLLM(model, messages, onChunk, {
         maxTokens: request.maxTokens ?? 3072,
         temperature: request.temperature ?? 0.5,
@@ -113,7 +113,7 @@ export class InferenceService {
     const provider = this.resolveProvider(settings)
     const model = this.resolveModel(settings)
 
-    if (provider === 'builtin') {
+    if (provider === 'local' || provider === 'builtin') {
       const content = await this.executeWebLLM(model, messages, onChunk, options)
       return { content, modelUsed: model }
     }

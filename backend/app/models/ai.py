@@ -28,6 +28,10 @@ class AIModelInfo(BaseModel):
   accuracy: str | None = None
   is_downloaded: bool | None = None
   disk_size_mb: float | None = None
+  vram_required_mb: int | None = None
+  vram_formatted: str | None = None
+  tier: str | None = None
+  required_features: list[str] | None = None
 
 
 class ModelCatalogResponse(BaseModel):

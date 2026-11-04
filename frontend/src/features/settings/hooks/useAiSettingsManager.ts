@@ -24,7 +24,7 @@ export function useAiSettingsManager() {
   const [loadingAi, setLoadingAi] = useState(true)
 
   // Provider state: 'builtin' | 'ollama' | 'groq' | 'gemini' | 'openai' | 'claude'
-  const [provider, setProvider] = useState<string>('builtin')
+  const [provider, setProvider] = useState<string>('local')
   const [model, setModel] = useState<string>('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
 
   // Collapsible panels
@@ -176,7 +176,7 @@ export function useAiSettingsManager() {
     try {
       const webllm = await getWebLLMProvider()
       const cached = await Promise.all(
-        catalogModels.filter((item) => item.provider === 'builtin').map(async (item) => ({
+        catalogModels.filter((item) => item.provider === 'local' || item.provider === 'builtin').map(async (item) => ({
           ...item,
           is_downloaded: await webllm.isModelCached(item.id),
           disk_size_mb: 0,
@@ -212,7 +212,7 @@ export function useAiSettingsManager() {
 
         const isFirstTimeSetup = !settings.provider && !settings.transcription_provider
 
-        const prov = userPrefs?.inference_provider || settings.provider || 'builtin'
+        const prov = userPrefs?.inference_provider || settings.provider || 'local'
         setProvider(prov)
 
         const activeModel = userPrefs?.inference_model || settings.model
@@ -220,14 +220,14 @@ export function useAiSettingsManager() {
           setModel(activeModel)
         } else if (isFirstTimeSetup) {
           if (prov === 'groq') setModel('qwen3.8-27b')
-          else if (prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
+          else if (prov === 'local' || prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
           else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
           else setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
         } else {
           if (prov === 'groq') setModel('qwen3.8-27b')
-          else if (prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
+          else if (prov === 'local' || prov === 'builtin') setModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')
           else if (prov === 'gemini') setModel('gemini-2.5-flash')
           else if (prov === 'openai') setModel('gpt-4o-mini')
           else if (prov === 'claude') setModel('claude-3-5-haiku-latest')
@@ -491,7 +491,7 @@ export function useAiSettingsManager() {
 
     setTestingConnection(true)
 
-    if (provider === 'builtin') {
+    if (provider === 'local' || provider === 'builtin') {
       try {
         const provider = await getWebLLMProvider()
         const isCached = await provider.isModelCached(model)

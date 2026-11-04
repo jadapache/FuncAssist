@@ -59,6 +59,19 @@ def migrate_integrations_schema_if_needed() -> None:
             "ON user_integrations (user_id, provider);"
           )
         )
+
+        # Enforce hardware metadata columns in ai_models_catalog
+        session.execute(
+          text(
+            """
+            ALTER TABLE ai_models_catalog ADD COLUMN IF NOT EXISTS vram_required_mb INTEGER;
+            ALTER TABLE ai_models_catalog ADD COLUMN IF NOT EXISTS context_window VARCHAR;
+            ALTER TABLE ai_models_catalog ADD COLUMN IF NOT EXISTS download_size VARCHAR;
+            ALTER TABLE ai_models_catalog ADD COLUMN IF NOT EXISTS tier VARCHAR;
+            ALTER TABLE ai_models_catalog ADD COLUMN IF NOT EXISTS required_features TEXT;
+            """
+          )
+        )
         session.commit()
         logger.info("Integrations schema verified/migrated successfully.")
       finally:

@@ -169,7 +169,7 @@ export function selectOptimalModel(
 
 export async function loadWebLLMModelsFromBackend(): Promise<WebLLMModelDefinition[]> {
   try {
-    const res = await api.getModelCatalog(false, 'builtin', 'chat_writing')
+    const res = await api.getModelCatalog(false, 'local', 'chat_writing')
     if (res?.models && res.models.length > 0) {
       cachedModels = res.models.map((m: ModelCatalogItem) => {
         const vramNum = typeof m.vram_required_mb === 'number' ? m.vram_required_mb : 1630
