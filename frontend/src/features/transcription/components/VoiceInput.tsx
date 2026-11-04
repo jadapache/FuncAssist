@@ -85,7 +85,7 @@ export const VoiceInput = ({
       animateWaveform()
 
       const mimeType = getSupportedMimeType()
-      if (!mimeType) {
+      if (typeof MediaRecorder === 'undefined') {
         stopMediaTracks(stream)
         streamRef.current = null
         analyser.disconnect()
@@ -94,10 +94,10 @@ export const VoiceInput = ({
         analyserRef.current = null
         if (waveformFrameRef.current) window.cancelAnimationFrame(waveformFrameRef.current)
         waveformFrameRef.current = null
-        setErrorMsg('Este navegador no soporta grabación de audio OGG/Opus.')
+        setErrorMsg('Tu navegador no soporta grabación de audio.')
         return
       }
-      const recorder = new MediaRecorder(stream, { mimeType })
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
       mediaRecorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
@@ -194,11 +194,27 @@ function stopMediaTracks(stream: MediaStream | null) {
 }
 
 function getSupportedMimeType(): string | undefined {
-  const candidates = ['audio/ogg;codecs=opus', 'audio/ogg']
+  if (typeof MediaRecorder === 'undefined') return undefined
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+    'audio/wav',
+  ]
   for (const c of candidates) {
     if (MediaRecorder.isTypeSupported(c)) return c
   }
   return undefined
+}
+
+function resolveAudioFilename(mimeType?: string): string {
+  if (!mimeType) return 'dictation.webm'
+  if (mimeType.includes('ogg')) return 'dictation.ogg'
+  if (mimeType.includes('mp4')) return 'dictation.mp4'
+  if (mimeType.includes('wav')) return 'dictation.wav'
+  return 'dictation.webm'
 }
 
 function formatTimer(totalSec: number): string {
@@ -216,7 +232,7 @@ async function uploadAudioSnippet(
   setLoading(true)
   try {
     const formData = new FormData()
-    formData.append('file', blob, 'dictation.ogg')
+    formData.append('file', blob, resolveAudioFilename(blob.type))
 
     const res = await fetch(`${API_BASE}/api/transcription/dictate`, {
       method: 'POST',
