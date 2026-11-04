@@ -1,47 +1,83 @@
 const fs = require('fs');
 const path = require('path');
 
-const version = process.argv[2];
-if (!version) {
-  console.error('Usage: node scripts/set-version.js <version> (e.g. 0.2.3)');
-  process.exit(1);
+function parseVersionArgument() {
+  const version = process.argv[2];
+  if (!version) {
+    console.error('Usage: node scripts/set-version.js <version> (e.g. 0.3.3)');
+    process.exit(1);
+  }
+  return version.replace(/^v/, '');
 }
 
-const cleanVersion = version.replace(/^v/, '');
-console.log(`Setting version to ${cleanVersion}...`);
-
-function updatePackageVersion(packagePath, lockPath) {
+function updatePackageVersion(packagePath, lockPath, cleanVersion) {
+  if (!fs.existsSync(packagePath)) {
+    return;
+  }
   const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
   packageJson.version = cleanVersion;
   fs.writeFileSync(packagePath, JSON.stringify(packageJson, null, 2) + '\n', 'utf8');
 
-  // npm lockfiles v2/v3 store the root package version in both places.
-  if (fs.existsSync(lockPath)) {
-    const lockJson = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
-    lockJson.version = cleanVersion;
-    if (lockJson.packages && lockJson.packages['']) {
-      lockJson.packages[''].version = cleanVersion;
-    }
-    fs.writeFileSync(lockPath, JSON.stringify(lockJson, null, 2) + '\n', 'utf8');
+  if (!fs.existsSync(lockPath)) {
+    return;
   }
+  const lockJson = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+  lockJson.version = cleanVersion;
+  if (lockJson.packages && lockJson.packages['']) {
+    lockJson.packages[''].version = cleanVersion;
+  }
+  fs.writeFileSync(lockPath, JSON.stringify(lockJson, null, 2) + '\n', 'utf8');
 }
 
-// 1. package.json
-const rootPkgPath = path.resolve(__dirname, '../package.json');
-const rootLockPath = path.resolve(__dirname, '../package-lock.json');
-const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
-rootPkg.version = cleanVersion;
-fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n', 'utf8');
-updatePackageVersion(rootPkgPath, rootLockPath);
-console.log('✓ Updated package.json');
+function updateFastApiVersion(mainPyPath, cleanVersion) {
+  if (!fs.existsSync(mainPyPath)) {
+    return;
+  }
+  const content = fs.readFileSync(mainPyPath, 'utf8');
+  const updated = content.replace(
+    /(version\s*=\s*["'])[^"']+(["'])/,
+    `$1${cleanVersion}$2`
+  );
+  fs.writeFileSync(mainPyPath, updated, 'utf8');
+}
 
-// 2. frontend/package.json
-const frontPkgPath = path.resolve(__dirname, '../frontend/package.json');
-const frontLockPath = path.resolve(__dirname, '../frontend/package-lock.json');
-const frontPkg = JSON.parse(fs.readFileSync(frontPkgPath, 'utf8'));
-frontPkg.version = cleanVersion;
-fs.writeFileSync(frontPkgPath, JSON.stringify(frontPkg, null, 2) + '\n', 'utf8');
-updatePackageVersion(frontPkgPath, frontLockPath);
-console.log('✓ Updated frontend/package.json');
+function updateEnvVersion(envPath, cleanVersion) {
+  if (!fs.existsSync(envPath)) {
+    return;
+  }
+  const content = fs.readFileSync(envPath, 'utf8');
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const appVersionRegex = /^APP_VERSION=.*$/m;
+  const updated = appVersionRegex.test(content)
+    ? content.replace(appVersionRegex, `APP_VERSION=${cleanVersion}`)
+    : `${content.trimEnd()}${eol}APP_VERSION=${cleanVersion}${eol}`;
+  fs.writeFileSync(envPath, updated, 'utf8');
+}
 
-console.log(`\nAll version references synchronized to ${cleanVersion}!`);
+function synchronizeVersions() {
+  const cleanVersion = parseVersionArgument();
+  console.log(`Setting version to ${cleanVersion}...`);
+
+  const rootDir = path.resolve(__dirname, '..');
+  updatePackageVersion(
+    path.join(rootDir, 'package.json'),
+    path.join(rootDir, 'package-lock.json'),
+    cleanVersion
+  );
+  console.log('[OK] Updated package.json');
+
+  updatePackageVersion(
+    path.join(rootDir, 'frontend', 'package.json'),
+    path.join(rootDir, 'frontend', 'package-lock.json'),
+    cleanVersion
+  );
+  console.log('[OK] Updated frontend/package.json');
+
+  updateFastApiVersion(
+    path.join(rootDir, 'backend', 'app', 'main.py'),
+    cleanVersion
+  );
+  console.log(`\nAll version references synchronized to ${cleanVersion}!`);
+}
+
+synchronizeVersions();

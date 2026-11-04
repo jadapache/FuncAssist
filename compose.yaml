@@ -2,7 +2,12 @@ name: funcassist
 services:
   frontend:
     image: ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:${APP_VERSION:-latest}
-    build: { context: ., dockerfile: Dockerfile }
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:${APP_VERSION:-latest}
+        - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:latest
     restart: unless-stopped
     ports: ["${APP_PORT:-6728}:80"]
     depends_on:
@@ -10,7 +15,12 @@ services:
     healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"], interval: 30s, timeout: 5s, retries: 3 }
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-backend}:${APP_VERSION:-latest}
-    build: { context: ., dockerfile: backend/Dockerfile }
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      tags:
+        - ${BACKEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-backend}:${APP_VERSION:-latest}
+        - ${BACKEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-backend}:latest
     restart: unless-stopped
     expose: ["8000"]
     environment:
