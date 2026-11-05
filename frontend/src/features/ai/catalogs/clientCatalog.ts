@@ -85,8 +85,8 @@ export const DEFAULT_BROWSER_ASR_MODEL = 'onnx-community/whisper-base'
 
 // Runtime catalog is authoritative. It is populated from AIModelCatalog by the settings loader.
 // These constants are identifiers/defaults only; they are not an operational fallback.
-let dynamicWebLLMModels: WebLLMModelDefinition[] = []
-let dynamicAsrModels: ClientAsrModelDefinition[] = []
+let dynamicWebLLMModels: WebLLMModelDefinition[] = [...CLIENT_WEBLLM_MODELS]
+let dynamicAsrModels: ClientAsrModelDefinition[] = [...CLIENT_ASR_MODELS]
 
 export function setDynamicClientCatalog(models: ModelCatalogItem[]): void {
   if (!models || models.length === 0) return
@@ -107,7 +107,7 @@ export function setDynamicClientCatalog(models: ModelCatalogItem[]): void {
     }))
 
   const asr = models
-    .filter((m) => m.provider === 'browser_asr' || (m.task_type === 'transcription' && m.id.includes('whisper-')))
+    .filter((m) => m.provider === 'browser_asr' || m.provider === 'local')
     .map((m) => ({
       id: m.id,
       name: m.name,
