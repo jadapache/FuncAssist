@@ -149,6 +149,31 @@ export const transcriptionApi = {
     return handleResponse(response)
   },
 
+  async uploadMediaFile(
+    file: File | Blob,
+    title: string,
+    description: string = '',
+    transcriptionId?: string,
+    filename: string = 'extracted_audio.wav'
+  ): Promise<{ ok: boolean; media_id: string; transcription_id: string; size: number; message: string }> {
+    const formData = new FormData()
+    formData.append('file', file, filename)
+    formData.append('title', title)
+    formData.append('description', description)
+    if (transcriptionId) {
+      formData.append('transcription_id', transcriptionId)
+    }
+
+    const response = await fetch(`${API_BASE}/api/transcription/upload`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+      },
+      body: formData,
+    })
+    return handleResponse(response)
+  },
+
   async startTranscription(mediaId: string, options?: TranscribeOptions): Promise<{ ok: boolean; status: string; transcription_id: string }> {
     const response = await fetch(`${API_BASE}/api/transcription/transcribe/${mediaId}`, {
       method: 'POST',

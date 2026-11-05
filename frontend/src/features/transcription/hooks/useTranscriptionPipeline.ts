@@ -7,6 +7,7 @@ import {
   type TranscriptionResult,
 } from '../api/transcriptionApi'
 import { runClientTranscription, resolveClientOnnxModel } from '../utils/clientTranscription'
+import { extractAudioTrackFromMedia, encodeFloat32ToWavBlob } from '../utils/audioExtractor'
 
 interface PipelineProps {
   availableModels: AvailableModelsInfo | null
@@ -174,6 +175,135 @@ export function useTranscriptionPipeline(props: PipelineProps) {
     setViewMode('studio')
   }
 
+  const executeUploadAndServerPath = async (
+    transcriptionId: string,
+    file: File,
+    title: string,
+    description: string,
+  ) => {
+    setSelectedTranscriptionId(transcriptionId)
+    const initJob: TranscriptionProgress = {
+      id: transcriptionId,
+      media_id: transcriptionId,
+      title,
+      status: 'preprocessing',
+      stage: 'preprocessing',
+      progress: 5,
+      message: 'Extrayendo pista de audio en el navegador...',
+      eta: null,
+      model_info: availableModels?.active_model_label || 'Whisper Cloud',
+    }
+    setActiveJobs((prev) => ({ ...prev, [transcriptionId]: initJob }))
+    addOrUpdateJob({
+      id: transcriptionId,
+      type: 'transcription',
+      title,
+      progress: 5,
+      status: 'preprocessing',
+      stageText: 'Extrayendo audio...',
+      eta: null,
+      onClick: () => {
+        openStudio(transcriptionId)
+        navigate('/funcional/transcripciones')
+      },
+      onCancel: () => void handleCancelTranscription(transcriptionId),
+      onDismiss: () => handleDismissJob(transcriptionId),
+    })
+
+    let payloadToUpload: File | Blob = file
+    let uploadFilename = file.name
+
+    try {
+      const { audioData } = await extractAudioTrackFromMedia(file, 16000, (pct, msg) => {
+        setActiveJobs((prev) => {
+          if (!prev[transcriptionId]) return prev
+          return {
+            ...prev,
+            [transcriptionId]: {
+              ...prev[transcriptionId],
+              progress: Math.min(15, Math.round(pct * 0.15)),
+              message: msg,
+            },
+          }
+        })
+      })
+      payloadToUpload = encodeFloat32ToWavBlob(audioData, 16000)
+      uploadFilename = `${file.name.replace(/\.[^/.]+$/, '')}_16k.wav`
+    } catch {
+      payloadToUpload = file
+      uploadFilename = file.name
+    }
+
+    if (cancelledJobsRef.current.has(transcriptionId)) return
+
+    setActiveJobs((prev) => {
+      if (!prev[transcriptionId]) return prev
+      return {
+        ...prev,
+        [transcriptionId]: {
+          ...prev[transcriptionId],
+          status: 'uploading',
+          stage: 'uploading',
+          progress: 20,
+          message: 'Enviando audio al servidor para transcripción en la nube...',
+        },
+      }
+    })
+
+    const uploadRes = await transcriptionApi.uploadMediaFile(
+      payloadToUpload,
+      title,
+      description,
+      transcriptionId,
+      uploadFilename,
+    )
+    const mediaId = uploadRes.media_id || transcriptionId
+
+    delete abortControllersRef.current[transcriptionId]
+    if (cancelledJobsRef.current.has(transcriptionId)) return
+
+    const preprocessingJob: TranscriptionProgress = {
+      id: transcriptionId,
+      media_id: mediaId,
+      title,
+      status: 'preprocessing',
+      stage: 'preprocessing',
+      progress: 15,
+      message: 'Procesando archivo en el servidor...',
+      eta: null,
+      model_info: availableModels?.active_model_label || 'Whisper Cloud',
+    }
+    setActiveJobs((prev) => {
+      if (cancelledJobsRef.current.has(transcriptionId)) return prev
+      return { ...prev, [transcriptionId]: preprocessingJob }
+    })
+    addOrUpdateJob({
+      id: transcriptionId,
+      type: 'transcription',
+      title,
+      progress: 15,
+      status: 'preprocessing',
+      stageText: 'Procesando archivo en el servidor...',
+      eta: null,
+      onClick: () => {
+        openStudio(transcriptionId)
+        navigate('/funcional/transcripciones')
+      },
+      onCancel: () => void handleCancelTranscription(transcriptionId),
+      onDismiss: () => handleDismissJob(transcriptionId),
+    })
+
+    await transcriptionApi.startTranscription(mediaId, {
+      transcription_id: transcriptionId,
+      mode: 'auto',
+      enable_diarization: true,
+    })
+
+    if (!cancelledJobsRef.current.has(transcriptionId)) {
+      setViewMode('studio')
+    }
+  }
+
   const executeServerAudioPath = async (
     transcriptionId: string,
     localPath: string,
@@ -250,6 +380,16 @@ export function useTranscriptionPipeline(props: PipelineProps) {
         setActiveMeetingTitle(title)
 
         if (!localPath && target instanceof File) {
+          const isCloud =
+            availableModels?.configured_provider === 'groq' ||
+            availableModels?.configured_provider === 'openai' ||
+            availableModels?.configured_provider === 'cloud'
+
+          if (isCloud) {
+            await executeUploadAndServerPath(transcriptionId, target, title, description)
+            return
+          }
+
           await executeClientAudioPath(transcriptionId, target, title, description)
           return
         }
