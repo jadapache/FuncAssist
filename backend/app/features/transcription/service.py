@@ -110,8 +110,9 @@ class TranscriptionService:
     delete_transcription_record(transcription_id)
     return True
 
-  def get_available_models_info(self) -> dict[str, Any]:
-    ai_cfg = load_app_settings().get("ai", {})
+  def get_available_models_info(self, user_id: Optional[str] = None) -> dict[str, Any]:
+    from app.ai.providers.factory import get_ai_settings
+    ai_cfg = get_ai_settings(user_id=user_id)
     provider = (ai_cfg.get("transcription_provider") or "browser_asr").lower()
     model = ai_cfg.get("transcription_model") or "onnx-community/whisper-base"
     groq_key = bool(
@@ -131,7 +132,7 @@ class TranscriptionService:
     if openai_key:
       available.append("openai")
 
-    if provider == "groq" or (groq_key and provider == "cloud"):
+    if provider == "groq" or (groq_key and provider in ("cloud", "auto")):
       active_label = f"Groq Whisper ({model or 'whisper-large-v3'})"
     elif provider == "openai":
       active_label = f"OpenAI Whisper ({model or 'whisper-1'})"
@@ -157,11 +158,12 @@ class TranscriptionService:
     language: Optional[str] = None,
     model_size: Optional[str] = None,
     enable_diarization: bool = True,
+    user_id: Optional[str] = None,
   ) -> TranscriptionResult:
     if transcription_id in _CANCELLED_JOBS:
       _CANCELLED_JOBS.remove(transcription_id)
 
-    model_info_data = self.get_available_models_info()
+    model_info_data = self.get_available_models_info(user_id=user_id)
     active_model_label = model_info_data.get("active_model_label", "Whisper")
 
     media_entry = get_media_entry(media_id) or get_media_entry(transcription_id)
@@ -187,7 +189,7 @@ class TranscriptionService:
     set_main_loop(asyncio.get_running_loop())
     media_title = media_entry.get("title", "Reunión de Requerimientos")
     audio_track_path = await self._preprocess_media(transcription_id, media_id, media_path, media_entry, media_title, active_model_label)
-    return await self._execute_cloud_pipeline(transcription_id, media_id, audio_track_path, media_entry, media_title, active_model_label, language, enable_diarization)
+    return await self._execute_cloud_pipeline(transcription_id, media_id, audio_track_path, media_entry, media_title, active_model_label, language, enable_diarization, user_id=user_id)
 
   def _fail_job(self, transcription_id: str, media_id: str, message: str, model_info: str) -> None:
     prog = TranscriptionProgress(
@@ -241,6 +243,7 @@ class TranscriptionService:
     active_model_label: str,
     language: Optional[str],
     enable_diarization: bool,
+    user_id: Optional[str] = None,
   ) -> TranscriptionResult:
     self._update_progress(
       TranscriptionProgress(
@@ -256,7 +259,8 @@ class TranscriptionService:
       )
     )
 
-    cloud_raw = await self.cloud_service.transcribe(audio_track_path, language=language)
+    cloud_service = WhisperCloudService(user_id=user_id)
+    cloud_raw = await cloud_service.transcribe(audio_track_path, language=language)
     raw_segments = cloud_raw.get("segments", [])
     if enable_diarization and raw_segments:
       labeled_segments = await asyncio.to_thread(self.diarizer.diarize_segments, raw_segments, audio_track_path)

@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 class WhisperCloudService:
-  def __init__(self, provider: str = "groq", api_key: Optional[str] = None):
-    self.provider = provider.lower()
+  def __init__(self, provider: str = "groq", api_key: Optional[str] = None, user_id: Optional[str] = None):
+    self.provider = provider.lower() if provider else "groq"
     self.api_key = api_key
+    self.user_id = user_id
 
   def _resolve_credentials(self) -> tuple[str, str, str]:
-    config = get_ai_settings()
+    config = get_ai_settings(user_id=self.user_id)
     prov = (self.provider or config.get("transcription_provider") or "auto").lower()
     configured_model = config.get("transcription_model")
 

@@ -11,7 +11,7 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user
@@ -121,11 +121,48 @@ async def register_local_path(req: RegisterLocalPathRequest) -> dict[str, Any]:
     raise HTTPException(status_code=500, detail=f"Error vinculando archivo local: {exc}") from exc
 
 
+@router.post("/upload")
+async def upload_transcription_media(
+  file: UploadFile = File(...),
+  title: str = Form(""),
+  description: str = Form(""),
+  transcription_id: Optional[str] = Form(None),
+) -> dict[str, Any]:
+  """Upload media file to the server for cloud or server-side transcription."""
+  tid = transcription_id or str(uuid.uuid4())
+  content = await file.read()
+  if not content:
+    raise HTTPException(status_code=400, detail="El archivo multimedia está vacío.")
+
+  try:
+    from app.features.transcription.storage import allocate_transcription_folder
+    entry = allocate_transcription_folder(
+      transcription_id=tid,
+      file_bytes=content,
+      original_filename=file.filename or "media.mp4",
+      title=title or file.filename or "Reunión",
+      description=description,
+    )
+    return {
+      "ok": True,
+      "media_id": tid,
+      "transcription_id": tid,
+      "size": entry.get("size_bytes", len(content)),
+      "entry": entry,
+      "message": "Archivo multimedia subido con éxito.",
+    }
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Error al guardar archivo: {exc}") from exc
+
+
 @router.post("/transcribe/{media_id}")
 async def start_transcription(
   media_id: str,
   background_tasks: BackgroundTasks,
   req: Optional[TranscribeRequest] = None,
+  current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
   """Trigger background transcription process for uploaded media."""
   entry = get_media_entry(media_id)
@@ -134,6 +171,7 @@ async def start_transcription(
 
   transcribe_cfg = req or TranscribeRequest()
   transcription_id = transcribe_cfg.transcription_id or str(uuid.uuid4())
+  user_id = current_user.get("id")
 
   async def _run_job():
     try:
@@ -144,6 +182,7 @@ async def start_transcription(
         language=transcribe_cfg.language,
         model_size=transcribe_cfg.model_size,
         enable_diarization=transcribe_cfg.enable_diarization,
+        user_id=user_id,
       )
     except Exception as exc:
       # Exception is recorded inside active job status in transcription_service
@@ -207,9 +246,9 @@ async def submit_client_transcription(req: SubmitClientTranscriptionRequest) -> 
 
 
 @router.get("/available-models")
-async def get_available_models() -> dict[str, Any]:
+async def get_available_models(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
   """Return available transcription models and active configuration."""
-  return transcription_service.get_available_models_info()
+  return transcription_service.get_available_models_info(user_id=current_user.get("id"))
 
 
 @router.post("/cancel/{transcription_id}")
@@ -355,7 +394,10 @@ async def export_levantamiento(req: ExportDocumentRequest) -> Response:
 
 
 @router.post("/dictate")
-async def dictate_audio(file: UploadFile = File(...)):
+async def dictate_audio(
+  file: UploadFile = File(...),
+  current_user: dict[str, Any] = Depends(get_current_user),
+):
   """Transcribe a short voice dictation audio snippet for chat composition."""
   content = await file.read()
   if not content:
@@ -369,7 +411,7 @@ async def dictate_audio(file: UploadFile = File(...)):
   try:
     temp_file.write_bytes(content)
     from app.features.transcription.whisper_cloud import WhisperCloudService
-    cloud_service = WhisperCloudService()
+    cloud_service = WhisperCloudService(user_id=current_user.get("id"))
     res = await cloud_service.transcribe(temp_file, language="es")
     transcribed_text = (res.get("text") or "").strip()
     return {"text": transcribed_text, "filename": file.filename}
