@@ -18,7 +18,7 @@ export type * from '../features/settings/types'
 export type * from '../features/document/types'
 export type * from '../features/transcription/api/transcriptionApi'
 
-export { API_BASE, getAuthHeaders } from '../core/api/config'
+export { API_BASE, getAuthHeaders, getAuthToken } from '../core/api/config'
 
 export type AuthUser = {
   id: string
@@ -66,7 +66,9 @@ export const handleResponse = async <T,>(response: Response): Promise<T> => {
         })
         .join('. ')
     }
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    const error = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    Object.assign(error, { status: response.status })
+    throw error
   }
   if (response.status === 204) {
     return undefined as T

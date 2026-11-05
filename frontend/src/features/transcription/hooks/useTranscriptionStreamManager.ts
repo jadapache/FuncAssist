@@ -9,6 +9,14 @@ import {
   getTranscriptionStageText,
 } from '../utils/transcriptionStages'
 
+function isNotFoundError(err: unknown): boolean {
+  if (!err) return false
+  const status = (err as { status?: number })?.status
+  if (status === 404) return true
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('404') || msg.toLowerCase().includes('no encontrado') || msg.toLowerCase().includes('not found')
+}
+
 interface StreamManagerProps {
   isAuthenticated: boolean
   isAuthLoading: boolean
@@ -136,6 +144,11 @@ export function useTranscriptionStreamManager({
     async (id: string, data: any) => {
       if (cancelledJobsRef.current.has(id)) return
 
+      if (typeof data.message === 'string' && data.message.toLowerCase().includes('no encontrado')) {
+        handleDismissJob(id)
+        return
+      }
+
       const isCancelled = data.stage === 'cancelled' || data.status === 'cancelled'
       if (isCancelled) {
         cancelledJobsRef.current.add(id)
@@ -262,14 +275,8 @@ export function useTranscriptionStreamManager({
             if (!status) continue
             await processJobPayload(id, status)
           } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err)
-            if (msg.includes('404')) {
-              setActiveJobs((prev) => {
-                const next = { ...prev }
-                delete next[id]
-                return next
-              })
-              removeJob(id)
+            if (isNotFoundError(err)) {
+              handleDismissJob(id)
             }
           }
         }

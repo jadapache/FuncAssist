@@ -151,12 +151,27 @@ async def transcription_progress_stream(transcription_id: str) -> AsyncGenerator
     yield f"data: {json.dumps(initial_event)}\n\n"
 
     # If we already have a latest progress status, send it immediately
-    if transcription_id in _LATEST_PROGRESS:
-      latest = _LATEST_PROGRESS[transcription_id]
+    latest = _LATEST_PROGRESS.get(transcription_id)
+    if not latest:
+      from app.features.transcription.service import transcription_service
+      prog = transcription_service.get_job_progress(transcription_id)
+      if prog:
+        latest = prog.model_dump()
+
+    if latest:
       yield f"data: {json.dumps(latest)}\n\n"
       latest_stage = str(latest.get("stage") or latest.get("status") or "")
       if latest_stage in {"complete", "failed", "cancelled"} or latest.get("progress") == 100:
         return
+    else:
+      error_event = {
+        "event": "error",
+        "stage": "failed",
+        "message": "Trabajo de transcripción no encontrado.",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+      }
+      yield f"data: {json.dumps(error_event)}\n\n"
+      return
 
     while True:
       try:

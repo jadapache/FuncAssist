@@ -68,6 +68,26 @@ class TranscriptionService:
     except Exception as exc:
       logger.warning("Could not emit SSE progress for %s: %s", job_progress.id, exc)
 
+  def init_job(
+    self,
+    transcription_id: str,
+    media_id: str,
+    title: str = "",
+    model_info: str = "Whisper",
+  ) -> TranscriptionProgress:
+    prog = TranscriptionProgress(
+      id=transcription_id,
+      media_id=media_id,
+      title=title or "Transcripción",
+      status="pending",
+      stage="pending",
+      progress=0,
+      message="Iniciando trabajo de transcripción...",
+      model_info=model_info,
+    )
+    self._update_progress(prog)
+    return prog
+
   def get_job_progress(self, transcription_id: str) -> Optional[TranscriptionProgress]:
     if transcription_id in _ACTIVE_JOBS:
       return _ACTIVE_JOBS[transcription_id]

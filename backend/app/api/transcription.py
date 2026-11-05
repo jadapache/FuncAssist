@@ -173,6 +173,14 @@ async def start_transcription(
   transcription_id = transcribe_cfg.transcription_id or str(uuid.uuid4())
   user_id = current_user.get("id")
 
+  media_title = entry.get("title") or entry.get("original_filename") or "Transcripción"
+  transcription_service.init_job(
+    transcription_id=transcription_id,
+    media_id=media_id,
+    title=media_title,
+    model_info=transcribe_cfg.model_size or "Whisper",
+  )
+
   async def _run_job():
     try:
       await transcription_service.transcribe_media_async(

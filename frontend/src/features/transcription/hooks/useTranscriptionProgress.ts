@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../../../api/client'
+import { transcriptionApi } from '../api/transcriptionApi'
 
 export interface TranscriptionProgressData {
   stage: string
@@ -54,7 +54,7 @@ export function useTranscriptionProgress(transcriptionId: string | null) {
       if (isDisposed) return
 
       try {
-        const streamUrl = `${API_BASE}/api/transcription/progress-stream/${transcriptionId}`
+        const streamUrl = transcriptionApi.getProgressStreamUrl(transcriptionId)
         eventSource = new EventSource(streamUrl)
 
         eventSource.addEventListener('open', () => {

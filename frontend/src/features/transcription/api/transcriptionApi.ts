@@ -1,4 +1,4 @@
-import { API_BASE, getAuthHeaders, handleResponse } from '../../../api/client'
+import { API_BASE, getAuthHeaders, getAuthToken, handleResponse } from '../../../api/client'
 
 export type MediaMetadata = {
   title: string
@@ -75,7 +75,9 @@ export type AvailableModelsInfo = {
 
 export const transcriptionApi = {
   getProgressStreamUrl(transcriptionId: string): string {
-    return `${API_BASE}/api/transcription/progress-stream/${transcriptionId}`
+    const token = getAuthToken()
+    const query = token ? `?token=${encodeURIComponent(token)}` : ''
+    return `${API_BASE}/api/transcription/progress-stream/${transcriptionId}${query}`
   },
 
   async getAvailableModels(): Promise<AvailableModelsInfo> {
