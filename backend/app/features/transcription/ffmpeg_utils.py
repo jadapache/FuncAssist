@@ -1,9 +1,12 @@
+import logging
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from app.core.settings import BIN_DIR
+
+logger = logging.getLogger(__name__)
 
 _CACHED_FFMPEG_PATH: str | None = None
 
@@ -66,7 +69,18 @@ def extract_audio_track(media_path: Path, output_wav_path: Path) -> Path:
             "1",
             str(output_wav_path),
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=1800,
+        )
         return output_wav_path
-    except Exception:
+    except subprocess.CalledProcessError as err:
+        logger.warning("FFmpeg audio extraction failed (exit %s): %s", err.returncode, err.stderr)
+        return media_path
+    except Exception as exc:
+        logger.warning("Unexpected error during FFmpeg audio extraction: %s", exc)
         return media_path

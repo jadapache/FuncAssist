@@ -4,6 +4,7 @@ import {
   AlertCircle,
   BadgeCheck,
   CheckCircle2,
+  Circle,
   Eye,
   EyeOff,
   Lock,
@@ -17,12 +18,48 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import {
   EMAIL_REGEX,
-  PASSWORD_REGEX,
   USERNAME_REGEX,
   roleOptions,
   type SelectableRole,
 } from '../constants/auth'
 import { API_BASE } from '../core/api/config'
+
+interface PasswordRule {
+  id: string
+  label: string
+  isValid: boolean
+}
+
+const evaluatePasswordRules = (pwd: string): PasswordRule[] => [
+  { id: 'length', label: 'Mínimo 10 caracteres', isValid: pwd.length >= 10 },
+  { id: 'uppercase', label: 'Al menos una letra mayúscula', isValid: /[A-Z]/.test(pwd) },
+  { id: 'number', label: 'Al menos un número', isValid: /\d/.test(pwd) },
+  {
+    id: 'special',
+    label: 'Al menos un carácter especial (!@#$%...)',
+    isValid: /[^A-Za-z0-9]/.test(pwd),
+  },
+]
+
+const PasswordRequirements: React.FC<{ rules: PasswordRule[] }> = ({ rules }) => (
+  <div className="mt-2.5 rounded-xl border border-slate-200/90 bg-slate-50/80 p-3">
+    <p className="text-[11px] font-semibold text-slate-700 mb-2">Requisitos de la contraseña:</p>
+    <ul className="space-y-1.5">
+      {rules.map((rule) => (
+        <li key={rule.id} className="flex items-center gap-2 text-[11px]">
+          {rule.isValid ? (
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" aria-hidden />
+          ) : (
+            <Circle className="h-3.5 w-3.5 text-slate-400 shrink-0" aria-hidden />
+          )}
+          <span className={rule.isValid ? 'text-emerald-700 font-medium' : 'text-slate-500'}>
+            {rule.label}
+          </span>
+        </li>
+      ))}
+    </ul>
+  </div>
+)
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate()
@@ -42,7 +79,9 @@ export const LoginPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
-  const isPasswordRobust = PASSWORD_REGEX.test(password)
+  const passwordRules = evaluatePasswordRules(password)
+  const allPasswordRulesMet = passwordRules.every((r) => r.isValid)
+  const isPasswordRobust = allPasswordRulesMet
   const isUsernameValid = USERNAME_REGEX.test(username.trim())
 
   // Enable/disable conditions based on completion of fields
@@ -54,8 +93,7 @@ export const LoginPage: React.FC = () => {
     email.trim() &&
     EMAIL_REGEX.test(email.trim()) &&
     role &&
-    password &&
-    isPasswordRobust
+    allPasswordRulesMet
   )
   const isSubmitDisabled =
     isLoading || (mode === 'login' ? !isLoginFormComplete : !isRegisterFormComplete)
@@ -396,6 +434,7 @@ export const LoginPage: React.FC = () => {
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+            {mode === 'register' && <PasswordRequirements rules={passwordRules} />}
           </div>
 
           {/* Submit Button */}
@@ -419,14 +458,6 @@ export const LoginPage: React.FC = () => {
             )}
           </button>
         </form>
-
-        {/* Card Footer */}
-        <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-          <span>FuncAssist</span>
-          {appVersion && (
-            <span className="font-mono text-[11px] text-slate-500 font-medium">v{appVersion}</span>
-          )}
-        </div>
       </div>
     </div>
   )

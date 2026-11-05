@@ -160,6 +160,13 @@ async def upload_transcription_media(
     raise HTTPException(status_code=500, detail=f"Error al guardar archivo: {exc}") from exc
 
 
+def _process_audio_extraction(upload_file: UploadFile, input_path: Path, output_path: Path) -> Path:
+  with input_path.open("wb") as buffer:
+    shutil.copyfileobj(upload_file.file, buffer)
+  from app.features.transcription.ffmpeg_utils import extract_audio_track
+  return extract_audio_track(input_path, output_path)
+
+
 @router.post("/extract-audio")
 async def extract_audio_endpoint(
   background_tasks: BackgroundTasks,
@@ -172,14 +179,11 @@ async def extract_audio_endpoint(
   temp_output = temp_dir / "extracted_16k.wav"
 
   try:
-    with temp_input.open("wb") as buffer:
-      shutil.copyfileobj(file.file, buffer)
+    result_path = await asyncio.to_thread(_process_audio_extraction, file, temp_input, temp_output)
   except Exception as exc:
     shutil.rmtree(temp_dir, ignore_errors=True)
-    raise HTTPException(status_code=500, detail=f"Error guardando archivo temporal: {exc}") from exc
+    raise HTTPException(status_code=500, detail=f"Error al procesar archivo de video: {exc}") from exc
 
-  from app.features.transcription.ffmpeg_utils import extract_audio_track
-  result_path = extract_audio_track(temp_input, temp_output)
   if not result_path.exists() or result_path == temp_input:
     shutil.rmtree(temp_dir, ignore_errors=True)
     raise HTTPException(

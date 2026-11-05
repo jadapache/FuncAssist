@@ -112,6 +112,6 @@ health_router = APIRouter(tags=["health"])
 @health_router.get("/health", response_model=HealthResponse)
 @health_router.get("/api/health", response_model=HealthResponse)
 @health_router.get("/api/health/ready", response_model=HealthResponse)
-async def health(request: Request | None = None) -> HealthResponse:
-  version = getattr(request.app, "version", "0.4.0") if request else "0.4.0"
+async def health(request: Request) -> HealthResponse:
+  version = getattr(request.app, "version", "0.4.0")
   return HealthResponse(version=version)
