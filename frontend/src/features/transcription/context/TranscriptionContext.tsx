@@ -125,6 +125,16 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
     clientJobIdsRef: streamManager.clientJobIdsRef,
   })
 
+  // Stabilize callbacks for persisted jobs to avoid re-triggering initialization effects
+  const openStudioRef = React.useRef(modals.openStudio)
+  openStudioRef.current = modals.openStudio
+
+  const cancelTranscriptionRef = React.useRef(streamManager.handleCancelTranscription)
+  cancelTranscriptionRef.current = streamManager.handleCancelTranscription
+
+  const dismissJobRef = React.useRef(streamManager.handleDismissJob)
+  dismissJobRef.current = streamManager.handleDismissJob
+
   // Restore stored active jobs on authentication
   const restorePersistedJobs = useCallback(() => {
     const validJobs = loadStoredActiveJobs()
@@ -142,14 +152,14 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
         speedOrSize: job.preview || null,
         eta: job.eta || null,
         onClick: () => {
-          modals.openStudio(id)
+          openStudioRef.current(id)
           navigate('/funcional/transcripciones')
         },
-        onCancel: () => void streamManager.handleCancelTranscription(id),
-        onDismiss: () => streamManager.handleDismissJob(id),
+        onCancel: () => void cancelTranscriptionRef.current(id),
+        onDismiss: () => dismissJobRef.current(id),
       })
     }
-  }, [addOrUpdateJob, modals, navigate, streamManager])
+  }, [addOrUpdateJob, navigate])
 
   // Fetch available models and restore persisted jobs on mount / auth change
   useEffect(() => {
