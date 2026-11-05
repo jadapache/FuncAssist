@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import hashlib
 import logging
 import re
+import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, List, Optional
@@ -12,6 +14,7 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user
@@ -155,6 +158,45 @@ async def upload_transcription_media(
     raise HTTPException(status_code=400, detail=str(exc)) from exc
   except Exception as exc:
     raise HTTPException(status_code=500, detail=f"Error al guardar archivo: {exc}") from exc
+
+
+@router.post("/extract-audio")
+async def extract_audio_endpoint(
+  background_tasks: BackgroundTasks,
+  file: UploadFile = File(...),
+) -> FileResponse:
+  """Extract audio from video container (.mkv, .wmv, .avi, etc.) to 16 kHz WAV using FFmpeg."""
+  suffix = Path(file.filename or "media.mkv").suffix.lower() or ".mkv"
+  temp_dir = Path(tempfile.mkdtemp(prefix="funcassist_audio_"))
+  temp_input = temp_dir / f"input{suffix}"
+  temp_output = temp_dir / "extracted_16k.wav"
+
+  try:
+    with temp_input.open("wb") as buffer:
+      shutil.copyfileobj(file.file, buffer)
+  except Exception as exc:
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    raise HTTPException(status_code=500, detail=f"Error guardando archivo temporal: {exc}") from exc
+
+  from app.features.transcription.ffmpeg_utils import extract_audio_track
+  result_path = extract_audio_track(temp_input, temp_output)
+  if not result_path.exists() or result_path == temp_input:
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    raise HTTPException(
+      status_code=422,
+      detail="No se pudo extraer la pista de audio con FFmpeg. Verifica el formato del video.",
+    )
+
+  def cleanup():
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+  background_tasks.add_task(cleanup)
+
+  return FileResponse(
+    path=str(result_path),
+    media_type="audio/wav",
+    filename="audio_16k.wav",
+  )
 
 
 @router.post("/transcribe/{media_id}")

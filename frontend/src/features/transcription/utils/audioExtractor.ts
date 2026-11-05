@@ -3,10 +3,49 @@
  * Processes video and audio files entirely in client memory without uploading bytes.
  */
 
+import { transcriptionApi } from '../api/transcriptionApi'
+
 export interface ExtractedAudioData {
   audioData: Float32Array
   sampleRate: number
   duration: number
+}
+
+const NON_BROWSER_CONTAINERS = new Set(['.mkv', '.wmv', '.avi', '.flv', '.mov', '.ts'])
+
+function requiresServerAudioExtraction(filename: string): boolean {
+  const ext = '.' + filename.split('.').pop()?.toLowerCase()
+  return NON_BROWSER_CONTAINERS.has(ext)
+}
+
+async function decodeWithAudioContext(arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) {
+    throw new Error('Web Audio API no está soportada en este navegador.')
+  }
+  const tempContext = new AudioCtx()
+  try {
+    return await tempContext.decodeAudioData(arrayBuffer)
+  } finally {
+    void tempContext.close()
+  }
+}
+
+async function resampleToMono(
+  decodedBuffer: AudioBuffer,
+  targetSampleRate: number
+): Promise<Float32Array> {
+  const totalLength = Math.ceil(decodedBuffer.duration * targetSampleRate)
+  const offlineCtx = new OfflineAudioContext(1, totalLength, targetSampleRate)
+  const source = offlineCtx.createBufferSource()
+  source.buffer = decodedBuffer
+  source.connect(offlineCtx.destination)
+  source.start(0)
+
+  const resampledBuffer = await offlineCtx.startRendering()
+  return resampledBuffer.getChannelData(0)
 }
 
 /**
@@ -18,53 +57,29 @@ export async function extractAudioTrackFromMedia(
   targetSampleRate = 16000,
   onProgress?: (progressPct: number, message: string) => void
 ): Promise<ExtractedAudioData> {
-  onProgress?.(2, 'Leyendo archivo multimedia en memoria...')
-
-  const arrayBuffer = await file.arrayBuffer()
-  onProgress?.(5, 'Decodificando pistas de audio en el navegador...')
-
-  // Standard AudioContext to decode container audio (AAC, MP3, Opus, PCM, etc.)
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-  if (!AudioCtx) {
-    throw new Error('Web Audio API no está soportada en este navegador.')
-  }
-
-  const tempContext = new AudioCtx()
   let decodedBuffer: AudioBuffer
-  try {
-    decodedBuffer = await tempContext.decodeAudioData(arrayBuffer)
-  } catch (err: unknown) {
-    const isVideo =
-      file.type.startsWith('video/') ||
-      /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v)$/i.test(file.name)
-    if (isVideo) {
-      throw new Error(
-        `El decodificador del navegador no puede procesar el contenedor de video '${file.name}' localmente. ` +
-        `Usa un archivo de audio (MP3, WAV, M4A, OGG, FLAC) o configura Groq Whisper Cloud en Ajustes para procesar video.`
-      )
+
+  if (requiresServerAudioExtraction(file.name)) {
+    onProgress?.(3, 'Extrayendo audio con motor FFmpeg...')
+    const wavBlob = await transcriptionApi.extractAudioTrack(file)
+    const wavBuffer = await wavBlob.arrayBuffer()
+    onProgress?.(7, 'Decodificando pista de audio extraída...')
+    decodedBuffer = await decodeWithAudioContext(wavBuffer)
+  } else {
+    onProgress?.(2, 'Leyendo archivo multimedia en memoria...')
+    const arrayBuffer = await file.arrayBuffer()
+    onProgress?.(5, 'Decodificando pistas de audio en el navegador...')
+    try {
+      decodedBuffer = await decodeWithAudioContext(arrayBuffer)
+    } catch {
+      onProgress?.(6, 'Decodificación nativa falló. Extrayendo audio con FFmpeg...')
+      const wavBlob = await transcriptionApi.extractAudioTrack(file)
+      decodedBuffer = await decodeWithAudioContext(await wavBlob.arrayBuffer())
     }
-    throw new Error(
-      `No se pudo decodificar el audio en el navegador: ${err instanceof Error ? err.message : String(err)}`
-    )
-  } finally {
-    void tempContext.close()
   }
 
   onProgress?.(8, 'Normalizando y remuestreando a 16 kHz mono...')
-
-  const totalLength = Math.ceil(decodedBuffer.duration * targetSampleRate)
-  const offlineCtx = new OfflineAudioContext(1, totalLength, targetSampleRate)
-
-  const source = offlineCtx.createBufferSource()
-  source.buffer = decodedBuffer
-  source.connect(offlineCtx.destination)
-  source.start(0)
-
-  const resampledBuffer = await offlineCtx.startRendering()
-  const monoChannel = resampledBuffer.getChannelData(0)
-
+  const monoChannel = await resampleToMono(decodedBuffer, targetSampleRate)
   onProgress?.(10, 'Audio preparado para transcripción.')
 
   return {

@@ -27,7 +27,7 @@ ENV TZ=${TZ} \
 # conversion resolves an optional binary from the persistent application data
 # directory, while cloud transcription works without it.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    && apt-get install -y --no-install-recommends tzdata ffmpeg \
     && ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*

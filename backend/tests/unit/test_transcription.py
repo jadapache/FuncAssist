@@ -371,6 +371,20 @@ def test_progress_stream_endpoint(client: TestClient):
     assert any("data:" in l for l in lines)
 
 
+def test_extract_audio_endpoint(client: TestClient, monkeypatch):
+  def fake_extract(media_path, output_wav_path):
+    output_wav_path.write_bytes(b"RIFFdummywavdata")
+    return output_wav_path
+
+  monkeypatch.setattr("app.features.transcription.ffmpeg_utils.extract_audio_track", fake_extract)
+
+  files = {"file": ("video.mkv", b"dummymkvdata", "video/x-matroska")}
+  res = client.post("/api/transcription/extract-audio", files=files)
+  assert res.status_code == 200
+  assert res.headers["content-type"] == "audio/wav"
+  assert res.content == b"RIFFdummywavdata"
+
+
 def test_local_whisper_models_endpoint(client: TestClient):
   res = client.get("/api/ai/whisper/models")
   assert res.status_code == 404

@@ -151,6 +151,32 @@ export const transcriptionApi = {
     return handleResponse(response)
   },
 
+  async extractAudioTrack(file: File): Promise<Blob> {
+    const formData = new FormData()
+    formData.append('file', file, file.name)
+
+    const response = await fetch(`${API_BASE}/api/transcription/extract-audio`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      let detail = `Error al extraer audio (${response.status})`
+      try {
+        const body = await response.json()
+        detail = body.detail ?? detail
+      } catch {
+        // ignore
+      }
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    }
+
+    return response.blob()
+  },
+
   async uploadMediaFile(
     file: File | Blob,
     title: string,

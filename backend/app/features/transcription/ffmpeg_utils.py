@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,11 @@ def get_ffmpeg_binary() -> str | None:
     if target.is_file() and target.stat().st_size > 10000:
         _ensure_in_path(BIN_DIR)
         _CACHED_FFMPEG_PATH = str(target.resolve())
+        return _CACHED_FFMPEG_PATH
+
+    resolved = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    if resolved and Path(resolved).is_file():
+        _CACHED_FFMPEG_PATH = str(Path(resolved).resolve())
         return _CACHED_FFMPEG_PATH
 
     return None
