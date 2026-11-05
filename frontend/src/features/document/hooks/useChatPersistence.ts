@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import type { Artifact } from '../../../types/artifacts'
 import { draftsApi } from '../../../features/document/api/draftsApi'
@@ -51,6 +51,8 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
   const [searchParams, setSearchParams] = useSearchParams()
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
   const urlSessionId = routeSessionId || searchParams.get('session')
+  const initialUrlSessionId = useRef(urlSessionId)
+  const hasLocalConversationRef = useRef(false)
   const [activeConversationId, setActiveConversationId] = useState<string | null>(urlSessionId || null)
 
   const syncUrlSession = useCallback(
@@ -79,11 +81,19 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
       .getSessions(featureSlug)
       .then((remoteSessions) => {
         if (isCancelled) return
-        setConversations(remoteSessions)
-        const matched = urlSessionId ? remoteSessions.find((c) => c.id === urlSessionId) : null
+        setConversations((current) => {
+          const remoteIds = new Set(remoteSessions.map((conversation) => conversation.id))
+          const localOnly = current.filter((conversation) => !remoteIds.has(conversation.id))
+          return [...localOnly, ...remoteSessions]
+        })
+        const matched = initialUrlSessionId.current
+          ? remoteSessions.find((c) => c.id === initialUrlSessionId.current)
+          : null
         const initialId = matched?.id || remoteSessions[0]?.id || null
-        setActiveConversationId(initialId)
-        if (initialId && !urlSessionId) {
+        if (!hasLocalConversationRef.current) {
+          setActiveConversationId(initialId)
+        }
+        if (initialId && !initialUrlSessionId.current && !hasLocalConversationRef.current) {
           syncUrlSession(initialId)
         }
       })
@@ -94,7 +104,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
     return () => {
       isCancelled = true
     }
-  }, [featureSlug, userId, urlSessionId, syncUrlSession])
+  }, [featureSlug, userId, syncUrlSession])
 
   // Sync state if user changes query param externally or navigates history
   useEffect(() => {
@@ -151,6 +161,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
         activeArtifactId: undefined,
       }
       setConversations((prev) => [newConv, ...prev])
+      hasLocalConversationRef.current = true
       setActiveConversationId(newConv.id)
       syncUrlSession(newConv.id)
       return newConv
