@@ -22,12 +22,14 @@ import {
   roleOptions,
   type SelectableRole,
 } from '../constants/auth'
+import { API_BASE } from '../core/api/config'
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate()
   const { login, register, isAuthenticated } = useAuth()
   const { toast } = useToast()
 
+  const [appVersion, setAppVersion] = useState<string | null>(null)
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -64,6 +66,19 @@ export const LoginPage: React.FC = () => {
       navigate('/', { replace: true })
     }
   }, [isAuthenticated, navigate])
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/health`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { version?: string } | null) => {
+        if (data?.version) {
+          setAppVersion(data.version)
+        }
+      })
+      .catch(() => {
+        // Keep null if healthcheck is unreachable
+      })
+  }, [])
 
   const switchTab = (newMode: 'login' | 'register') => {
     setMode(newMode)
@@ -180,8 +195,15 @@ export const LoginPage: React.FC = () => {
             <Sparkles className="h-6 w-6" aria-hidden />
             <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-cyan-400 ring-2 ring-white animate-pulse-soft" aria-hidden />
           </div>
-          <div className="text-2xl font-bold tracking-tight text-[var(--color-ink)]">
-            Func<span className="font-normal text-[var(--color-primary-accent)]">Assist</span>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-2xl font-bold tracking-tight text-[var(--color-ink)]">
+              Func<span className="font-normal text-[var(--color-primary-accent)]">Assist</span>
+            </span>
+            {appVersion && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 border border-slate-200">
+                v{appVersion}
+              </span>
+            )}
           </div>
           <h1 className="text-lg font-bold tracking-tight text-slate-800 mt-2">
             {mode === 'login' ? 'Iniciar Sesión' : 'Solicitud de Acceso'}
@@ -397,6 +419,14 @@ export const LoginPage: React.FC = () => {
             )}
           </button>
         </form>
+
+        {/* Card Footer */}
+        <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+          <span>FuncAssist</span>
+          {appVersion && (
+            <span className="font-mono text-[11px] text-slate-500 font-medium">v{appVersion}</span>
+          )}
+        </div>
       </div>
     </div>
   )

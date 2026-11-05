@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_admin_user
@@ -103,6 +103,7 @@ async def update_gitlab_oauth(body: GitLabOAuthUpdate) -> dict[str, Any]:
 class HealthResponse(BaseModel):
   status: str = "ok"
   app: str = "FuncAssist"
+  version: str = "0.4.0"
 
 
 health_router = APIRouter(tags=["health"])
@@ -111,5 +112,6 @@ health_router = APIRouter(tags=["health"])
 @health_router.get("/health", response_model=HealthResponse)
 @health_router.get("/api/health", response_model=HealthResponse)
 @health_router.get("/api/health/ready", response_model=HealthResponse)
-async def health() -> HealthResponse:
-  return HealthResponse()
+async def health(request: Request | None = None) -> HealthResponse:
+  version = getattr(request.app, "version", "0.4.0") if request else "0.4.0"
+  return HealthResponse(version=version)
