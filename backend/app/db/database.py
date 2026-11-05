@@ -133,9 +133,14 @@ def get_sync_db() -> Generator[Session, None]:
 async def init_db() -> None:
   """Initialize PostgreSQL schema and tables using SQLAlchemy ORM Metadata."""
   try:
+    from sqlalchemy import text
     engine = get_async_engine()
     async with engine.begin() as conn:
       await conn.run_sync(Base.metadata.create_all)
+      try:
+        await conn.execute(text("ALTER TABLE ai_models_catalog ALTER COLUMN id TYPE VARCHAR(128);"))
+      except Exception:
+        pass
     logger.info("PostgreSQL database tables initialized successfully via SQLAlchemy ORM.")
   except Exception as exc:
     logger.warning("Could not automatically initialize PostgreSQL tables: %s", exc)

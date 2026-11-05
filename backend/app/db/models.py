@@ -832,7 +832,7 @@ class AIModelCatalogModel(Base):
   """Frontier and built-in AI models catalog synchronized into PostgreSQL."""
   __tablename__ = "ai_models_catalog"
 
-  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  id: Mapped[str] = mapped_column(String(128), primary_key=True, default=lambda: str(uuid.uuid4()))
   provider: Mapped[str] = mapped_column(String, nullable=False, index=True)
   task_type: Mapped[str] = mapped_column(String, nullable=False, default="chat_writing", index=True)
   name: Mapped[str] = mapped_column(String, nullable=False)

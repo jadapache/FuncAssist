@@ -368,25 +368,25 @@ async def dictate_audio(file: UploadFile = File(...)):
 
   try:
     temp_file.write_bytes(content)
-    ai_cfg = load_app_settings().get("ai", {})
-    provider_id = (ai_cfg.get("transcription_provider") or "auto").lower()
-    model_id = ai_cfg.get("transcription_model") or "base"
-
-    from app.features.transcription.service import _resolve_provider
-    engine = _resolve_provider(provider_id, model_id)
-    # All local transcription providers share the same contract and require
-    # both the audio path and the configured model identifier.
-    res = await asyncio.to_thread(
-      engine.transcribe,
-      temp_file,
-      model_id=model_id,
-      language="es",
-    )
-    transcribed_text = res.text.strip() if res else ""
+    from app.features.transcription.whisper_cloud import WhisperCloudService
+    cloud_service = WhisperCloudService()
+    res = await cloud_service.transcribe(temp_file, language="es")
+    transcribed_text = (res.get("text") or "").strip()
     return {"text": transcribed_text, "filename": file.filename}
-  except Exception:
-    logger.exception("Voice dictation transcription failed")
-    return {"text": "", "error": "Transcription failed due to an internal error.", "filename": file.filename}
+  except ValueError as val_err:
+    logger.warning("Voice dictation credentials missing: %s", val_err)
+    return {
+      "text": "",
+      "error": str(val_err),
+      "filename": file.filename,
+    }
+  except Exception as exc:
+    logger.exception("Voice dictation transcription failed: %s", exc)
+    return {
+      "text": "",
+      "error": "Error al transcribir audio de voz.",
+      "filename": file.filename,
+    }
   finally:
     if temp_file.exists():
       try:

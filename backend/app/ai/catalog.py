@@ -158,8 +158,10 @@ KNOWN_BROWSER_MODELS: list[dict[str, Any]] = [
 
 def _ensure_catalog_seeded() -> None:
     try:
+        from app.ai.frontier_sync import KNOWN_FRONTIER_MODELS
         repo = AIModelCatalogRepository()
         repo.bulk_upsert_sync(KNOWN_BROWSER_MODELS)
+        repo.bulk_upsert_sync(KNOWN_FRONTIER_MODELS)
     except Exception as exc:
         logger.debug("Failed ensuring catalog seeded in DB: %s", exc)
 
