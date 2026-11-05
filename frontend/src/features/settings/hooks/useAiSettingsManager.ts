@@ -173,8 +173,6 @@ export function useAiSettingsManager() {
       inference_provider: provider,
       inference_model: model.trim(),
       ollama_base_url: normalizeOllamaUrl(ollamaUrl),
-      transcription_provider: voiceAudioProvider,
-      transcription_model: voiceAudioModel.trim(),
     }
 
     if (groqKey.trim()) payload.groq_api_key = groqKey.trim()

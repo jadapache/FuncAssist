@@ -204,11 +204,17 @@ def load_local_catalog(refresh: bool = False) -> list[AIModelInfo]:
 
 def has_catalog_model(model_id: str, provider: str, task_type: str) -> bool:
     """Validate a model against the persisted catalog, never a compiled allow-list."""
-    normalized_provider = {"local": "webllm", "builtin": "webllm"}.get(provider.lower(), provider.lower())
+    p_lower = provider.lower()
+    t_lower = task_type.lower()
+    if t_lower == "transcription":
+        alias_map = {"local": "browser_asr", "builtin": "browser_asr"}
+    else:
+        alias_map = {"local": "webllm", "builtin": "webllm"}
+    normalized_provider = alias_map.get(p_lower, p_lower)
     return any(
-        item.id == model_id
+        (item.id == model_id or getattr(item, "raw_id", None) == model_id)
         and item.provider.lower() == normalized_provider
-        and item.task_type.lower() == task_type.lower()
+        and item.task_type.lower() == t_lower
         for item in load_local_catalog()
     )
 
