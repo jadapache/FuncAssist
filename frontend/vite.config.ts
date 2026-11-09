@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -37,6 +38,10 @@ export default defineConfig({
   // Optimize WASM loading
   optimizeDeps: {
     exclude: ['@mlc-ai/web-llm', '@huggingface/transformers'],
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
   },
   server: {
     port: 5173,
