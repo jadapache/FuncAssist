@@ -22,6 +22,15 @@ export type TranscriptionSummary = {
   decisions?: string[]
   requirements?: string[]
   action_items?: string[]
+  template_id?: string
+  template_name?: string
+}
+
+export type SummaryTemplateItem = {
+  id: string
+  title: string
+  description?: string
+  tag?: string
 }
 
 export type TranscriptionProgress = {
@@ -253,13 +262,36 @@ export const transcriptionApi = {
     return handleResponse(response)
   },
 
-  async generateSummary(transcriptionId: string): Promise<{ ok: boolean; summary: TranscriptionSummary; transcription: TranscriptionResult }> {
+  async getSummaryTemplates(tag: string = 'transcript_summary'): Promise<SummaryTemplateItem[]> {
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/transcription/summary-templates?tag=${encodeURIComponent(tag)}`,
+        {
+          headers: { ...getAuthHeaders() },
+        }
+      )
+      const data = await handleResponse<{ templates: SummaryTemplateItem[] }>(response)
+      return data.templates || []
+    } catch {
+      return []
+    }
+  },
+
+  async generateSummary(
+    transcriptionId: string,
+    feature?: string,
+  ): Promise<{ ok: boolean; summary: TranscriptionSummary; transcription: TranscriptionResult }> {
+    const validFeature =
+      typeof feature === 'string' && feature.trim().length > 0
+        ? feature.trim()
+        : 'transcript_summary_standard_meeting'
     const response = await fetch(`${API_BASE}/api/transcription/generate-summary/${transcriptionId}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(),
       },
+      body: JSON.stringify({ feature: validFeature }),
     })
     return handleResponse(response)
   },

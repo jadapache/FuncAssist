@@ -4,10 +4,12 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { api } from '../../../api/client'
 import {
   transcriptionApi,
   type TranscriptionResult,
   type TranscriptionProgress,
+  type SummaryTemplateItem,
 } from '../api/transcriptionApi'
 import { inferenceService } from '../../ai/services/InferenceService'
 import { useToast } from '../../../context/ToastContext'
@@ -24,6 +26,25 @@ export function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60)
   const secs = Math.floor(seconds % 60)
   return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`
+}
+
+function formatSegmentsForPrompt(
+  segments?: Array<{ start?: number; speaker?: string; text?: string }>,
+  rawText?: string,
+): string {
+  if (segments && segments.length > 0) {
+    return segments
+      .map((seg) => {
+        const secs = seg.start || 0
+        const m = Math.floor(secs / 60)
+        const s = Math.floor(secs % 60)
+        const ts = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+        const spk = seg.speaker || 'Participante'
+        return `[${ts}] ${spk}: ${seg.text || ''}`
+      })
+      .join('\n')
+  }
+  return rawText || ''
 }
 
 export const SPEAKER_COLORS = [
@@ -83,6 +104,39 @@ export function useTranscriptionActions(
   // Download dropdown toggles
   const [showTranscriptDownloadMenu, setShowTranscriptDownloadMenu] = useState(false)
   const [showSummaryDownloadMenu, setShowSummaryDownloadMenu] = useState(false)
+
+  // Summary template selection queried from DB by tag like 'transcript_%'
+  const [summaryTemplates, setSummaryTemplates] = useState<SummaryTemplateItem[]>([])
+  const [selectedSummaryTemplate, setSelectedSummaryTemplate] = useState<string>('')
+
+  useEffect(() => {
+    let isMounted = true
+    transcriptionApi
+      .getSummaryTemplates('transcript_summary')
+      .then((templates) => {
+        if (!isMounted || !templates || templates.length === 0) return
+        setSummaryTemplates(templates)
+        setSelectedSummaryTemplate((prev) => {
+          if (prev && templates.some((t) => t.id === prev)) return prev
+          return (
+            transcriptionResult?.summary?.template_id ||
+            templates[0]?.id ||
+            ''
+          )
+        })
+      })
+      .catch(() => {})
+
+    return () => {
+      isMounted = false
+    }
+  }, [transcriptionResult?.summary?.template_id])
+
+  useEffect(() => {
+    if (transcriptionResult?.summary?.template_id) {
+      setSelectedSummaryTemplate(transcriptionResult.summary.template_id)
+    }
+  }, [transcriptionResult?.summary?.template_id])
 
   // Speaker rename state
   const [showRenameModal, setShowRenameModal] = useState(false)
@@ -216,38 +270,86 @@ export function useTranscriptionActions(
   }, [transcriptionId, meetingTitle, onRetranscribe, toast, onRefreshData])
 
   // Handle AI summary generation
-  const handleGenerateSummary = useCallback(async () => {
-    try {
-      setIsGeneratingSummary(true)
-      const settings = await inferenceService.getAiSettings()
+  const handleGenerateSummary = useCallback(
+    async (templateIdOverride?: unknown) => {
+      const templateToUse =
+        (typeof templateIdOverride === 'string' && templateIdOverride.trim().length > 0
+          ? templateIdOverride.trim()
+          : selectedSummaryTemplate) ||
+        summaryTemplates[0]?.id ||
+        'transcript_summary_standard_meeting'
+      try {
+        setIsGeneratingSummary(true)
+        const settings = await inferenceService.getAiSettings()
+        const isBrowser = inferenceService.isBrowserExecution(settings)
+        const transcriptContent = formatSegmentsForPrompt(
+          displayResult?.segments,
+          displayResult?.text,
+        )
 
-      if (settings?.provider === 'builtin' && displayResult?.text) {
-        const sumRes = await inferenceService.summarize({
-          text: displayResult.text,
-          instructions: 'Genera un resumen ejecutivo claro de la reunión con temas principales, acuerdos y próximos pasos.',
-        })
-        const updated = await transcriptionApi.updateTranscriptionSummary(transcriptionId, {
-          summary_text: sumRes.summary,
-        })
-        setTranscriptionResult(updated.transcription)
-        toast.success('Resumen generado con éxito con WebLLM.')
-        onRefreshData?.()
-        return
-      }
+        if (isBrowser && transcriptContent) {
+          const [prompt, rubric] = await Promise.all([
+            api.getAiPrompt(templateToUse).catch(() => null),
+            api.getAiRubric(templateToUse).catch(() => null),
+          ])
 
-      const res = await transcriptionApi.generateSummary(transcriptionId)
-      if (res.transcription) {
-        setTranscriptionResult(res.transcription)
-        toast.success('Resumen generado con éxito.')
-        onRefreshData?.()
+          const rubricText = rubric?.criteria?.length
+            ? rubric.criteria.map((c: string) => `- ${c}`).join('\n')
+            : ''
+          const meetingTitle = displayResult?.metadata?.title || 'Reunión'
+
+          const defaultSystem =
+            'Eres un analista y redactor ejecutivo senior especializado en minutas y notas de reunión. Genera una síntesis profesional, clara y estructurada de la reunión basada estrictamente en la transcripción. No inventes información que no esté sustentada en la grabación.'
+          const defaultUserTemplate =
+            'Título de la reunión: {title}\n\nTRANSCRIPCIÓN:\n{transcript}\n\nRÚBRICA:\n{rubric}'
+
+          const systemPrompt = prompt?.system?.trim() || defaultSystem
+          const userTemplate = prompt?.user_template?.trim() || defaultUserTemplate
+
+          const userContent = userTemplate
+            .replace('{title}', meetingTitle)
+            .replace('{transcript}', transcriptContent)
+            .replace('{rubric}', rubricText)
+
+          const genResult = await inferenceService.generateMessages(
+            [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userContent },
+            ],
+            undefined,
+            { temperature: 0.3, maxTokens: 2500 },
+          )
+
+          const templateTitle =
+            summaryTemplates.find((t) => t.id === templateToUse)?.title ||
+            (typeof prompt?.title === 'string' ? prompt.title : templateToUse)
+
+          const updated = await transcriptionApi.updateTranscriptionSummary(transcriptionId, {
+            summary_text: genResult.content,
+            template_id: templateToUse,
+            template_name: templateTitle,
+          })
+          setTranscriptionResult(updated.transcription)
+          toast.success('Resumen generado con éxito con IA.')
+          onRefreshData?.()
+          return
+        }
+
+        const res = await transcriptionApi.generateSummary(transcriptionId, templateToUse)
+        if (res.transcription) {
+          setTranscriptionResult(res.transcription)
+          toast.success('Resumen generado con éxito.')
+          onRefreshData?.()
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Error al generar resumen'
+        toast.error(`Error al generar resumen: ${msg}`)
+      } finally {
+        setIsGeneratingSummary(false)
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al generar resumen'
-      toast.error(`Error al generar resumen: ${msg}`)
-    } finally {
-      setIsGeneratingSummary(false)
-    }
-  }, [transcriptionId, displayResult, toast, onRefreshData])
+    },
+    [transcriptionId, selectedSummaryTemplate, summaryTemplates, displayResult, toast, onRefreshData]
+  )
 
   // Save to Knowledge Base
   const handleSaveToKB = useCallback(async () => {
@@ -401,17 +503,22 @@ export function useTranscriptionActions(
       )) ||
       keyInsights.length > 0)
 
+  const summaryText = summaryData?.summary_text || null
+
   // Copy summary text
   const handleCopySummary = useCallback(() => {
     if (!isSummaryReady) return
-    let text = `# Summary\n\n${summaryParagraphs.join('\n\n')}\n\n# Key Insights\n\n`
-    text += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    let text = summaryText
+    if (!text) {
+      text = `# Summary\n\n${summaryParagraphs.join('\n\n')}\n\n# Key Insights\n\n`
+      text += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    }
 
     navigator.clipboard.writeText(text)
     setHasCopiedSummary(true)
     setTimeout(() => setHasCopiedSummary(false), 2000)
     toast.success('Resumen copiado al portapapeles.')
-  }, [isSummaryReady, summaryParagraphs, keyInsights, toast])
+  }, [isSummaryReady, summaryText, summaryParagraphs, keyInsights, toast])
 
   // Download summary as TXT
   const handleDownloadSummaryTxt = useCallback(() => {
@@ -419,14 +526,17 @@ export function useTranscriptionActions(
     const title = displayResult.metadata?.title || 'Resumen'
     const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_')
 
-    let content = `Summary\n\n`
-    content += `${summaryParagraphs.join('\n\n')}\n\n`
-    content += `Key Insights\n\n`
-    content += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    let content = summaryText
+    if (!content) {
+      content = `Summary\n\n`
+      content += `${summaryParagraphs.join('\n\n')}\n\n`
+      content += `Key Insights\n\n`
+      content += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    }
 
     downloadFile(content, `Resumen_${safeTitle}.txt`, 'text/plain;charset=utf-8')
     setShowSummaryDownloadMenu(false)
-  }, [displayResult, isSummaryReady, summaryParagraphs, keyInsights])
+  }, [displayResult, isSummaryReady, summaryText, summaryParagraphs, keyInsights])
 
   // Download summary as JSON
   const handleDownloadSummaryJson = useCallback(() => {
@@ -464,8 +574,12 @@ export function useTranscriptionActions(
     transcriptMenuRef,
     summaryMenuRef,
     isJobActive,
+    summaryText,
     summaryParagraphs,
     keyInsights,
+    summaryTemplates,
+    selectedSummaryTemplate,
+    setSelectedSummaryTemplate,
     isSummaryReady,
     hasTranscriptContent,
     meetingTitle,
