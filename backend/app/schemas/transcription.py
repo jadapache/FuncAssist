@@ -27,6 +27,8 @@ class TranscriptionSummary(BaseModel):
   decisions: List[str] = Field(default_factory=list)
   requirements: List[str] = Field(default_factory=list)
   action_items: List[str] = Field(default_factory=list)
+  template_id: Optional[str] = None
+  template_name: Optional[str] = None
 
 
 

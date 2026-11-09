@@ -434,7 +434,11 @@ class TranscriptionService:
     else:
       labeled_segments = raw_segments
 
-    summary = await summarize_transcript(labeled_segments, title=media_title)
+    try:
+      summary = await summarize_transcript(labeled_segments, title=media_title)
+    except Exception as exc:
+      logger.warning("Could not auto-generate summary during transcription: %s", exc)
+      summary = None
     return self._persist_result(transcription_id, media_entry, audio_track_path, cloud_raw, labeled_segments, summary, active_model_label)
 
   def _persist_result(

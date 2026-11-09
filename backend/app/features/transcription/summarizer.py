@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+from fastapi import HTTPException
 
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import resolve_provider
@@ -110,7 +112,7 @@ def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
       if current_section == "summary" and not stripped.startswith("#"):
         summary_paragraphs.append(stripped)
 
-  summary_str = "\n\n".join(summary_paragraphs) if summary_paragraphs else None
+  summary_str = text.strip() if text.strip() else ("\n\n".join(summary_paragraphs) if summary_paragraphs else None)
   if not key_insights and topics:
     key_insights = topics + decisions
 
@@ -128,7 +130,13 @@ def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
 async def summarize_transcript(
   segments: List[Dict[str, Any]],
   title: str = "Reunión",
+  feature: str = "transcript_summary_standard_meeting",
+  user_id: Optional[str] = None,
 ) -> TranscriptionSummary:
+  target_feature = feature or "transcript_summary_standard_meeting"
+  if target_feature == "transcript_summary":
+    target_feature = "transcript_summary_standard_meeting"
+
   if not segments:
     return TranscriptionSummary(
       summary_text="No se detectaron diálogos en la grabación.",
@@ -138,13 +146,14 @@ async def summarize_transcript(
       decisions=[],
       requirements=[],
       action_items=[],
+      template_id=target_feature,
     )
 
   formatted_transcript = format_transcript_for_llm(segments)
 
-  prompt_cfg = await get_prompt("transcript_summary")
+  prompt_cfg = await get_prompt(target_feature)
   try:
-    rubric_cfg = await get_rubric("transcript_summary")
+    rubric_cfg = await get_rubric(target_feature)
     rubric_text = rubric_to_text(rubric_cfg)
   except Exception:
     rubric_text = ""
@@ -162,25 +171,17 @@ async def summarize_transcript(
     AIMessage(role="user", content=user_content),
   ]
 
+  template_title = prompt_cfg.get("title", target_feature)
   try:
-    provider = resolve_provider()
+    provider = resolve_provider(user_id=user_id)
     res = await provider.complete(messages, max_tokens=2000)
-    summary_text = res.text
-    return parse_summary_markdown_or_json(summary_text)
+    summary = parse_summary_markdown_or_json(res.text)
+    summary.template_id = target_feature
+    summary.template_name = template_title
+    return summary
   except Exception as exc:
-    logger.warning(f"LLM Summarization failed: {exc}. Using fallback summary.")
-    unique_speakers = list(dict.fromkeys(s.get("speaker", "Participante") for s in segments if s.get("speaker")))
-    first_text = " ".join(s.get("text", "") for s in segments[:5])
-    return TranscriptionSummary(
-      summary_text=f"En esta reunión sobre '{title}', los participantes discutieron temas de levantamiento, necesidades del sistema y flujos de trabajo funcionales. {first_text}",
-      key_insights=[
-        f"Se identificaron {len(segments)} intervenciones de voz en la grabación.",
-        "Se capturaron las necesidades operativas y definiciones técnicas del proyecto.",
-        "Los interlocutores definieron los compromisos de avance para las siguientes entregas.",
-      ],
-      participants=unique_speakers if unique_speakers else ["Participante 1"],
-      topics=[f"Reunión: {title}"],
-      decisions=["Definición de requerimientos"],
-      requirements=["Requerimientos funcionales del sistema"],
-      action_items=["Estructurar entregables funcionales"],
-    )
+    logger.error("LLM Summarization failed: %s", exc)
+    raise HTTPException(
+      status_code=400 if isinstance(exc, ValueError) else 500,
+      detail=f"Error al generar resumen con IA: {exc}",
+    ) from exc
