@@ -4,6 +4,7 @@ export interface FeatureMeta {
   description: string
   category: 'workspace' | 'qa' | 'product' | 'custom'
   isCustom?: boolean
+  tag?: string
 }
 
 export const FEATURE_METAS: FeatureMeta[] = [
@@ -80,10 +81,46 @@ export const FEATURE_METAS: FeatureMeta[] = [
     category: 'qa',
   },
   {
-    id: 'transcript_summary',
-    title: 'Resumen de Transcripción y Minutas',
-    description: 'Generación de resumen narrativo ejecutivo y Key Insights a partir de audios transcritos.',
+    id: 'transcript_summary_standard_meeting',
+    title: 'Notas Estándar de Reunión',
+    description: 'Plantilla estándar para reuniones generales, enfocada en resultados clave y acuerdos.',
     category: 'workspace',
+    tag: 'transcript_summary',
+  },
+  {
+    id: 'transcript_summary_daily_standup',
+    title: 'Standup Diario',
+    description: 'Actualizaciones diarias con tiempo acotado para equipos de ingeniería y producto.',
+    category: 'product',
+    tag: 'transcript_summary',
+  },
+  {
+    id: 'transcript_summary_project_sync',
+    title: 'Sincronización de Proyecto y Estado',
+    description: 'Reunión de seguimiento de proyecto con foco en hitos, riesgos y decisiones clave.',
+    category: 'workspace',
+    tag: 'transcript_summary',
+  },
+  {
+    id: 'transcript_summary_retrospective',
+    title: 'Retrospectiva Ágil (Sprint)',
+    description: 'Plantilla de retrospectiva de sprint para mejora continua y experimentos del equipo.',
+    category: 'workspace',
+    tag: 'transcript_summary',
+  },
+  {
+    id: 'transcript_summary_client_sales',
+    title: 'Reunión Comercial y con Clientes',
+    description: 'Captura de objetivos del cliente, entregables acordados y próximos pasos.',
+    category: 'workspace',
+    tag: 'transcript_summary',
+  },
+  {
+    id: 'transcript_summary_psychiatric_session',
+    title: 'Nota de Sesión Clínica (SOAP + IA)',
+    description: 'Plantilla de nota de evolución psiquiátrica asistida por IA basada en SOAP y metadatos clínicos.',
+    category: 'workspace',
+    tag: 'transcript_summary',
   },
   {
     id: 'inventario_doc',

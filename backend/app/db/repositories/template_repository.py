@@ -21,13 +21,17 @@ class AITemplateRepository:
       tmpl = result.scalar_one_or_none()
       return tmpl.to_dict() if tmpl else None
 
-  async def list_templates(self, template_type: str) -> List[dict[str, Any]]:
+  async def list_templates(
+    self, template_type: str, tag: Optional[str] = None
+  ) -> List[dict[str, Any]]:
     async with get_db() as db:
       stmt = (
         select(AITemplateModel)
         .where(AITemplateModel.template_type == template_type)
-        .order_by(AITemplateModel.feature.asc())
       )
+      if tag:
+        stmt = stmt.where(AITemplateModel.tag == tag)
+      stmt = stmt.order_by(AITemplateModel.feature.asc())
       result = await db.execute(stmt)
       items = result.scalars().all()
       return [item.to_dict() for item in items]
@@ -41,6 +45,7 @@ class AITemplateRepository:
     change_summary: Optional[str] = None,
   ) -> dict[str, Any]:
     template_id = f"{template_type}:{feature}"
+    tag = new_data.get("tag")
     async with get_db() as db:
       stmt = select(AITemplateModel).where(AITemplateModel.id == template_id)
       result = await db.execute(stmt)
@@ -57,6 +62,7 @@ class AITemplateRepository:
           id=template_id,
           template_type=template_type,
           feature=feature,
+          tag=tag,
           version=version,
           payload_json=payload_json,
           updated_by=updated_by or "user",
@@ -67,6 +73,7 @@ class AITemplateRepository:
           template_id=template_id,
           template_type=template_type,
           feature=feature,
+          tag=tag,
           version=version,
           payload_json=payload_json,
           change_summary=change_summary or f"Created {template_type} for {feature}",
@@ -90,12 +97,15 @@ class AITemplateRepository:
       tmpl.version = next_version
       tmpl.payload_json = payload_json
       tmpl.updated_by = updated_by
+      if tag:
+        tmpl.tag = tag
 
       version_entry = AITemplateVersionModel(
         id=str(uuid.uuid4()),
         template_id=template_id,
         template_type=template_type,
         feature=feature,
+        tag=tag or tmpl.tag,
         version=next_version,
         payload_json=payload_json,
         change_summary=change_summary or f"Updated {template_type} for {feature}",

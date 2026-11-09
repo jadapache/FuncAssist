@@ -19,243 +19,189 @@ from app.db.repositories.template_repository import AITemplateRepository
 
 
 _repo = AITemplateRepository()
-
 _DB_SEEDED = False
-
+DEFAULT_TRANSCRIPT_SUMMARY_FEATURE = "transcript_summary_standard_meeting"
 
 
 def ensure_ai_templates_seeded() -> None:
-
   """Seed default prompts and rubrics into PostgreSQL if they do not exist."""
-
   global _DB_SEEDED
-
   if _DB_SEEDED:
     return
 
-
   try:
     import uuid
-
     from sqlalchemy import select
-
     from app.db.models import AITemplateModel, AITemplateVersionModel
 
-
     with get_sync_db() as db:
-
       stmt = select(AITemplateModel)
-
       result = db.execute(stmt)
-
       items = result.scalars().all()
-
       existing_ids = {item.id for item in items}
-
 
       has_new = False
 
+      # Remove obsolete default transcript summary template if present
+      for obsolete_id in ("prompt:transcript_summary", "rubric:transcript_summary"):
+        if obsolete_id in existing_ids:
+          obs_entry = db.execute(
+            select(AITemplateModel).where(AITemplateModel.id == obsolete_id)
+          ).scalar_one_or_none()
+          if obs_entry:
+            db.delete(obs_entry)
+            has_new = True
+
       for feature, payload in DEFAULT_PROMPTS.items():
-
         template_id = f"prompt:{feature}"
-
         if template_id not in existing_ids:
-
           cleaned_payload = {
-
             k: v for k, v in payload.items()
-
             if k not in ("id", "template_type", "feature", "version", "updated_by", "created_at", "updated_at")
-
           }
-
           payload_json = json.dumps(cleaned_payload, ensure_ascii=False)
-
           version = int(payload.get("version") or 1)
+          tag = payload.get("tag")
 
           tmpl = AITemplateModel(
             id=template_id,
             template_type="prompt",
             feature=feature,
-
+            tag=tag,
             version=version,
-
             payload_json=payload_json,
-
             updated_by="system",
           )
-
           version_entry = AITemplateVersionModel(
-
             id=str(uuid.uuid4()),
             template_id=template_id,
             template_type="prompt",
             feature=feature,
-
+            tag=tag,
             version=version,
-
             payload_json=payload_json,
-
             change_summary="Initial system seed",
-
             created_by="system",
           )
-
           db.add(tmpl)
-
           db.add(version_entry)
-
           has_new = True
-
 
       for feature, payload in DEFAULT_RUBRICS.items():
-
         template_id = f"rubric:{feature}"
-
         if template_id not in existing_ids:
-
           cleaned_payload = {
-
             k: v for k, v in payload.items()
-
             if k not in ("id", "template_type", "feature", "version", "updated_by", "created_at", "updated_at")
-
           }
-
           payload_json = json.dumps(cleaned_payload, ensure_ascii=False)
-
           version = int(payload.get("version") or 1)
+          tag = payload.get("tag")
 
           tmpl = AITemplateModel(
             id=template_id,
-
             template_type="rubric",
             feature=feature,
-
+            tag=tag,
             version=version,
-
             payload_json=payload_json,
-
             updated_by="system",
           )
-
           version_entry = AITemplateVersionModel(
-
             id=str(uuid.uuid4()),
             template_id=template_id,
-
             template_type="rubric",
             feature=feature,
-
+            tag=tag,
             version=version,
-
             payload_json=payload_json,
-
             change_summary="Initial system seed",
-
             created_by="system",
           )
-
           db.add(tmpl)
-
           db.add(version_entry)
-
           has_new = True
 
-
       if has_new:
-
         db.commit()
 
-
     _DB_SEEDED = True
-
   except Exception:
-
     # If DB is temporarily unavailable or during offline setup, allow caller to fallback
     pass
 
 
-
 def ensure_ai_files() -> None:
-
   """Ensure prompts and rubrics are seeded in PostgreSQL."""
   ensure_ai_templates_seeded()
 
 
-async def list_prompts() -> list[dict[str, Any]]:
+async def list_prompts(tag: str | None = None) -> list[dict[str, Any]]:
   ensure_ai_templates_seeded()
-
   try:
-
-    items = await _repo.list_templates("prompt")
-
+    items = await _repo.list_templates("prompt", tag=tag)
     if items:
       return items
-
   except Exception:
     pass
 
-  return [dict(DEFAULT_PROMPTS[f]) for f in sorted(DEFAULT_PROMPTS.keys())]
+  prompts = [dict(DEFAULT_PROMPTS[f]) for f in sorted(DEFAULT_PROMPTS.keys())]
+  if tag:
+    return [p for p in prompts if p.get("tag") == tag]
+  return prompts
 
 
-
-async def list_rubrics() -> list[dict[str, Any]]:
+async def list_rubrics(tag: str | None = None) -> list[dict[str, Any]]:
   ensure_ai_templates_seeded()
-
   try:
-
-    items = await _repo.list_templates("rubric")
-
+    items = await _repo.list_templates("rubric", tag=tag)
     if items:
       return items
-
   except Exception:
     pass
 
-  return [dict(DEFAULT_RUBRICS[f]) for f in sorted(DEFAULT_RUBRICS.keys())]
-
+  rubrics = [dict(DEFAULT_RUBRICS[f]) for f in sorted(DEFAULT_RUBRICS.keys())]
+  if tag:
+    return [r for r in rubrics if r.get("tag") == tag]
+  return rubrics
 
 
 async def get_prompt(feature: str) -> dict[str, Any]:
   ensure_ai_templates_seeded()
-
+  resolved_feature = (
+    DEFAULT_TRANSCRIPT_SUMMARY_FEATURE
+    if feature == "transcript_summary"
+    else feature
+  )
   try:
-
-    item = await _repo.get_template("prompt", feature)
-
+    item = await _repo.get_template("prompt", resolved_feature)
     if item:
       return item
-
   except Exception:
     pass
 
-
-  if feature in DEFAULT_PROMPTS:
-
-    return dict(DEFAULT_PROMPTS[feature])
+  if resolved_feature in DEFAULT_PROMPTS:
+    return dict(DEFAULT_PROMPTS[resolved_feature])
 
   raise KeyError(f"Unknown prompt feature: {feature}")
 
 
-
 async def get_rubric(feature: str) -> dict[str, Any]:
   ensure_ai_templates_seeded()
-
+  resolved_feature = (
+    DEFAULT_TRANSCRIPT_SUMMARY_FEATURE
+    if feature == "transcript_summary"
+    else feature
+  )
   try:
-
-    item = await _repo.get_template("rubric", feature)
-
+    item = await _repo.get_template("rubric", resolved_feature)
     if item:
       return item
-
   except Exception:
     pass
 
-
-  if feature in DEFAULT_RUBRICS:
-
-    return dict(DEFAULT_RUBRICS[feature])
+  if resolved_feature in DEFAULT_RUBRICS:
+    return dict(DEFAULT_RUBRICS[resolved_feature])
 
   raise KeyError(f"Unknown rubric feature: {feature}")
 

@@ -194,28 +194,222 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
       "Prioridad sugerida, Observaciones clave. Cita como [1], [2]."
     ),
   },
-  "transcript_summary": {
+  "transcript_summary_standard_meeting": {
     "version": 1,
-    "feature": "transcript_summary",
+    "feature": "transcript_summary_standard_meeting",
+    "title": "Estándar",
+    "description": "Plantilla estándar para reuniones generales, enfocada en resultados clave y acciones.",
+    "tag": "transcript_summary",
     "allowed_sources": [],
     "system": (
-      "Eres un analista y redactor ejecutivo senior. "
-      "Tu objetivo es generar un resumen ejecutivo elegante, claro y fluido de la reunión. "
-      "Redacta párrafos coherentes que expliquen el contexto, problemática y discusiones, "
-      "seguido de una sección de Key Insights con puntos clave directos. "
-      "No inventes información que no esté sustentada en la transcripción."
+      "Eres un analista y redactor ejecutivo senior especializado en minutas y notas de reunión. "
+      "Tu objetivo es generar una síntesis profesional, clara y estructurada de la reunión basada estrictamente en la transcripción. "
+      "No inventes información que no esté sustentada en la grabación."
     ),
     "user_template": (
       "Título de la reunión: {title}\n\n"
       "TRANSCRIPCIÓN:\n{transcript}\n\n"
       "RÚBRICA:\n{rubric}\n\n"
-      "Genera el resumen en Markdown con la siguiente estructura:\n\n"
-      "## Summary\n"
-      "(Escribe de 2 a 4 párrafos fluidos y bien explicados que resuman los temas tratados, motivaciones y acuerdos).\n\n"
-      "## Key Insights\n"
-      "- (Punto clave o conclusión relevante 1)\n"
-      "- (Punto clave o conclusión relevante 2)\n"
-      "- (Punto clave o conclusión relevante 3)"
+      "Genera las notas de la reunión en Markdown con la siguiente estructura:\n\n"
+      "## Resumen\n"
+      "(Proporciona un breve resumen ejecutivo de un párrafo de toda la reunión).\n\n"
+      "## Decisiones Clave\n"
+      "- (Enumera las decisiones más importantes tomadas durante la reunión).\n\n"
+      "## Elementos de Acción\n"
+      "| **Responsable** | **Tarea** | **Fecha Límite** | **Segmento de Referencia** | **Marca de Tiempo** |\n"
+      "| --- | --- | --- | --- | --- |\n\n"
+      "## Puntos Destacados de la Discusión\n"
+      "(Sintetiza los temas principales de discusión, argumentos clave y observaciones importantes)."
+    ),
+  },
+  "transcript_summary_daily_standup": {
+    "version": 1,
+    "feature": "transcript_summary_daily_standup",
+    "title": "Standup Diario",
+    "description": "Actualizaciones diarias con tiempo acotado para equipos de ingeniería y producto.",
+    "tag": "transcript_summary",
+    "allowed_sources": [],
+    "system": (
+      "Eres un facilitador y asistente ágil senior. "
+      "Tu objetivo es generar el reporte de standup diario estructurado y conciso a partir de la transcripción de la sesión del equipo. "
+      "No inventes tareas ni impedimentos no mencionados."
+    ),
+    "user_template": (
+      "Título de la reunión: {title}\n\n"
+      "TRANSCRIPCIÓN:\n{transcript}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Genera el reporte de Standup Diario en Markdown con la siguiente estructura:\n\n"
+      "## Fecha\n"
+      "YYYY-MM-DD\n\n"
+      "## Asistentes\n"
+      "- (Lista de participantes presentes en el standup)\n\n"
+      "## Ayer\n"
+      "| **Responsable** | **Trabajo Completado** |\n"
+      "| --- | --- |\n\n"
+      "## Hoy\n"
+      "| **Responsable** | **Trabajo Planificado** |\n"
+      "| --- | --- |\n\n"
+      "## Bloqueos\n"
+      "| **Responsable** | **Bloqueo** | **Impacto** |\n"
+      "| --- | --- | --- |\n\n"
+      "## Notas\n"
+      "(Notas rápidas, avisos de sincronización o anuncios opcionales)."
+    ),
+  },
+  "transcript_summary_project_sync": {
+    "version": 1,
+    "feature": "transcript_summary_project_sync",
+    "title": "Sincronización de Proyecto y Estado",
+    "description": "Reunión semanal o quincenal de estado de proyecto con foco en hitos y riesgos.",
+    "tag": "transcript_summary",
+    "allowed_sources": [],
+    "system": (
+      "Eres un Director de Proyectos (PMO) y analista senior. "
+      "Tu objetivo es redactar un informe ejecutivo de sincronización de proyecto a partir de la transcripción de la reunión, "
+      "enfocándote en avances, hitos críticos, gestión de riesgos y compromisos asumidos."
+    ),
+    "user_template": (
+      "Título de la reunión: {title}\n\n"
+      "TRANSCRIPCIÓN:\n{transcript}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Genera el reporte de sincronización de proyecto en Markdown con la siguiente estructura:\n\n"
+      "## Fecha y Hora de la Reunión\n"
+      "(Fecha, hora de inicio/fin y nombre del facilitador)\n\n"
+      "## Asistentes\n"
+      "(Lista de asistentes y sus roles en el proyecto)\n\n"
+      "## Hitos y Estado\n"
+      "| **Hito** | **Estado** | **Fecha Estimada (ETA)** |\n"
+      "| --- | --- | --- |\n\n"
+      "## Resumen de Progreso\n"
+      "(Párrafo conciso que resuma el avance general del proyecto desde la última sesión)\n\n"
+      "## Principales Riesgos y Mitigaciones\n"
+      "| **Riesgo** | **Impacto** | **Mitigación** | **Responsable** |\n"
+      "| --- | --- | --- | --- |\n\n"
+      "## Decisiones Clave\n"
+      "| **Decisión** | **Justificación** | **Marca de Tiempo** |\n"
+      "| --- | --- | --- |\n\n"
+      "## Elementos de Acción\n"
+      "| **Responsable** | **Tarea** | **Fecha Límite** | **Prioridad** | **Estado** |\n"
+      "| --- | --- | --- | --- | --- |\n\n"
+      "## Documentos Relacionados\n"
+      "| **Título del Documento** | **URL / Referencia** | **Tipo** |\n"
+      "| --- | --- | --- |"
+    ),
+  },
+  "transcript_summary_retrospective": {
+    "version": 1,
+    "feature": "transcript_summary_retrospective",
+    "title": "Retrospectiva",
+    "description": "Plantilla de retrospectiva de sprint para mejora continua.",
+    "tag": "transcript_summary",
+    "allowed_sources": [],
+    "system": (
+      "Eres un Scrum Master y Coach Ágil experimentado. "
+      "Tu objetivo es sintetizar la retrospectiva de sprint a partir de la transcripción, "
+      "facilitando la identificación de lecciones aprendidas, mejoras operativas y compromisos medibles para el siguiente ciclo."
+    ),
+    "user_template": (
+      "Título de la reunión: {title}\n\n"
+      "TRANSCRIPCIÓN:\n{transcript}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Genera el resumen de Retrospectiva en Markdown con la siguiente estructura:\n\n"
+      "## Sprint\n"
+      "(Nombre/número del sprint y rango de fechas)\n\n"
+      "## Asistencia\n"
+      "(Lista de participantes de la retrospectiva)\n\n"
+      "## Comenzar a Hacer (Start Doing)\n"
+      "| **Idea / Iniciativa** | **Proponente** |\n"
+      "| --- | --- |\n\n"
+      "## Dejar de Hacer (Stop Doing)\n"
+      "| **Práctica a Abandonar** | **Motivo** |\n"
+      "| --- | --- |\n\n"
+      "## Continuar Haciendo (Continue Doing)\n"
+      "| **Buena Práctica** | **Notas y Beneficio** |\n"
+      "| --- | --- |\n\n"
+      "## Elementos de Acción\n"
+      "| **Responsable** | **Tarea / Experimento** | **Fecha Límite** | **Métrica de Éxito** |\n"
+      "| --- | --- | --- | --- |\n\n"
+      "## Notas y Votaciones\n"
+      "(Resumen general del debate, consenso y temas más votados por el equipo)."
+    ),
+  },
+  "transcript_summary_client_sales": {
+    "version": 1,
+    "feature": "transcript_summary_client_sales",
+    "title": "Reunión Comercial",
+    "description": "Captura de objetivos del cliente, entregables y próximos pasos.",
+    "tag": "transcript_summary",
+    "allowed_sources": [],
+    "system": (
+      "Eres un consultor de negocios y account manager senior. "
+      "Tu objetivo es documentar las reuniones comerciales o de alineación con clientes, "
+      "registrando con claridad ejecutiva los objetivos planteados, acuerdos contractuales, entregables y cronograma de seguimiento."
+    ),
+    "user_template": (
+      "Título de la reunión: {title}\n\n"
+      "TRANSCRIPCIÓN:\n{transcript}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Genera la minuta comercial en Markdown con la siguiente estructura:\n\n"
+      "## Metadatos de la Reunión\n"
+      "(Fecha, hora, ubicación/modalidad y gestor de cuenta)\n\n"
+      "## Asistentes\n"
+      "(Asistentes del cliente y del proveedor con sus roles)\n\n"
+      "## Objetivos del Cliente y Criterios de Éxito\n"
+      "(Qué desea lograr el cliente y cómo se medirá el éxito)\n\n"
+      "## Entregables Acordados\n"
+      "| **Entregable** | **Responsable** | **Fecha Límite** |\n"
+      "| --- | --- | --- |\n\n"
+      "## Términos Comerciales Discutidos\n"
+      "(Precios, SLAs, condiciones de pago o cláusulas contractuales tratadas)\n\n"
+      "## Riesgos e Inquietudes\n"
+      "| **Inquietud** | **Impacto** | **Responsable** |\n"
+      "| --- | --- | --- |\n\n"
+      "## Próximos Pasos\n"
+      "| **Responsable** | **Acción** | **Fecha Límite** |\n"
+      "| --- | --- | --- |"
+    ),
+  },
+  "transcript_summary_psychiatric_session": {
+    "version": 1,
+    "feature": "transcript_summary_psychiatric_session",
+    "title": "Sesión Clínica",
+    "description": "Plantilla de nota de evolución psiquiátrica asistida basada en SOAP, con metadatos clínicos y resumen.",
+    "tag": "transcript_summary",
+    "allowed_sources": [],
+    "system": (
+      "Eres un asistente especializado en redacción médica y notas clínicas de evolución psiquiátrica bajo el modelo SOAP. "
+      "Mantén estricta confidencialidad, rigor técnico, terminología clínica apropiada y abstente de diagnosticar o sugerir tratamientos no mencionados explícitamente en la consulta."
+    ),
+    "user_template": (
+      "Título de la sesión: {title}\n\n"
+      "TRANSCRIPCIÓN:\n{transcript}\n\n"
+      "RÚBRICA:\n{rubric}\n\n"
+      "Genera la nota de evolución clínica en Markdown con la siguiente estructura:\n\n"
+      "## Metadatos de la Sesión\n"
+      "(Iniciales/ID del paciente, fecha de la sesión, profesional, tipo de sesión y duración)\n\n"
+      "## Resumen de la Sesión por IA\n"
+      "(Conclusión en una línea y resumen ejecutivo de un párrafo con nivel de confianza clínica)\n\n"
+      "## Subjetivo (S)\n"
+      "(Estado de ánimo referido por el paciente, síntomas, sueño, apetito y factores estresantes)\n\n"
+      "## Objetivo (O)\n"
+      "(Hallazgos observables del examinador: afecto, lenguaje, conducta, orientación y signos vitales)\n\n"
+      "## Evaluación (A)\n"
+      "(Impresión diagnóstica, evaluación de riesgo de auto/heteroagresión y progreso frente a metas terapéuticas)\n\n"
+      "## Plan (P)\n"
+      "| **Intervención** | **Responsable** | **Frecuencia** | **Fecha de Seguimiento** |\n"
+      "| --- | --- | --- | --- |\n\n"
+      "## Medicamentos\n"
+      "| **Medicamento** | **Dosis** | **Vía** | **Fecha de Inicio / Cambio** |\n"
+      "| --- | --- | --- | --- |\n\n"
+      "## Diagnósticos (DSM / CIE)\n"
+      "| **Código** | **Sistema** | **Diagnóstico** |\n"
+      "| --- | --- | --- |\n\n"
+      "## Seguridad y Gestión de Riesgos\n"
+      "(Plan de seguridad, contactos de emergencia y consideraciones de hospitalización)\n\n"
+      "## Próxima Cita\n"
+      "(Fecha, hora y modalidad de la próxima sesión)\n\n"
+      "## Registro de Auditoría\n"
+      "(Indicador de revisión humana, nombre del revisor, marca de tiempo y versión del modelo)"
     ),
   },
   "inventario_doc": {
@@ -486,14 +680,82 @@ DEFAULT_RUBRICS: dict[str, dict[str, Any]] = {
       "Detallar con precisión el comportamiento esperado del sistema y las observaciones del equipo",
     ],
   },
-  "transcript_summary": {
+  "transcript_summary_standard_meeting": {
     "version": 1,
-    "feature": "transcript_summary",
+    "feature": "transcript_summary_standard_meeting",
+    "title": "Notas Estándar de Reunión",
+    "tag": "transcript_summary",
     "criteria": [
-      "Redactar párrafos fluidos, coherentes y explicativos del contexto, problemática y discusiones principales",
-      "Sintetizar los puntos clave y conclusiones directas en viñetas bajo la sección Key Insights",
-      "No alucinar información ni inventar acuerdos o participantes no sustentados en la transcripción",
-      "Mantener un tono ejecutivo, claro y estructurado",
+      "Elaborar un resumen ejecutivo de un párrafo que sintetice el propósito y los acuerdos principales de la reunión",
+      "Listar con precisión las decisiones clave acordadas por los participantes",
+      "Construir la tabla de elementos de acción especificando responsable, tarea, fecha límite y cita al segmento con marca de tiempo",
+      "Resumir los temas principales de debate y argumentos clave bajo la sección de discusión",
+      "No alucinar ni agregar compromisos o acuerdos no sustentados en la transcripción",
+    ],
+  },
+  "transcript_summary_daily_standup": {
+    "version": 1,
+    "feature": "transcript_summary_daily_standup",
+    "title": "Standup Diario",
+    "tag": "transcript_summary",
+    "criteria": [
+      "Registrar la fecha y los participantes identificados en la sesión diaria",
+      "Detallar en tablas claras el trabajo completado ayer y el trabajo planificado para hoy por cada responsable",
+      "Identificar cualquier impedimento o bloqueo reportado, indicando su responsable y nivel de impacto",
+      "Mantener un formato ágil, directo y libre de redundancias",
+      "Limitarse exclusivamente a los avances y bloqueos expresados por los integrantes en la transcripción",
+    ],
+  },
+  "transcript_summary_project_sync": {
+    "version": 1,
+    "feature": "transcript_summary_project_sync",
+    "title": "Sincronización de Proyecto y Estado",
+    "tag": "transcript_summary",
+    "criteria": [
+      "Identificar con exactitud la fecha, participantes y facilitador de la sincronización",
+      "Presentar el estado actual de los hitos y fechas estimadas de entrega en formato tabular",
+      "Sintetizar el avance en un resumen de progreso ejecutivo fluido y sin ambigüedades",
+      "Categorizar los riesgos con impacto, planes de mitigación y responsables asignados",
+      "Estructurar decisiones y elementos de acción con responsables, plazos, prioridad y marcas de tiempo",
+    ],
+  },
+  "transcript_summary_retrospective": {
+    "version": 1,
+    "feature": "transcript_summary_retrospective",
+    "title": "Retrospectiva Ágil (Sprint)",
+    "tag": "transcript_summary",
+    "criteria": [
+      "Identificar el sprint, rango de fechas y participantes de la retrospectiva",
+      "Clasificar rigurosamente las dinámicas en Comenzar a Hacer, Dejar de Hacer y Continuar Haciendo",
+      "Definir elementos de acción accionables con responsable, fecha límite y métrica de éxito verificable",
+      "Sintetizar el consenso general y votaciones del equipo sin sesgos personales",
+      "Asegurar que todas las propuestas deriven de intervenciones reales expresadas en la reunión",
+    ],
+  },
+  "transcript_summary_client_sales": {
+    "version": 1,
+    "feature": "transcript_summary_client_sales",
+    "title": "Reunión Comercial y con Clientes",
+    "tag": "transcript_summary",
+    "criteria": [
+      "Detallar con precisión los participantes del cliente y del proveedor",
+      "Definir claramente los objetivos del cliente y sus expectativas de éxito",
+      "Consignar los entregables acordados y términos comerciales o contractuales mencionados",
+      "Registrar inquietudes, objeciones o riesgos manifestados por el cliente",
+      "Establecer la tabla de próximos pasos con responsables y fechas concretas",
+    ],
+  },
+  "transcript_summary_psychiatric_session": {
+    "version": 1,
+    "feature": "transcript_summary_psychiatric_session",
+    "title": "Nota de Sesión Clínica (SOAP + IA)",
+    "tag": "transcript_summary",
+    "criteria": [
+      "Seguir con rigor la estructura formal SOAP (Subjetivo, Objetivo, Evaluación, Plan)",
+      "Consignar metadatos clínicos y resumen ejecutivo con nivel de certeza",
+      "Documentar la evaluación de riesgo (seguridad, auto/heterolesión) y consideraciones preventivas",
+      "Estructurar tablas precisas de intervenciones del plan, medicamentos y diagnósticos CIE/DSM mencionados",
+      "Incluir bloque de verificación y auditoría médica para revisión humana",
     ],
   },
   "inventario_doc": {

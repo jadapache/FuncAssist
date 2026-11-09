@@ -176,7 +176,13 @@ export const AgenticDocumentWorkspace = ({
       ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'qa').map((meta) => meta.id))
       : role === 'pm'
         ? new Set(FEATURE_METAS.filter((meta) => meta.category === 'product').map((meta) => meta.id))
-        : new Set(['mejoras_doc', 'inventario_doc', 'levantamiento_doc', 'generic_report', 'transcript_summary'])
+        : new Set([
+            'mejoras_doc',
+            'inventario_doc',
+            'levantamiento_doc',
+            'generic_report',
+            ...FEATURE_METAS.filter((meta) => meta.tag === 'transcript_summary').map((meta) => meta.id),
+          ])
   }, [activeRole])
 
   const visiblePrompts = useMemo(
