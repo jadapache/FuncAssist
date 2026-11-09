@@ -43,6 +43,7 @@ export type TranscriptionProgress = {
 
 export type TranscriptionResult = {
   id: string
+  slug?: string | null
   media_id: string
   metadata: MediaMetadata
   language: string

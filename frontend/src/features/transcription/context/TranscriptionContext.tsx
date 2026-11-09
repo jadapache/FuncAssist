@@ -33,7 +33,7 @@ export { STAGE_TRANSLATIONS, getGeneralStageText, getTranscriptionStageText }
 export interface TranscriptionContextValue {
   viewMode: 'dashboard' | 'studio'
   setViewMode: React.Dispatch<React.SetStateAction<'dashboard' | 'studio'>>
-  openStudio: (transcriptionId: string) => void
+  openStudio: (transcriptionId: string, title?: string) => void
   closeStudio: () => void
   activeJobs: TranscriptionProgress[]
   recentTranscriptions: TranscriptionResult[]

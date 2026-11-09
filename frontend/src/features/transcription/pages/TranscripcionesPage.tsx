@@ -11,7 +11,8 @@ import {
   ChevronRight,
   Plus,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
+import { generateTranscriptionSlug } from '../utils/transcriptionStorage'
 import { useTranscription } from '../hooks/useTranscription'
 import type { TranscriptionResult } from '../api/transcriptionApi'
 import { ConfirmationModal, PageHeader } from '../../../components/common'
@@ -45,6 +46,9 @@ export const TranscripcionesPage = () => {
     refreshTranscriptions,
   } = useTranscription()
 
+  const { slug } = useParams<{ slug?: string }>()
+  const navigate = useNavigate()
+
   const [searchQuery, setSearchQuery] = useState('')
   const [viewStyle, setViewStyle] = useState<'grid' | 'list'>('grid')
   const [currentPage, setCurrentPage] = useState(1)
@@ -53,6 +57,51 @@ export const TranscripcionesPage = () => {
   // Delete confirmation modal state
   const [transcriptionToDelete, setTranscriptionToDelete] = useState<TranscriptionResult | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Match transcription by slug or id
+  const targetFromSlug = useMemo(() => {
+    if (!slug) return null
+    return (
+      recentTranscriptions.find(
+        (t) =>
+          t.id === slug ||
+          t.slug === slug ||
+          t.id.startsWith(slug) ||
+          slug.endsWith(t.id.slice(0, 8)) ||
+          generateTranscriptionSlug(t.metadata?.title || '', t.id) === slug
+      ) ||
+      activeJobs.find(
+        (j) =>
+          j.id === slug ||
+          j.id.startsWith(slug) ||
+          slug.endsWith(j.id.slice(0, 8)) ||
+          generateTranscriptionSlug(j.title || '', j.id) === slug
+      ) ||
+      null
+    )
+  }, [slug, recentTranscriptions, activeJobs])
+
+  // Sync route slug with studio view
+  useEffect(() => {
+    if (slug) {
+      const resolvedId = targetFromSlug?.id || slug
+      const title =
+        (targetFromSlug as any)?.metadata?.title || (targetFromSlug as any)?.title || activeMeetingTitle
+      openStudio(resolvedId, title)
+    } else if (viewMode === 'studio') {
+      closeStudio()
+    }
+  }, [slug, targetFromSlug, openStudio, closeStudio, activeMeetingTitle, viewMode])
+
+  const handleOpenStudioWithSlug = (id: string, title?: string) => {
+    const slugToUse = generateTranscriptionSlug(title || '', id)
+    navigate(`/funcional/transcripciones/${slugToUse}`)
+  }
+
+  const handleBackToDashboard = () => {
+    closeStudio()
+    navigate('/funcional/transcripciones')
+  }
 
   const isModelConfigured =
     !availableModels ||
@@ -95,14 +144,20 @@ export const TranscripcionesPage = () => {
   }
 
   // If in Studio mode and a transcription is selected, render the TranscriptionStudio workspace
-  if (viewMode === 'studio' && selectedTranscriptionId) {
+  const studioTranscriptionId = selectedTranscriptionId || targetFromSlug?.id || slug
+  if ((viewMode === 'studio' || Boolean(slug)) && studioTranscriptionId) {
     return (
       <div className="animate-fade-in font-sans">
         <TranscriptionStudio
-          transcriptionId={selectedTranscriptionId}
-          initialMeetingTitle={activeMeetingTitle}
+          transcriptionId={studioTranscriptionId}
+          initialMeetingTitle={
+            activeMeetingTitle ||
+            (targetFromSlug as any)?.metadata?.title ||
+            (targetFromSlug as any)?.title ||
+            'Transcripción'
+          }
           activeProgress={currentProgress}
-          onBackToDashboard={closeStudio}
+          onBackToDashboard={handleBackToDashboard}
           onRefreshData={refreshTranscriptions}
           onRetranscribe={handleRetranscribe}
         />
@@ -254,7 +309,7 @@ export const TranscripcionesPage = () => {
                     key={item.id}
                     transcription={item}
                     viewMode="grid"
-                    onOpenSummary={(id) => openStudio(id)}
+                    onOpenSummary={(id) => handleOpenStudioWithSlug(id, item.metadata.title)}
                     onRequestDelete={(t) => setTranscriptionToDelete(t)}
                   />
                 ))}
@@ -266,7 +321,7 @@ export const TranscripcionesPage = () => {
                     key={item.id}
                     transcription={item}
                     viewMode="list"
-                    onOpenSummary={(id) => openStudio(id)}
+                    onOpenSummary={(id) => handleOpenStudioWithSlug(id, item.metadata.title)}
                     onRequestDelete={(t) => setTranscriptionToDelete(t)}
                   />
                 ))}

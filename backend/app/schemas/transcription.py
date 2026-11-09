@@ -50,7 +50,8 @@ class TranscriptionProgress(BaseModel):
 
 class TranscriptionResult(BaseModel):
   id: str
-  media_id: str
+  slug: Optional[str] = None
+  media_id: Optional[str] = ""
   metadata: MediaMetadata
   language: str = "es"
   duration_seconds: float = 0.0

@@ -49,3 +49,17 @@ export function saveActiveJobsToStorage(
   }
 }
 
+export function generateTranscriptionSlug(title: string, id: string): string {
+  const cleaned = (title || 'transcripcion')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/[\s_-]+/g, '-')
+    .slice(0, 50)
+    .replace(/^-+|-+$/g, '')
+  const shortId = id.slice(0, 8)
+  return cleaned ? `${cleaned}-${shortId}` : id
+}
+

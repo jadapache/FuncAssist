@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -748,9 +749,14 @@ class TranscriptionModel(Base):
       meta = {}
 
     created_iso = self.created_at.isoformat() if self.created_at else datetime.now(timezone.utc).isoformat()
+    cleaned = re.sub(r"[^\w\s-]", "", (self.title or "transcripcion").lower())
+    slug_part = re.sub(r"[\s_-]+", "-", cleaned).strip("-")[:50]
+    short_id = self.id[:8] if len(self.id) >= 8 else self.id
+    slug = f"{slug_part}-{short_id}" if slug_part else short_id
 
     return {
       "id": self.id,
+      "slug": slug,
       "media_id": self.id,
       "title": self.title,
       "description": self.description or "",

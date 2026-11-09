@@ -17,14 +17,50 @@ class TranscriptionRepository:
       stmt = select(TranscriptionModel).where(TranscriptionModel.id == transcription_id)
       result = db.execute(stmt)
       row = result.scalar_one_or_none()
-      return row.to_dict() if row else None
+      if row:
+        return row.to_dict()
+
+      # Fallback lookup by slug or partial id suffix
+      parts = transcription_id.split("-")
+      candidate_suffix = parts[-1] if len(parts[-1]) >= 8 else None
+      if candidate_suffix:
+        stmt2 = select(TranscriptionModel).where(TranscriptionModel.id.startswith(candidate_suffix))
+        row2 = db.execute(stmt2).scalar_one_or_none()
+        if row2:
+          return row2.to_dict()
+
+      # Match across all rows by computed slug
+      all_stmt = select(TranscriptionModel)
+      for r in db.execute(all_stmt).scalars().all():
+        d = r.to_dict()
+        if d.get("slug") == transcription_id:
+          return d
+      return None
 
   async def get(self, transcription_id: str) -> Optional[dict[str, Any]]:
     async with get_db() as db:
       stmt = select(TranscriptionModel).where(TranscriptionModel.id == transcription_id)
       result = await db.execute(stmt)
       row = result.scalar_one_or_none()
-      return row.to_dict() if row else None
+      if row:
+        return row.to_dict()
+
+      parts = transcription_id.split("-")
+      candidate_suffix = parts[-1] if len(parts[-1]) >= 8 else None
+      if candidate_suffix:
+        stmt2 = select(TranscriptionModel).where(TranscriptionModel.id.startswith(candidate_suffix))
+        result2 = await db.execute(stmt2)
+        row2 = result2.scalar_one_or_none()
+        if row2:
+          return row2.to_dict()
+
+      all_stmt = select(TranscriptionModel)
+      all_res = await db.execute(all_stmt)
+      for r in all_res.scalars().all():
+        d = r.to_dict()
+        if d.get("slug") == transcription_id:
+          return d
+      return None
 
   def list_sync(self) -> List[dict[str, Any]]:
     with get_sync_db() as db:

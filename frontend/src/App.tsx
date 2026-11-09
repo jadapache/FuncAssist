@@ -67,6 +67,7 @@ export const App = () => {
                         {/* Funcional Routes - admin, funcional */}
                         <Route element={<ProtectedRoute allowedRoles={['admin', 'funcional']} />}>
                           <Route path="funcional/transcripciones" element={<TranscripcionesPage />} />
+                          <Route path="funcional/transcripciones/:slug" element={<TranscripcionesPage />} />
                           <Route path="funcional/inventario" element={<InventarioPage />} />
                           <Route path="funcional/inventario/:sessionId" element={<InventarioPage />} />
                           <Route path="funcional/levantamiento" element={<LevantamientoPage />} />
