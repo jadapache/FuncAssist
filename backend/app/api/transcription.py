@@ -19,8 +19,9 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user
 
+from app.core.exceptions import FFmpegError
 from app.core.settings import USER_DATA_DIR
-from app.core.storage import load_app_settings
+from app.core.storage import allocate_transcription_folder, load_app_settings
 
 
 from app.api.transcription_stream import emit_progress
@@ -28,16 +29,39 @@ from app.features.inventario.xlsx_builder import create_inventario_xlsx
 from app.features.levantamiento.docx_builder import create_levantamiento_docx
 from app.features.transcription.service import transcription_service
 from app.features.transcription.summarizer import summarize_transcript
-from app.features.transcription.storage import (
-  delete_transcription_record,
-  get_media_entry,
-  get_transcription_record,
-  list_transcriptions,
-  register_local_media_path,
-  rename_transcription_speakers,
-  save_transcription_record,
-  update_transcription_summary,
-)
+from app.features.transcription import storage
+
+
+def get_media_entry(*args, **kwargs):
+  return storage.get_media_entry(*args, **kwargs)
+
+
+def get_transcription_record(*args, **kwargs):
+  return storage.get_transcription_record(*args, **kwargs)
+
+
+def save_transcription_record(*args, **kwargs):
+  return storage.save_transcription_record(*args, **kwargs)
+
+
+def list_transcriptions(*args, **kwargs):
+  return storage.list_transcriptions(*args, **kwargs)
+
+
+def delete_transcription_record(*args, **kwargs):
+  return storage.delete_transcription_record(*args, **kwargs)
+
+
+def update_transcription_summary(*args, **kwargs):
+  return storage.update_transcription_summary(*args, **kwargs)
+
+
+def rename_transcription_speakers(*args, **kwargs):
+  return storage.rename_transcription_speakers(*args, **kwargs)
+
+
+def register_local_media_path(*args, **kwargs):
+  return storage.register_local_media_path(*args, **kwargs)
 from app.schemas.transcription import (
   RenameSpeakerRequest,
   SaveToKnowledgeRequest,
@@ -134,23 +158,25 @@ async def upload_transcription_media(
   """Upload media file to the server for cloud or server-side transcription."""
   tid = transcription_id or str(uuid.uuid4())
   content = await file.read()
+  
   if not content:
     raise HTTPException(status_code=400, detail="El archivo multimedia está vacío.")
 
   try:
-    from app.features.transcription.storage import allocate_transcription_folder
+    from app.core.storage import allocate_transcription_folder
     entry = allocate_transcription_folder(
       transcription_id=tid,
       file_bytes=content,
-      original_filename=file.filename or "media.mp4",
+      original_filename=file.filename or "media.mp3",
       title=title or file.filename or "Reunión",
       description=description,
     )
+    size = entry.get("size_bytes", len(content)) if isinstance(entry, dict) else len(content)
     return {
       "ok": True,
       "media_id": tid,
       "transcription_id": tid,
-      "size": entry.get("size_bytes", len(content)),
+      "size": size,
       "entry": entry,
       "message": "Archivo multimedia subido con éxito.",
     }
@@ -164,7 +190,10 @@ def _process_audio_extraction(upload_file: UploadFile, input_path: Path, output_
   with input_path.open("wb") as buffer:
     shutil.copyfileobj(upload_file.file, buffer)
   from app.features.transcription.ffmpeg_utils import extract_audio_track
-  return extract_audio_track(input_path, output_path)
+  result = extract_audio_track(input_path, output_path, validate=True)
+  if isinstance(result, tuple):
+    return result[0]
+  return result
 
 
 @router.post("/extract-audio")
@@ -172,7 +201,7 @@ async def extract_audio_endpoint(
   background_tasks: BackgroundTasks,
   file: UploadFile = File(...),
 ) -> FileResponse:
-  """Extract audio from video container (.mkv, .wmv, .avi, etc.) to 16 kHz WAV using FFmpeg."""
+  """Extract audio from video container (.mkv, .wmv, .avi, etc.) or compressed audio to 16 kHz WAV using FFmpeg."""
   suffix = Path(file.filename or "media.mkv").suffix.lower() or ".mkv"
   temp_dir = Path(tempfile.mkdtemp(prefix="funcassist_audio_"))
   temp_input = temp_dir / f"input{suffix}"
@@ -180,15 +209,20 @@ async def extract_audio_endpoint(
 
   try:
     result_path = await asyncio.to_thread(_process_audio_extraction, file, temp_input, temp_output)
+  except FFmpegError as exc:
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    raise HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}") from exc
   except Exception as exc:
     shutil.rmtree(temp_dir, ignore_errors=True)
-    raise HTTPException(status_code=500, detail=f"Error al procesar archivo de video: {exc}") from exc
+    err_str = str(exc)
+    code = 422 if "ffmpeg" in err_str.lower() or "audio" in err_str.lower() else 500
+    raise HTTPException(status_code=code, detail=f"Error al procesar archivo: {err_str}") from exc
 
   if not result_path.exists() or result_path == temp_input:
     shutil.rmtree(temp_dir, ignore_errors=True)
     raise HTTPException(
       status_code=422,
-      detail="No se pudo extraer la pista de audio con FFmpeg. Verifica el formato del video.",
+      detail="No se pudo extraer la pista de audio con FFmpeg. Verifica el formato del archivo.",
     )
 
   def cleanup():

@@ -202,3 +202,103 @@ class StorageError(BaseApplicationException):
         if reason:
             detail = f"{detail}: {reason}"
         super().__init__(detail=detail, status_code=500, headers=headers)
+
+
+class AudioAnalysisError(BaseApplicationException):
+    """Raised when audio file analysis fails.
+    
+    This occurs when ffprobe cannot analyze the file due to corruption,
+    unsupported format, or missing audio stream.
+    
+    Maps to HTTP 422 Unprocessable Entity.
+    """
+    
+    status_code = 422
+    detail = "Audio file analysis failed"
+    
+    def __init__(
+        self,
+        reason: str,
+        filename: Optional[str] = None,
+        headers: Optional[dict[str, str]] = None,
+    ):
+        detail = f"Audio analysis failed: {reason}"
+        if filename:
+            detail = f"File '{filename}': {detail}"
+        super().__init__(detail=detail, status_code=422, headers=headers)
+
+
+class FFmpegError(BaseApplicationException):
+    """Raised when FFmpeg processing fails.
+    
+    Contains detailed error information from ffmpeg subprocess including
+    stderr output and return code for debugging.
+    
+    Maps to HTTP 422 Unprocessable Entity.
+    """
+    
+    status_code = 422
+    detail = "FFmpeg processing failed"
+    
+    def __init__(
+        self,
+        message: str,
+        stderr: str = "",
+        returncode: int = 0,
+        headers: Optional[dict[str, str]] = None,
+    ):
+        self.stderr = stderr
+        self.returncode = returncode
+        detail = f"FFmpeg error: {message}"
+        if returncode:
+            detail = f"{detail} (exit code: {returncode})"
+        super().__init__(detail=detail, status_code=422, headers=headers)
+
+
+class ChunkingError(BaseApplicationException):
+    """Raised when audio chunking operations fail.
+    
+    This occurs during the process of splitting long audio files into
+    processable chunks for cloud APIs.
+    
+    Maps to HTTP 422 Unprocessable Entity.
+    """
+    
+    status_code = 422
+    detail = "Audio chunking failed"
+    
+    def __init__(
+        self,
+        reason: str,
+        chunk_index: Optional[int] = None,
+        headers: Optional[dict[str, str]] = None,
+    ):
+        detail = f"Chunking failed: {reason}"
+        if chunk_index is not None:
+            detail = f"Chunk {chunk_index}: {detail}"
+        super().__init__(detail=detail, status_code=422, headers=headers)
+
+
+class TranscriptionError(BaseApplicationException):
+    """Raised when transcription pipeline fails.
+    
+    This is a generic error for any failure during the transcription process,
+    including API errors, validation failures, or pipeline issues.
+    
+    Maps to HTTP 422 Unprocessable Entity.
+    """
+    
+    status_code = 422
+    detail = "Transcription processing failed"
+    
+    def __init__(
+        self,
+        message: str,
+        chunk_index: Optional[int] = None,
+        headers: Optional[dict[str, str]] = None,
+    ):
+        self.chunk_index = chunk_index
+        detail = f"Transcription error: {message}"
+        if chunk_index is not None:
+            detail = f"Chunk {chunk_index}: {detail}"
+        super().__init__(detail=detail, status_code=422, headers=headers)

@@ -84,6 +84,14 @@ from app.core.storage_ai import (
   save_user_ai_settings,
 )
 
+# Transcription storage
+from app.features.transcription.storage import (
+  allocate_transcription_folder,
+  get_transcription_dir,
+  get_transcription_record,
+  save_transcription_record,
+)
+
 
 def _resolve_secret() -> str:
   settings = get_settings()
@@ -127,6 +135,7 @@ __all__ = [
   "save_app_settings",
   "load_user_ai_settings",
   "save_user_ai_settings",
+  "allocate_transcription_folder",
   "SettingModel",
   "UserPreferencesModel",
   "UserProviderCredentialModel",

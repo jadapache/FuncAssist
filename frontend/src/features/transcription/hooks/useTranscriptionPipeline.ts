@@ -7,7 +7,6 @@ import {
   type TranscriptionResult,
 } from '../api/transcriptionApi'
 import { runClientTranscription, resolveClientOnnxModel } from '../utils/clientTranscription'
-import { extractAudioTrackFromMedia, encodeFloat32ToWavBlob } from '../utils/audioExtractor'
 
 interface PipelineProps {
   availableModels: AvailableModelsInfo | null
@@ -189,7 +188,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       status: 'preprocessing',
       stage: 'preprocessing',
       progress: 5,
-      message: 'Extrayendo pista de audio en el navegador...',
+      message: 'Extrayendo y procesando audio en el navegador...',
       eta: null,
       model_info: availableModels?.active_model_label || 'Whisper Cloud',
     }
@@ -200,7 +199,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       title,
       progress: 5,
       status: 'preprocessing',
-      stageText: 'Extrayendo audio...',
+      stageText: 'Procesando audio...',
       eta: null,
       onClick: () => {
         openStudio(transcriptionId)
@@ -210,29 +209,8 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       onDismiss: () => handleDismissJob(transcriptionId),
     })
 
-    let payloadToUpload: File | Blob = file
-    let uploadFilename = file.name
-
-    try {
-      const { audioData } = await extractAudioTrackFromMedia(file, 16000, (pct, msg) => {
-        setActiveJobs((prev) => {
-          if (!prev[transcriptionId]) return prev
-          return {
-            ...prev,
-            [transcriptionId]: {
-              ...prev[transcriptionId],
-              progress: Math.min(15, Math.round(pct * 0.15)),
-              message: msg,
-            },
-          }
-        })
-      })
-      payloadToUpload = encodeFloat32ToWavBlob(audioData, 16000)
-      uploadFilename = `${file.name.replace(/\.[^/.]+$/, '')}_16k.wav`
-    } catch {
-      payloadToUpload = file
-      uploadFilename = file.name
-    }
+    const payloadToUpload: File | Blob = file
+    const uploadFilename = file.name
 
     if (cancelledJobsRef.current.has(transcriptionId)) return
 

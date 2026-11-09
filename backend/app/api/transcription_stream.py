@@ -158,12 +158,12 @@ async def transcription_progress_stream(transcription_id: str) -> AsyncGenerator
       if prog:
         latest = prog.model_dump()
 
-    if latest:
+    if latest and queue.empty():
       yield f"data: {json.dumps(latest)}\n\n"
       latest_stage = str(latest.get("stage") or latest.get("status") or "")
       if latest_stage in {"complete", "failed", "cancelled"} or latest.get("progress") == 100:
         return
-    else:
+    elif not latest:
       error_event = {
         "event": "error",
         "stage": "failed",
@@ -219,6 +219,7 @@ async def get_progress_stream(transcription_id: str):
     transcription_progress_stream(transcription_id),
     media_type="text/event-stream",
     headers={
+      "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
       "X-Accel-Buffering": "no",

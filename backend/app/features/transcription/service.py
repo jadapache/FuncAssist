@@ -12,6 +12,8 @@ from app.context.knowledge import ingest_document
 from app.core.storage import load_app_settings
 from app.features.transcription.diarization import SpeakerDiarization
 from app.features.transcription.ffmpeg_utils import extract_audio_track
+from app.features.transcription.audio_analyzer import AudioAnalyzer
+from app.core.exceptions import TranscriptionError, AudioAnalysisError, FFmpegError
 from app.features.transcription.storage import (
   delete_active_job_progress,
   delete_transcription_record,
@@ -53,6 +55,7 @@ class TranscriptionService:
   def __init__(self):
     self.cloud_service = WhisperCloudService()
     self.diarizer = SpeakerDiarization()
+    self.audio_analyzer = AudioAnalyzer()
 
   def _update_progress(self, job_progress: TranscriptionProgress) -> None:
     _ACTIVE_JOBS[job_progress.id] = job_progress
@@ -194,7 +197,7 @@ class TranscriptionService:
     media_path = get_media_path_for_transcription(transcription_id) or get_media_path_for_transcription(media_id)
     if not media_path or not media_path.exists():
       self._fail_job(transcription_id, media_id, "El archivo en disco no existe.", active_model_label)
-      raise FileNotFoundError(f"Media file on disk for {transcription_id} not found.")
+      raise AudioAnalysisError(f"Media file on disk for {transcription_id} not found.", filename=getattr(media_path, "name", str(media_path)))
 
     has_groq = model_info_data.get("groq_configured", False)
     has_openai = model_info_data.get("openai_configured", False)
@@ -208,6 +211,46 @@ class TranscriptionService:
 
     set_main_loop(asyncio.get_running_loop())
     media_title = media_entry.get("title", "Reunión de Requerimientos")
+    
+    # NEW: Analyze audio duration and validate integrity
+    try:
+      duration_seconds = await asyncio.to_thread(
+        self.audio_analyzer.get_duration_seconds, media_path
+      )
+      logger.info(f"Audio duration: {duration_seconds:.1f}s ({duration_seconds/60:.1f} min)")
+      
+      # Update media entry with duration
+      media_entry["duration_seconds"] = duration_seconds
+    except AudioAnalysisError as e:
+      self._fail_job(
+        transcription_id, media_id,
+        f"No se pudo analizar el archivo: {e.detail}",
+        active_model_label
+      )
+      raise
+    
+    # Validate audio integrity before processing
+    try:
+      is_valid, error_msg = await asyncio.to_thread(
+        self.audio_analyzer.validate_audio_integrity, media_path
+      )
+      if not is_valid:
+        self._fail_job(
+          transcription_id, media_id,
+          f"Archivo de audio inválido: {error_msg}",
+          active_model_label
+        )
+        raise AudioAnalysisError(error_msg or "Audio validation failed", filename=media_path.name)
+    except AudioAnalysisError:
+      raise
+    except Exception as e:
+      self._fail_job(
+        transcription_id, media_id,
+        f"Error validando audio: {str(e)}",
+        active_model_label
+      )
+      raise AudioAnalysisError(str(e), filename=media_path.name)
+    
     audio_track_path = await self._preprocess_media(transcription_id, media_id, media_path, media_entry, media_title, active_model_label)
     return await self._execute_cloud_pipeline(transcription_id, media_id, audio_track_path, media_entry, media_title, active_model_label, language, enable_diarization, user_id=user_id)
 
@@ -223,6 +266,89 @@ class TranscriptionService:
       model_info=model_info,
     )
     self._update_progress(prog)
+    
+    # Guardar record fallido en BD para que no devuelva 404
+    failed_record = {
+      "id": transcription_id,
+      "media_id": media_id,
+      "text": "",
+      "segments": [],
+      "language": "es",
+      "duration_seconds": 0.0,
+      "created_at": datetime.now(timezone.utc).isoformat(),
+      "metadata": {"title": "Error en transcripción"},
+      "summary": None,
+      "saved_to_knowledge": False,
+      "document_id": None,
+      "status": "failed",
+      "error": message,
+      "model_info": model_info,
+    }
+    try:
+      save_transcription_record(failed_record)
+    except Exception as exc:
+      logger.warning("Could not persist failed transcription record: %s", exc)
+
+  def _validate_transcription_result(
+    self,
+    cloud_raw: dict[str, Any],
+    audio_path: Path,
+  ) -> None:
+    """
+    Validate that transcription result is not empty and is valid.
+    
+    Checks:
+    - Text is not empty or whitespace
+    - Segments exist and have content
+    - Duration returned matches audio file (within tolerance)
+    
+    Args:
+        cloud_raw: Raw response from cloud transcription API
+        audio_path: Path to the audio file that was transcribed
+        
+    Raises:
+        TranscriptionError: If validation fails
+    """
+    # Check text is not empty
+    text = cloud_raw.get("text", "").strip()
+    if not text:
+        raise TranscriptionError("Transcription result is empty (no text detected)")
+    
+    # Check segments exist and have content
+    segments = cloud_raw.get("segments", [])
+    if not segments:
+        raise TranscriptionError("Transcription result has no segments")
+    
+    # Verify at least one segment has text
+    has_content = any(s.get("text", "").strip() for s in segments)
+    if not has_content:
+        raise TranscriptionError("All transcription segments are empty")
+    
+    # Check duration matches (within 10% tolerance)
+    returned_duration = float(cloud_raw.get("duration", 0))
+    if returned_duration <= 0:
+        raise TranscriptionError("Returned duration is invalid")
+    
+    # Verify audio file duration for comparison
+    try:
+        from app.features.transcription.audio_analyzer import AudioAnalyzer
+        analyzer = AudioAnalyzer()
+        expected_duration = analyzer.get_duration_seconds(audio_path)
+        
+        # Allow 10% tolerance
+        tolerance = expected_duration * 0.1
+        if abs(returned_duration - expected_duration) > tolerance:
+            logger.warning(
+                f"Duration mismatch: expected {expected_duration:.1f}s, "
+                f"got {returned_duration:.1f}s (tolerance: {tolerance:.1f}s)"
+            )
+    except Exception as exc:
+        logger.warning(f"Could not verify audio duration: {exc}")
+    
+    logger.info(
+        f"Transcription result validated: {len(text)} chars, "
+        f"{len(segments)} segments, {returned_duration:.1f}s duration"
+    )
 
   async def _preprocess_media(self, transcription_id: str, media_id: str, media_path: Path, media_entry: dict[str, Any], media_title: str, active_model_label: str) -> Path:
     self._update_progress(
@@ -243,7 +369,20 @@ class TranscriptionService:
     if media_entry.get("is_video") or media_path.suffix.lower() != ".wav":
       transcription_folder = get_transcription_dir(transcription_id)
       audio_candidate = transcription_folder / "audio.wav"
-      audio_track_path = await asyncio.to_thread(extract_audio_track, media_path, audio_candidate)
+      try:
+        audio_track_path, success = await asyncio.to_thread(
+          extract_audio_track, media_path, audio_candidate, validate=True
+        )
+        if not success:
+          raise FFmpegError(f"Audio extraction returned failure status")
+      except FFmpegError as e:
+        self._fail_job(
+          transcription_id, media_id,
+          f"Error al procesar audio: {e.detail}",
+          active_model_label
+        )
+        raise
+      
       if audio_candidate.exists() and audio_track_path == audio_candidate:
         if media_path != audio_candidate and media_path.exists() and str(media_path.resolve()).startswith(str(transcription_folder.resolve())):
           try:
@@ -281,6 +420,14 @@ class TranscriptionService:
 
     cloud_service = WhisperCloudService(user_id=user_id)
     cloud_raw = await cloud_service.transcribe(audio_track_path, language=language)
+    
+    # Validate result is not empty
+    try:
+      self._validate_transcription_result(cloud_raw, audio_track_path)
+    except TranscriptionError as e:
+      self._fail_job(transcription_id, media_id, str(e), active_model_label)
+      raise
+    
     raw_segments = cloud_raw.get("segments", [])
     if enable_diarization and raw_segments:
       labeled_segments = await asyncio.to_thread(self.diarizer.diarize_segments, raw_segments, audio_track_path)
