@@ -646,28 +646,39 @@ export const AgenticDocumentWorkspace = ({
 
                 {/* Minimal loading state while the first response/artifact is not available yet */}
                 {isCurrentChatGenerating && (
-                  !streamingText && runState.artifacts.length === 0 ? (
-                    <div className="flex gap-3 justify-start animate-in fade-in duration-150" aria-busy="true">
-                      <div className="relative w-full max-w-[85%] overflow-hidden rounded-2xl rounded-bl-none border border-slate-200 bg-slate-100 p-4 pt-14 text-slate-800 shadow-2xs">
-                        <div className="pointer-events-none absolute inset-x-4 top-4 flex items-center gap-2">
+                  <div className="flex gap-3 justify-start animate-in fade-in duration-150" aria-busy="true">
+                    <div className="relative w-full max-w-[85%] overflow-hidden rounded-2xl rounded-bl-none border border-slate-200 bg-slate-100 p-4 text-slate-800 shadow-2xs space-y-3">
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
+                        <div className="flex items-center gap-2">
                           <RefreshCw className="h-4 w-4 animate-spin text-[#002777]" aria-hidden="true" />
-                          <span className="text-xs font-semibold text-slate-500">Pensando...</span>
+                          <span className="text-xs font-semibold text-slate-700">
+                            {runState.activeStatusText || 'Generando y consolidando documento...'}
+                          </span>
                         </div>
-                        <div className="space-y-3 animate-pulse" aria-hidden="true">
-                          <div className="h-3 w-full rounded-full bg-slate-200" />
-                          <div className="h-3 w-11/12 rounded-full bg-slate-200" />
-                          <div className="h-3 w-4/5 rounded-full bg-slate-200" />
-                          <div className="h-3 w-2/5 rounded-full bg-slate-200" />
+                        <button
+                          type="button"
+                          onClick={() => void handleCancelRun()}
+                          className="px-2.5 py-1 text-[11px] font-semibold text-red-600 hover:text-white hover:bg-red-600 rounded-lg border border-red-200 bg-red-50/50 transition cursor-pointer flex items-center gap-1"
+                          title="Detener la generación actual"
+                        >
+                          <Square className="h-3 w-3 fill-current" />
+                          <span>Cancelar</span>
+                        </button>
+                      </div>
+
+                      {streamingText ? (
+                        <div className="text-xs text-slate-700">
+                          <MarkdownMessage content={streamingText} />
                         </div>
-                      </div>
+                      ) : (
+                        <div className="space-y-2.5 animate-pulse py-1" aria-hidden="true">
+                          <div className="h-2.5 w-full rounded-full bg-slate-200" />
+                          <div className="h-2.5 w-11/12 rounded-full bg-slate-200" />
+                          <div className="h-2.5 w-4/5 rounded-full bg-slate-200" />
+                        </div>
+                      )}
                     </div>
-                  ) : streamingText ? (
-                    <div className="flex gap-3 justify-start animate-in fade-in duration-150">
-                      <div className="max-w-[85%] rounded-2xl p-3.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-none space-y-1.5 shadow-2xs">
-                        <MarkdownMessage content={streamingText} />
-                      </div>
-                    </div>
-                  ) : null
+                  </div>
                 )}
               </>
             )}
@@ -1025,9 +1036,8 @@ export const AgenticDocumentWorkspace = ({
           onRegenerate={() => {
             const userMsgs = (activeConversation?.messages ?? []).filter((m) => m.role === 'user')
             const lastUserMsg = userMsgs[userMsgs.length - 1]
-            if (!lastUserMsg) return
 
-            const msgWithAttachments = (lastUserMsg.attachments && lastUserMsg.attachments.length > 0)
+            const msgWithAttachments = (lastUserMsg?.attachments && lastUserMsg.attachments.length > 0)
               ? lastUserMsg
               : [...userMsgs].reverse().find((m) => m.attachments && m.attachments.length > 0)
 
@@ -1044,7 +1054,13 @@ export const AgenticDocumentWorkspace = ({
                 char_count: att.size,
               }))
 
-            void handleSendMessage(lastUserMsg.content, attachedImages, attachedDocs)
+            const queryToUse = (
+              activeArtifact
+                ? `Regenera y completa rigurosamente el documento "${activeArtifact.title}" con todas sus secciones, tablas y especificaciones técnicas a partir del contexto provisto.`
+                : (lastUserMsg?.content || 'Regenera el documento funcional.')
+            )
+
+            void handleSendMessage(queryToUse, attachedImages, attachedDocs)
           }}
         />
       </div>

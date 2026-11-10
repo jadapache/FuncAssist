@@ -33,6 +33,7 @@ interface GeneratedDocState {
   title: string
   fileType: string
   module: string
+  transcriptionContext?: string
 }
 
 export const GenerateModal: React.FC<GenerateModalProps> = ({
@@ -137,6 +138,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         title: docTitle,
         fileType: (template.file_type || 'docx').toLowerCase(),
         module: template.module || 'general',
+        transcriptionContext: transcriptionContext || undefined,
       })
       toast.success(`"${template.title}" generado con IA.`)
     } catch (err: unknown) {
@@ -212,6 +214,35 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
       updatedAt: nowIso,
     }
 
+    const hasContext = Boolean(generatedDoc.transcriptionContext)
+    const contextContent = generatedDoc.transcriptionContext || ''
+
+    const initialMessages = [
+      {
+        id: crypto.randomUUID(),
+        role: 'user' as const,
+        content: `Genera el documento "${generatedDoc.title}" estructurado y completo basado en la transcripción de la reunión.`,
+        timestamp: nowIso,
+        attachments: hasContext
+          ? [
+              {
+                id: crypto.randomUUID(),
+                name: 'Transcripción - Contexto de Reunión',
+                type: 'file' as const,
+                size: contextContent.length,
+                content: contextContent,
+              },
+            ]
+          : undefined,
+      },
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        content: `He generado el documento "${generatedDoc.title}" a partir de la transcripción de la reunión. Puedes revisarlo, editarlo o exportarlo.`,
+        timestamp: nowIso,
+      },
+    ]
+
     try {
       await draftsApi.saveDraft({
         id: newSessionId,
@@ -220,14 +251,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         feature_slug: targetSlug,
         specification: targetSlug,
         lastInteraction: nowIso,
-        messages: [
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: `He generado el documento "${generatedDoc.title}" a partir de la transcripción de la reunión. Puedes revisarlo, editarlo o exportarlo.`,
-            timestamp: nowIso,
-          },
-        ],
+        messages: initialMessages,
         documentContent: generatedDoc.content,
         artifacts: [newArtifact],
       })
