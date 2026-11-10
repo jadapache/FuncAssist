@@ -48,8 +48,12 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     transcriptMenuRef,
     summaryMenuRef,
     isJobActive,
+    summaryText,
     summaryParagraphs,
     keyInsights,
+    summaryTemplates,
+    selectedSummaryTemplate,
+    setSelectedSummaryTemplate,
     isSummaryReady,
     hasTranscriptContent,
     meetingTitle,
@@ -62,7 +66,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     handleDownloadTranscriptTxt,
     handleDownloadTranscriptJson,
     handleCopySummary,
-    handleDownloadSummaryTxt,
+    handleDownloadSummaryMd,
     handleDownloadSummaryJson,
   } = useTranscriptionActions(
     transcriptionId,
@@ -205,8 +209,12 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
 
         {/* Right Panel: Resumen */}
         <SummaryPanel
+          summaryText={summaryText}
           summaryParagraphs={summaryParagraphs}
           keyInsights={keyInsights}
+          summaryTemplates={summaryTemplates}
+          selectedTemplate={selectedSummaryTemplate}
+          onSelectTemplate={setSelectedSummaryTemplate}
           isSummaryReady={isSummaryReady}
           isGeneratingSummary={isGeneratingSummary}
           isJobActive={isJobActive}
@@ -215,9 +223,9 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
           showSummaryDownloadMenu={showSummaryDownloadMenu}
           summaryMenuRef={summaryMenuRef}
           onToggleDownloadMenu={() => setShowSummaryDownloadMenu((prev) => !prev)}
-          onGenerateSummary={handleGenerateSummary}
+          onGenerateSummary={() => handleGenerateSummary()}
           onCopySummary={handleCopySummary}
-          onDownloadTxt={handleDownloadSummaryTxt}
+          onDownloadMd={handleDownloadSummaryMd}
           onDownloadJson={handleDownloadSummaryJson}
         />
       </div>

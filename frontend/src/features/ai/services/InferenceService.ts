@@ -50,7 +50,7 @@ export class InferenceService {
     }
   }
 
-  private isBrowserExecution(settings: AISettings | null): boolean {
+  public isBrowserExecution(settings: AISettings | null): boolean {
     const provider = (settings?.provider || 'local').toLowerCase()
     return provider === 'local' || provider === 'builtin' || provider === 'webllm'
   }

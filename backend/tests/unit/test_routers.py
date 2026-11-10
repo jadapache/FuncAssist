@@ -64,6 +64,19 @@ def test_ai_templates_endpoints():
     data_rubrics = res_rubrics.json()
     assert "rubrics" in data_rubrics
 
+    # Check filtering by tag
+    res_tagged = client.get("/api/ai/prompts?tag=transcript_summary")
+    assert res_tagged.status_code == 200
+    tagged_data = res_tagged.json()
+    assert len(tagged_data.get("prompts", [])) >= 6
+
+    # Check transcription summary templates endpoint
+    res_sum_tmpls = client.get("/api/transcription/summary-templates")
+    assert res_sum_tmpls.status_code == 200
+    sum_data = res_sum_tmpls.json()
+    assert "templates" in sum_data
+    assert len(sum_data["templates"]) >= 6
+
 
 def test_templates_router():
     res = client.get("/api/templates")

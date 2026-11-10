@@ -37,6 +37,9 @@ export function formatWebLLMError(err: unknown): string {
   if (/webgpu/i.test(message) && /not\s*supported|unsupported|unavailable/i.test(message)) {
     return 'Tu navegador o dispositivo no cuenta con aceleración WebGPU activa para ejecutar modelos locales.'
   }
+  if (/contextwindowsizeexceeded|prompt tokens exceed context window/i.test(message)) {
+    return 'La transcripción supera la ventana de contexto de este modelo en el navegador. Para textos muy extensos te sugerimos seleccionar Google Gemini (1M+ tokens) o un modelo de nube en Configuración.'
+  }
   return message || 'Error al ejecutar el modelo de lenguaje en el navegador.'
 }
 

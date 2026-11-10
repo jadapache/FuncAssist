@@ -29,14 +29,42 @@ litellm.set_verbose = False
 
 def _handle_completion_error(err: Exception) -> Exception:
   err_str = str(err)
-  if "reduce max_tokens" in err_str or "OTPM" in err_str or "output tokens per minute" in err_str:
+  lower_err = err_str.lower()
+  if "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
     limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
     req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
     req_tokens = req_match.group(1) if req_match else "solicitada"
     limit_tokens = limit_match.group(1) if limit_match else "establecido"
     return RuntimeError(
       f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo. "
-      f"Te sugerimos seleccionar un modelo diferente en Configuración (Settings)."
+      "Te sugerimos seleccionar un modelo diferente en Configuración (Settings)."
+    )
+  if "itpm" in lower_err or "input tokens per minute" in lower_err or "request too large for model" in lower_err:
+    limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
+    req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
+    req_tokens = req_match.group(1) if req_match else "solicitada"
+    limit_tokens = limit_match.group(1) if limit_match else "establecido"
+    return RuntimeError(
+      f"El texto enviado ({req_tokens} tokens) supera el límite de {limit_tokens} tokens de entrada por minuto (ITPM) de este modelo. "
+      "Para audios o transcripciones extensas, selecciona un modelo con mayor cuota."
+    )
+  if "ratelimiterror" in lower_err or "rate limit reached" in lower_err or "rate_limit_exceeded" in lower_err or "429" in lower_err:
+    wait_match = re.search(r"try again in ([0-9.]+s?)", err_str, re.IGNORECASE)
+    wait_time = wait_match.group(1) if wait_match else "unos segundos"
+    limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
+    req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
+    if limit_match and req_match:
+      return RuntimeError(
+        f"Límite de tasa de tokens por minuto (TPM) alcanzado: ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
+        f"Espera {wait_time} o selecciona un modelo con mayor límite."
+      )
+    return RuntimeError(
+      f"Límite de peticiones por minuto alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo."
+    )
+  if "contextwindowsizeexceeded" in lower_err or "context length" in lower_err or "context_window" in lower_err:
+    return RuntimeError(
+      "La longitud del texto supera la ventana de contexto del modelo. "
+      "Te sugerimos seleccionar un modelo con ventana extendida."
     )
   return err
 
@@ -202,8 +230,6 @@ class LiteLLMProvider(AIProvider):
           delta_content = choice.delta.content
           if delta_content:
             yield delta_content
-
-
 
 # Backwards-compatible aliases mapping to the registry
 class OpenAIProvider(LiteLLMProvider):

@@ -145,3 +145,37 @@ class TestTemplatesApi:
     # Reset
     reset_item = await reset_prompt_endpoint("standup")
     assert "system" in reset_item
+
+  @pytest.mark.asyncio
+  async def test_transcript_summary_templates_by_tag(self):
+    prompts = await list_prompts(tag="transcript_summary")
+    rubrics = await list_rubrics(tag="transcript_summary")
+
+    expected_features = {
+      "transcript_summary_standard_meeting",
+      "transcript_summary_daily_standup",
+      "transcript_summary_project_sync",
+      "transcript_summary_retrospective",
+      "transcript_summary_client_sales",
+      "transcript_summary_psychiatric_session",
+    }
+
+    prompt_features = {p["feature"] for p in prompts}
+    rubric_features = {r["feature"] for r in rubrics}
+
+    assert expected_features.issubset(prompt_features)
+    assert expected_features.issubset(rubric_features)
+
+    # Legacy feature alias fallback
+    legacy_prompt = await get_prompt("transcript_summary")
+    assert legacy_prompt["feature"] == "transcript_summary_standard_meeting"
+
+    legacy_rubric = await get_rubric("transcript_summary")
+    assert legacy_rubric["feature"] == "transcript_summary_standard_meeting"
+
+  def test_migration_script_executes_safely(self):
+    from scripts.migrate_transcript_summary_templates import migrate_schema_and_templates
+    migrate_schema_and_templates()
+
+    from scripts.migrate_ai_models_catalog_id import migrate_ai_models_catalog
+    migrate_ai_models_catalog()

@@ -69,8 +69,8 @@ class RubricUpdate(BaseModel):
 
 @router.get("/prompts")
 @handle_grounded_errors
-async def prompts() -> dict[str, Any]:
-    return {"prompts": await list_prompts()}
+async def prompts(tag: str | None = Query(default=None)) -> dict[str, Any]:
+    return {"prompts": await list_prompts(tag=tag)}
 
 
 @router.post("/prompts")
@@ -163,12 +163,9 @@ async def reset_prompt_endpoint(feature: str) -> dict[str, Any]:
 
 
 @router.get("/rubrics")
-
 @handle_grounded_errors
-
-async def rubrics() -> dict[str, Any]:
-
-    return {"rubrics": await list_rubrics()}
+async def rubrics(tag: str | None = Query(default=None)) -> dict[str, Any]:
+    return {"rubrics": await list_rubrics(tag=tag)}
 
 
 

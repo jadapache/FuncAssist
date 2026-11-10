@@ -515,6 +515,7 @@ export const ArtifactsStudio = ({
           <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
             <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
               <UniverContainer
+                key={`${activeArtifact.id}-${activeArtifact.updatedAt || ''}-${(activeArtifact.content || '').length}`}
                 adapter={adapter}
                 kind={activeArtifact.extension === 'xlsx' ? 'spreadsheet' : 'document'}
                 title={activeArtifact.title}

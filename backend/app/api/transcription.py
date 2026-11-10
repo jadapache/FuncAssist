@@ -27,6 +27,7 @@ from app.core.storage import allocate_transcription_folder, load_app_settings
 from app.api.transcription_stream import emit_progress
 from app.features.inventario.xlsx_builder import create_inventario_xlsx
 from app.features.levantamiento.docx_builder import create_levantamiento_docx
+from app.ai.templates import list_prompts
 from app.features.transcription.service import transcription_service
 from app.features.transcription.summarizer import summarize_transcript
 from app.features.transcription import storage
@@ -82,6 +83,11 @@ router = APIRouter(
 class ExportDocumentRequest(BaseModel):
   content: str = ""
   title: str = "Documento"
+
+
+class GenerateSummaryRequest(BaseModel):
+  feature: Optional[str] = None
+  rubric_id: Optional[str] = None
 
 
 from app.features.transcription.local_picker import (
@@ -376,8 +382,28 @@ async def get_transcription_result(transcription_id: str) -> TranscriptionResult
   return TranscriptionResult(**record)
 
 
+@router.get("/summary-templates")
+async def get_summary_templates(tag: Optional[str] = "transcript_summary") -> dict[str, Any]:
+  """List all available transcript summary templates and rubrics."""
+  prompts = await list_prompts(tag=tag or "transcript_summary")
+  templates = [
+    {
+      "id": p.get("feature"),
+      "title": p.get("title") or p.get("feature"),
+      "description": p.get("description", ""),
+      "tag": p.get("tag", "transcript_summary"),
+    }
+    for p in prompts
+  ]
+  return {"templates": templates}
+
+
 @router.post("/generate-summary/{transcription_id}")
-async def generate_summary(transcription_id: str) -> dict[str, Any]:
+async def generate_summary(
+  transcription_id: str,
+  body: Optional[GenerateSummaryRequest] = None,
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
   """Trigger AI summary generation for a completed transcription."""
   record = get_transcription_record(transcription_id)
   if not record:
@@ -386,8 +412,10 @@ async def generate_summary(transcription_id: str) -> dict[str, Any]:
   segments = record.get("segments", [])
   meta = record.get("metadata", {})
   title = meta.get("title", "Reunión")
+  chosen_feature = (body.feature or body.rubric_id) if body else "transcript_summary_standard_meeting"
+  user_id = current_user.get("id") if current_user else None
 
-  summary = await summarize_transcript(segments, title=title)
+  summary = await summarize_transcript(segments, title=title, feature=chosen_feature, user_id=user_id)
   updated = update_transcription_summary(transcription_id, summary.model_dump())
   return {"ok": True, "summary": summary, "transcription": updated}
 

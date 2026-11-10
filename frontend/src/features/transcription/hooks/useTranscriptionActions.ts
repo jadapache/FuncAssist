@@ -4,10 +4,12 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { api } from '../../../api/client'
 import {
   transcriptionApi,
   type TranscriptionResult,
   type TranscriptionProgress,
+  type SummaryTemplateItem,
 } from '../api/transcriptionApi'
 import { inferenceService } from '../../ai/services/InferenceService'
 import { useToast } from '../../../context/ToastContext'
@@ -24,6 +26,128 @@ export function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60)
   const secs = Math.floor(seconds % 60)
   return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`
+}
+
+export function condenseTranscriptForBrowser(transcript: string, maxChars: number = 8000): string {
+  if (!transcript || transcript.length <= maxChars) {
+    return transcript
+  }
+
+  const lines = transcript.split('\n').filter((l) => l.trim().length > 0)
+  if (lines.length <= 1) {
+    return transcript.slice(0, maxChars)
+  }
+
+  const headBudget = Math.floor(maxChars * 0.30)
+  const tailBudget = Math.floor(maxChars * 0.30)
+  const midBudget = maxChars - headBudget - tailBudget
+
+  const headLines: string[] = []
+  let headChars = 0
+  for (const line of lines) {
+    if (headChars + line.length + 1 > headBudget) {
+      if (headLines.length === 0) {
+        headLines.push(line.slice(0, headBudget))
+      }
+      break
+    }
+    headLines.push(line)
+    headChars += line.length + 1
+  }
+
+  const tailLines: string[] = []
+  let tailChars = 0
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]
+    if (tailChars + line.length + 1 > tailBudget) {
+      if (tailLines.length === 0) {
+        tailLines.unshift(line.slice(-tailBudget))
+      }
+      break
+    }
+    tailLines.unshift(line)
+    tailChars += line.length + 1
+  }
+
+  const midStart = headLines.length
+  const midEnd = Math.max(midStart, lines.length - tailLines.length)
+  const midPool = lines.slice(midStart, midEnd)
+  const midLines: string[] = []
+  if (midPool.length > 0) {
+    const step = Math.max(1, Math.floor(midPool.length / 10))
+    let midChars = 0
+    for (let i = 0; i < midPool.length; i += step) {
+      const line = midPool[i]
+      if (midChars + line.length + 1 > midBudget) break
+      midLines.push(line)
+      midChars += line.length + 1
+    }
+  }
+
+  const parts: string[] = []
+  if (headLines.length > 0) parts.push(headLines.join('\n'))
+  if (midLines.length > 0) parts.push('...\n' + midLines.join('\n'))
+  if (tailLines.length > 0) parts.push('...\n' + tailLines.join('\n'))
+
+  const result = parts.join('\n\n').trim()
+  return result || transcript.slice(0, maxChars)
+}
+
+function formatSegmentsForPrompt(
+  segments?: Array<{ start?: number; end?: number; speaker?: string; text?: string }>,
+  rawText?: string,
+): string {
+  if (segments && segments.length > 0) {
+    const lines: string[] = []
+    let currentSpeaker: string | null = null
+    let currentStart = 0
+    let currentLastEnd = 0
+    let currentTexts: string[] = []
+    let currentChars = 0
+
+    const flush = () => {
+      if (currentTexts.length > 0 && currentSpeaker !== null) {
+        const m = Math.floor(currentStart / 60)
+        const s = Math.floor(currentStart % 60)
+        const ts = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+        const merged = currentTexts.join(' ').trim()
+        if (merged) {
+          lines.push(`[${ts}] ${currentSpeaker}: ${merged}`)
+        }
+      }
+      currentTexts = []
+      currentChars = 0
+    }
+
+    for (const seg of segments) {
+      const spk = seg.speaker || 'Participante'
+      const txt = (seg.text || '').trim()
+      if (!txt) continue
+      const start = seg.start || 0
+      const end = seg.end || start + 2.0
+
+      const silenceGap = currentTexts.length > 0 ? start - currentLastEnd : 0
+      const isSpeakerChange = spk !== currentSpeaker
+      const isTurnTooLong = currentChars + txt.length > 600
+      const isGap = silenceGap > 5.0
+
+      if (isSpeakerChange || isTurnTooLong || isGap) {
+        flush()
+        currentSpeaker = spk
+        currentStart = start
+      }
+
+      currentTexts.push(txt)
+      currentChars += txt.length + 1
+      currentLastEnd = end
+    }
+    flush()
+
+    if (lines.length > 0) {
+      return lines.join('\n')
+    }
+  }
+  return rawText || ''
 }
 
 export const SPEAKER_COLORS = [
@@ -83,6 +207,39 @@ export function useTranscriptionActions(
   // Download dropdown toggles
   const [showTranscriptDownloadMenu, setShowTranscriptDownloadMenu] = useState(false)
   const [showSummaryDownloadMenu, setShowSummaryDownloadMenu] = useState(false)
+
+  // Summary template selection queried from DB by tag like 'transcript_%'
+  const [summaryTemplates, setSummaryTemplates] = useState<SummaryTemplateItem[]>([])
+  const [selectedSummaryTemplate, setSelectedSummaryTemplate] = useState<string>('')
+
+  useEffect(() => {
+    let isMounted = true
+    transcriptionApi
+      .getSummaryTemplates('transcript_summary')
+      .then((templates) => {
+        if (!isMounted || !templates || templates.length === 0) return
+        setSummaryTemplates(templates)
+        setSelectedSummaryTemplate((prev) => {
+          if (prev && templates.some((t) => t.id === prev)) return prev
+          return (
+            transcriptionResult?.summary?.template_id ||
+            templates[0]?.id ||
+            ''
+          )
+        })
+      })
+      .catch(() => {})
+
+    return () => {
+      isMounted = false
+    }
+  }, [transcriptionResult?.summary?.template_id])
+
+  useEffect(() => {
+    if (transcriptionResult?.summary?.template_id) {
+      setSelectedSummaryTemplate(transcriptionResult.summary.template_id)
+    }
+  }, [transcriptionResult?.summary?.template_id])
 
   // Speaker rename state
   const [showRenameModal, setShowRenameModal] = useState(false)
@@ -216,38 +373,87 @@ export function useTranscriptionActions(
   }, [transcriptionId, meetingTitle, onRetranscribe, toast, onRefreshData])
 
   // Handle AI summary generation
-  const handleGenerateSummary = useCallback(async () => {
-    try {
-      setIsGeneratingSummary(true)
-      const settings = await inferenceService.getAiSettings()
+  const handleGenerateSummary = useCallback(
+    async (templateIdOverride?: unknown) => {
+      const templateToUse =
+        (typeof templateIdOverride === 'string' && templateIdOverride.trim().length > 0
+          ? templateIdOverride.trim()
+          : selectedSummaryTemplate) ||
+        summaryTemplates[0]?.id ||
+        'transcript_summary_standard_meeting'
+      try {
+        setIsGeneratingSummary(true)
+        const settings = await inferenceService.getAiSettings()
+        const isBrowser = inferenceService.isBrowserExecution(settings)
+        const transcriptContent = formatSegmentsForPrompt(
+          displayResult?.segments,
+          displayResult?.text,
+        )
 
-      if (settings?.provider === 'builtin' && displayResult?.text) {
-        const sumRes = await inferenceService.summarize({
-          text: displayResult.text,
-          instructions: 'Genera un resumen ejecutivo claro de la reunión con temas principales, acuerdos y próximos pasos.',
-        })
-        const updated = await transcriptionApi.updateTranscriptionSummary(transcriptionId, {
-          summary_text: sumRes.summary,
-        })
-        setTranscriptionResult(updated.transcription)
-        toast.success('Resumen generado con éxito con WebLLM.')
-        onRefreshData?.()
-        return
-      }
+        if (isBrowser && transcriptContent) {
+          const [prompt, rubric] = await Promise.all([
+            api.getAiPrompt(templateToUse).catch(() => null),
+            api.getAiRubric(templateToUse).catch(() => null),
+          ])
 
-      const res = await transcriptionApi.generateSummary(transcriptionId)
-      if (res.transcription) {
-        setTranscriptionResult(res.transcription)
-        toast.success('Resumen generado con éxito.')
-        onRefreshData?.()
+          const rubricText = rubric?.criteria?.length
+            ? rubric.criteria.map((c: string) => `- ${c}`).join('\n')
+            : ''
+          const meetingTitle = displayResult?.metadata?.title || 'Reunión'
+
+          const defaultSystem =
+            'Eres un analista y redactor ejecutivo senior especializado en minutas y notas de reunión. Genera una síntesis profesional, clara y estructurada de la reunión basada estrictamente en la transcripción. No inventes información que no esté sustentada en la grabación.'
+          const defaultUserTemplate =
+            'Título de la reunión: {title}\n\nTRANSCRIPCIÓN:\n{transcript}\n\nRÚBRICA:\n{rubric}'
+
+          const systemPrompt = prompt?.system?.trim() || defaultSystem
+          const userTemplate = prompt?.user_template?.trim() || defaultUserTemplate
+
+          const safeTranscript = condenseTranscriptForBrowser(transcriptContent, 8000)
+          const userContent = userTemplate
+            .replace('{title}', meetingTitle)
+            .replace('{transcript}', safeTranscript)
+            .replace('{rubric}', rubricText)
+
+          const genResult = await inferenceService.generateMessages(
+            [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userContent },
+            ],
+            undefined,
+            { temperature: 0.3, maxTokens: 2500 },
+          )
+
+          const templateTitle =
+            summaryTemplates.find((t) => t.id === templateToUse)?.title ||
+            (typeof prompt?.title === 'string' ? prompt.title : templateToUse)
+
+          const updated = await transcriptionApi.updateTranscriptionSummary(transcriptionId, {
+            summary_text: genResult.content,
+            template_id: templateToUse,
+            template_name: templateTitle,
+          })
+          setTranscriptionResult(updated.transcription)
+          toast.success('Resumen generado con éxito con IA.')
+          onRefreshData?.()
+          return
+        }
+
+        const res = await transcriptionApi.generateSummary(transcriptionId, templateToUse)
+        if (res.transcription) {
+          setTranscriptionResult(res.transcription)
+          toast.success('Resumen generado con éxito.')
+          onRefreshData?.()
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Error al generar resumen'
+        toast.error(`Error al generar resumen: ${msg}`)
+      } finally {
+        setIsGeneratingSummary(false)
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al generar resumen'
-      toast.error(`Error al generar resumen: ${msg}`)
-    } finally {
-      setIsGeneratingSummary(false)
-    }
-  }, [transcriptionId, displayResult, toast, onRefreshData])
+    },
+    [transcriptionId, selectedSummaryTemplate, summaryTemplates, displayResult, toast, onRefreshData]
+  )
 
   // Save to Knowledge Base
   const handleSaveToKB = useCallback(async () => {
@@ -401,32 +607,45 @@ export function useTranscriptionActions(
       )) ||
       keyInsights.length > 0)
 
+  const summaryText = summaryData?.summary_text || null
+
   // Copy summary text
   const handleCopySummary = useCallback(() => {
     if (!isSummaryReady) return
-    let text = `# Summary\n\n${summaryParagraphs.join('\n\n')}\n\n# Key Insights\n\n`
-    text += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    let text = summaryText
+    if (!text) {
+      text = `# Summary\n\n${summaryParagraphs.join('\n\n')}\n\n# Key Insights\n\n`
+      text += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    }
 
     navigator.clipboard.writeText(text)
     setHasCopiedSummary(true)
     setTimeout(() => setHasCopiedSummary(false), 2000)
     toast.success('Resumen copiado al portapapeles.')
-  }, [isSummaryReady, summaryParagraphs, keyInsights, toast])
+  }, [isSummaryReady, summaryText, summaryParagraphs, keyInsights, toast])
 
-  // Download summary as TXT
-  const handleDownloadSummaryTxt = useCallback(() => {
+  // Download summary as Markdown (.md)
+  const handleDownloadSummaryMd = useCallback(() => {
     if (!displayResult || !isSummaryReady) return
     const title = displayResult.metadata?.title || 'Resumen'
     const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_')
 
-    let content = `Summary\n\n`
-    content += `${summaryParagraphs.join('\n\n')}\n\n`
-    content += `Key Insights\n\n`
-    content += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+    let content = summaryText
+    if (!content) {
+      content = `# Resumen: ${title}\n\n`
+      if (summaryParagraphs.length > 0) {
+        content += `## Puntos Clave\n\n${summaryParagraphs.join('\n\n')}\n\n`
+      }
+      if (keyInsights.length > 0) {
+        content += `## Insights Principales\n\n`
+        content += keyInsights.map((ki) => `- ${ki}`).join('\n')
+        content += '\n'
+      }
+    }
 
-    downloadFile(content, `Resumen_${safeTitle}.txt`, 'text/plain;charset=utf-8')
+    downloadFile(content, `Resumen_${safeTitle}.md`, 'text/markdown;charset=utf-8')
     setShowSummaryDownloadMenu(false)
-  }, [displayResult, isSummaryReady, summaryParagraphs, keyInsights])
+  }, [displayResult, isSummaryReady, summaryText, summaryParagraphs, keyInsights])
 
   // Download summary as JSON
   const handleDownloadSummaryJson = useCallback(() => {
@@ -464,8 +683,12 @@ export function useTranscriptionActions(
     transcriptMenuRef,
     summaryMenuRef,
     isJobActive,
+    summaryText,
     summaryParagraphs,
     keyInsights,
+    summaryTemplates,
+    selectedSummaryTemplate,
+    setSelectedSummaryTemplate,
     isSummaryReady,
     hasTranscriptContent,
     meetingTitle,
@@ -479,7 +702,7 @@ export function useTranscriptionActions(
     handleDownloadTranscriptTxt,
     handleDownloadTranscriptJson,
     handleCopySummary,
-    handleDownloadSummaryTxt,
+    handleDownloadSummaryMd,
     handleDownloadSummaryJson,
   }
 }

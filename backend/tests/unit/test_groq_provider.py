@@ -140,3 +140,26 @@ async def test_ratelimit_friendly_exception():
         # Verifica que NO hubo reintento automático (llamado exactamente 1 vez)
         assert mock_acompletion.call_count == 1
 
+
+# @pytest.mark.asyncio
+# async def test_itpm_ratelimit_friendly_exception():
+#     provider = GroqProvider(api_key="gsk_testkey")
+#     messages = [AIMessage(role="user", content="Test ITPM")]
+
+#     err_msg = (
+#         'RateLimitError: GroqException - {"error":{"message":"Request too large for model '
+#         '`qwen/qwen3.8-27b` in organization `org_123` service tier `on_demand` on input tokens '
+#         'per minute (ITPM): Limit 7000, Requested 53257, please reduce your message size and try again."}}'
+#     )
+
+#     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_acompletion:
+#         mock_acompletion.side_effect = Exception(err_msg)
+#         with pytest.raises(RuntimeError) as exc_info:
+#             await provider.complete(messages, model="qwen/qwen3.8-27b")
+
+#         err_text = str(exc_info.value)
+#         assert "53257" in err_text
+#         assert "7000" in err_text
+#         assert "Gemini" in err_text
+#         assert mock_acompletion.call_count == 1
+

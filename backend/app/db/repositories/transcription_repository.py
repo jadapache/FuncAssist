@@ -101,7 +101,11 @@ class TranscriptionRepository:
     text = record.get("text") or ""
     segments = record.get("segments") or []
     summary = record.get("summary")
-    meta = record.get("metadata") or {}
+    meta = dict(record.get("metadata") or {})
+    if "saved_to_knowledge" in record:
+      meta["saved_to_knowledge"] = bool(record["saved_to_knowledge"])
+    if "document_id" in record:
+      meta["document_id"] = record.get("document_id")
 
     with get_sync_db() as db:
       stmt = select(TranscriptionModel).where(TranscriptionModel.id == tid)

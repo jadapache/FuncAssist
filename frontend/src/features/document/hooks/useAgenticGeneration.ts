@@ -472,7 +472,29 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           targetArtifactId = newCreatedItems[0].id
           onSetActiveArtifactId(newCreatedItems[0].id)
           onDocHistoryReset(newCreatedItems[0].content)
-        } else if (extractedArtifacts.length === 1 || resolution.targetMode === 'plan' || resolution.targetMode === 'report' || convArtifacts.length === 0) {
+        } else if (activeArtifact || convArtifacts.length > 0) {
+          // Si ya existe un artefacto activo en la sesión, actualizamos su contenido en lugar de duplicarlo
+          const targetId = activeArtifact?.id || convArtifacts[0]?.id
+          const newContent = extractedArtifacts[0]?.content || finalContent
+          const newTitle = extractedArtifacts[0]?.title || activeArtifact?.title || config.docxTitle || config.title
+          const newExt = extractedArtifacts[0]?.extension || activeArtifact?.extension || config.defaultExtension || 'docx'
+
+          updatedArtifacts = convArtifacts.map((a) =>
+            a.id === targetId
+              ? {
+                  ...a,
+                  title: newTitle,
+                  extension: newExt,
+                  content: newContent,
+                  subtitle: generateArtifactSubtitle(newContent),
+                  updatedAt: 'Hace un momento',
+                }
+              : a,
+          )
+          targetArtifactId = targetId
+          onDocHistoryReset(newContent)
+        } else {
+          // Primera generación: se crea el artefacto inicial
           const newArtId = crypto.randomUUID()
           const artifactTitle =
             extractedArtifacts[0]?.title ||
@@ -480,25 +502,20 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
               ? `${resolution.commandSlug.toUpperCase()}: ${resolution.cleanQuery.slice(0, 30)}`
               : config.docxTitle || config.title)
 
+          const newContent = extractedArtifacts[0]?.content || finalContent
           const newArtifact: Artifact = {
             id: newArtId,
             title: artifactTitle,
-            subtitle: generateArtifactSubtitle(extractedArtifacts[0]?.content || finalContent) || 'Documento generado por IA',
+            subtitle: generateArtifactSubtitle(newContent) || 'Documento generado por IA',
             extension: extractedArtifacts[0]?.extension || config.defaultExtension || 'docx',
-            content: extractedArtifacts[0]?.content || finalContent,
+            content: newContent,
             createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             updatedAt: 'Hace un momento',
           }
-          updatedArtifacts = [...convArtifacts, newArtifact]
+          updatedArtifacts = [newArtifact]
           targetArtifactId = newArtId
           onSetActiveArtifactId(newArtId)
           onDocHistoryReset(newArtifact.content)
-        } else {
-          const targetId = activeArtifact?.id || convArtifacts[0]?.id
-          updatedArtifacts = convArtifacts.map((a) =>
-            a.id === targetId ? { ...a, content: finalContent, updatedAt: 'Hace un momento' } : a,
-          )
-          onDocHistoryPush(finalContent)
         }
 
         const bubbleContent = resolveAssistantBubbleText(

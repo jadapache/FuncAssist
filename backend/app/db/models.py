@@ -639,9 +639,10 @@ class AITemplateModel(Base):
   """Current active version of an AI prompt or rubric template."""
   __tablename__ = "ai_templates"
 
-  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))  
+  id: Mapped[str] = mapped_column(String(128), primary_key=True, default=lambda: str(uuid.uuid4()))  
   template_type: Mapped[str] = mapped_column(String, nullable=False, index=True) 
   feature: Mapped[str] = mapped_column(String, nullable=False, index=True)
+  tag: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
   version: Mapped[int] = mapped_column(Integer, default=1)
   payload_json: Mapped[str] = mapped_column(Text, nullable=False)
   updated_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -661,6 +662,7 @@ class AITemplateModel(Base):
       "id": self.id,
       "template_type": self.template_type,
       "feature": self.feature,
+      "tag": self.tag or parsed.get("tag"),
       "version": self.version,
       "updated_by": self.updated_by,
       "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -673,12 +675,13 @@ class AITemplateVersionModel(Base):
   """Audit history log of all prompt/rubric template changes."""
   __tablename__ = "ai_template_versions"
 
-  id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+  id: Mapped[str] = mapped_column(String(128), primary_key=True, default=lambda: str(uuid.uuid4()))
   template_id: Mapped[str] = mapped_column(
-    String(36), ForeignKey("ai_templates.id", ondelete="CASCADE"), nullable=False, index=True
+    String(128), ForeignKey("ai_templates.id", ondelete="CASCADE"), nullable=False, index=True
   )
   template_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
   feature: Mapped[str] = mapped_column(String, nullable=False, index=True)
+  tag: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
   version: Mapped[int] = mapped_column(Integer, nullable=False)
   payload_json: Mapped[str] = mapped_column(Text, nullable=False)
   change_summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -699,6 +702,7 @@ class AITemplateVersionModel(Base):
       "template_id": self.template_id,
       "template_type": self.template_type,
       "feature": self.feature,
+      "tag": self.tag or parsed.get("tag"),
       "version": self.version,
       "change_summary": self.change_summary,
       "created_by": self.created_by,
@@ -772,6 +776,8 @@ class TranscriptionModel(Base):
       "segments": segments,
       "text": self.text or "",
       "summary": summary,
+      "saved_to_knowledge": bool(meta.get("saved_to_knowledge", False)),
+      "document_id": meta.get("document_id"),
       "metadata": {
         "title": self.title,
         "description": self.description or "",
