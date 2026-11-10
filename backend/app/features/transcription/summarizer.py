@@ -28,14 +28,19 @@ def format_transcript_lines(segments: List[Dict[str, Any]]) -> List[str]:
   lines: list[str] = []
   current_speaker: str | None = None
   current_start: float = 0.0
+  current_last_end: float = 0.0
   current_texts: list[str] = []
+  current_chars: int = 0
 
   def flush() -> None:
+    nonlocal current_chars
     if current_texts and current_speaker is not None:
       start_str = format_timestamp(current_start)
       merged = " ".join(current_texts).strip()
       if merged:
         lines.append(f"[{start_str}] {current_speaker}: {merged}")
+    current_texts.clear()
+    current_chars = 0
 
   for seg in segments:
     spk = seg.get("speaker") or "Participante"
@@ -43,13 +48,21 @@ def format_transcript_lines(segments: List[Dict[str, Any]]) -> List[str]:
     if not txt:
       continue
     start = float(seg.get("start", 0.0))
-    if spk == current_speaker:
-      current_texts.append(txt)
-    else:
+    end = float(seg.get("end", start + 2.0))
+
+    silence_gap = (start - current_last_end) if current_texts else 0.0
+    speaker_changed = (spk != current_speaker)
+    turn_too_long = (current_chars + len(txt) > 600)
+    gap_detected = (silence_gap > 5.0)
+
+    if speaker_changed or turn_too_long or gap_detected:
       flush()
       current_speaker = spk
       current_start = start
-      current_texts = [txt]
+
+    current_texts.append(txt)
+    current_chars += len(txt) + 1
+    current_last_end = end
 
   flush()
   return lines
@@ -77,14 +90,16 @@ def condense_transcript_lines(lines: List[str], max_chars: int) -> str:
   if len(joined) <= max_chars:
     return joined
 
-  head_budget = int(max_chars * 0.25)
-  tail_budget = int(max_chars * 0.25)
+  head_budget = int(max_chars * 0.30)
+  tail_budget = int(max_chars * 0.30)
   mid_budget = max_chars - head_budget - tail_budget
 
   head_lines: list[str] = []
   head_chars = 0
   for line in lines:
     if head_chars + len(line) + 1 > head_budget:
+      if not head_lines:
+        head_lines.append(line[:head_budget])
       break
     head_lines.append(line)
     head_chars += len(line) + 1
@@ -93,15 +108,18 @@ def condense_transcript_lines(lines: List[str], max_chars: int) -> str:
   tail_chars = 0
   for line in reversed(lines):
     if tail_chars + len(line) + 1 > tail_budget:
+      if not tail_lines:
+        tail_lines.insert(0, line[-tail_budget:])
       break
     tail_lines.insert(0, line)
     tail_chars += len(line) + 1
 
-  consumed = len(head_lines) + len(tail_lines)
-  mid_pool = lines[len(head_lines): max(len(head_lines), len(lines) - len(tail_lines))]
+  mid_start = len(head_lines)
+  mid_end = max(mid_start, len(lines) - len(tail_lines))
+  mid_pool = lines[mid_start:mid_end]
   mid_lines: list[str] = []
   if mid_pool:
-    step = max(1, len(mid_pool) // 15)
+    step = max(1, len(mid_pool) // 10)
     sampled = mid_pool[::step]
     mid_chars = 0
     for line in sampled:
@@ -110,16 +128,16 @@ def condense_transcript_lines(lines: List[str], max_chars: int) -> str:
       mid_lines.append(line)
       mid_chars += len(line) + 1
 
-  note = "[Nota: Transcripcion extensa sintetizada cronologicamente para ajustarse a la cuota del modelo.]"
-  sections = [note]
+  sections: list[str] = []
   if head_lines:
     sections.append("\n".join(head_lines))
   if mid_lines:
-    sections.append("... [Continuacion del debate de la reunion] ...\n" + "\n".join(mid_lines))
+    sections.append("...\n" + "\n".join(mid_lines))
   if tail_lines:
-    sections.append("... [Conclusiones y acuerdos finales] ...\n" + "\n".join(tail_lines))
+    sections.append("...\n" + "\n".join(tail_lines))
 
-  return "\n\n".join(sections)
+  result = "\n\n".join(sections).strip()
+  return result if result else joined[:max_chars]
 
 
 def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:

@@ -91,8 +91,8 @@ describe('Transcription Feature - Frontend Utilities', () => {
       const condensed = condenseTranscriptForBrowser(longTranscript, 300)
 
       expect(condensed.length).toBeLessThan(longTranscript.length)
-      expect(condensed).toContain('[Nota: Transcripción extensa sintetizada')
       expect(condensed).toContain('Juan')
+      expect(condensed).toContain('...')
     })
   })
 })

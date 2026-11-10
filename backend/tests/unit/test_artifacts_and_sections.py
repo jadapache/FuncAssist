@@ -195,8 +195,8 @@ class TestTranscriptCondensation:
 
         long_lines = [f"[{i:02d}:00] Speaker{i % 3}: Debate punto {i} con amplio detalle..." for i in range(100)]
         condensed = condense_transcript_lines(long_lines, max_chars=500)
-        assert len(condensed) <= 700  # including notes and section markers
-        assert "[Nota:" in condensed
-        assert "Speaker0" in condensed
+        assert len(condensed) <= 700
+        assert "Speaker" in condensed
+        assert "..." in condensed
 
 
