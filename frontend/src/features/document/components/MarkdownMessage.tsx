@@ -1,5 +1,6 @@
 import React, { type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface MarkdownMessageProps {
   content: string
@@ -12,7 +13,7 @@ interface ComponentProps {
 }
 
 /**
- * Rich Markdown renderer for chat bubbles.
+ * Rich Markdown renderer with GitHub Flavored Markdown (GFM) support.
  * Renders headings, bold/italic, code blocks, lists, and tables cleanly.
  */
 export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
@@ -24,19 +25,20 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
   return (
     <div className={`prose-sm max-w-none text-slate-800 leading-relaxed text-xs space-y-2 ${className}`}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }: ComponentProps) => (
-            <h1 className="text-sm font-bold text-slate-900 mt-3 mb-1.5 first:mt-0 tracking-tight">
+            <h1 className="text-base font-bold text-slate-900 mt-4 mb-2 first:mt-0 tracking-tight">
               {children}
             </h1>
           ),
           h2: ({ children }: ComponentProps) => (
-            <h2 className="text-xs font-bold text-slate-900 mt-2.5 mb-1 first:mt-0 tracking-tight">
+            <h2 className="text-sm font-bold text-slate-900 mt-4 mb-2 first:mt-0 tracking-tight pb-1 border-b border-slate-100">
               {children}
             </h2>
           ),
           h3: ({ children }: ComponentProps) => (
-            <h3 className="text-xs font-semibold text-slate-900 mt-2 mb-1 first:mt-0">
+            <h3 className="text-xs font-bold text-slate-900 mt-3 mb-1.5 first:mt-0">
               {children}
             </h3>
           ),
@@ -92,8 +94,8 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
             </blockquote>
           ),
           table: ({ children }: ComponentProps) => (
-            <div className="my-2 overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
-              <table className="min-w-full divide-y divide-slate-200 text-[11px] text-left">
+            <div className="my-3 overflow-x-auto rounded-xl border border-slate-200 shadow-2xs bg-white">
+              <table className="min-w-full divide-y divide-slate-200 text-xs text-left">
                 {children}
               </table>
             </div>
@@ -109,23 +111,22 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
             </tbody>
           ),
           tr: ({ children }: ComponentProps) => (
-            <tr className="hover:bg-slate-50/50 transition-colors">
+            <tr className="hover:bg-slate-50/60 transition-colors">
               {children}
             </tr>
           ),
           th: ({ children }: ComponentProps) => (
-            <th className="px-3 py-1.5 font-semibold text-slate-700">
+            <th className="px-3.5 py-2 font-semibold text-slate-800 whitespace-nowrap bg-slate-50/90">
               {children}
             </th>
           ),
           td: ({ children }: ComponentProps) => (
-            <td className="px-3 py-1.5 text-slate-600">
+            <td className="px-3.5 py-2 text-slate-600 align-top">
               {children}
             </td>
           ),
           hr: () => <hr className="my-3 border-slate-200" />,
         }}
-
       >
         {content}
       </ReactMarkdown>

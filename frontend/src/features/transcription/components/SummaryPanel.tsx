@@ -164,21 +164,19 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
             </p>
           </div>
         ) : isSummaryReady ? (
-          <div className="space-y-6 animate-fade-in max-w-xl">
+          <div className="space-y-6 animate-fade-in w-full">
             {summaryText ? (
-              <MarkdownMessage content={summaryText} className="text-xs text-slate-700" />
+              <MarkdownMessage content={summaryText} className="text-xs text-slate-700 w-full" />
             ) : (
               <>
                 {summaryParagraphs.length > 0 && (
                   <section className="space-y-4">
-                    <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                      Summary
+                    <h2 className="text-sm font-bold text-slate-900 tracking-tight pb-1 border-b border-slate-100">
+                      Resumen
                     </h2>
-                    <div className="space-y-4 text-sm text-slate-700 leading-relaxed font-normal">
+                    <div className="space-y-3 text-xs text-slate-700 leading-relaxed font-normal">
                       {summaryParagraphs.map((paragraph, idx) => (
-                        <p key={idx} className="leading-relaxed">
-                          {paragraph}
-                        </p>
+                        <MarkdownMessage key={idx} content={paragraph} />
                       ))}
                     </div>
                   </section>
@@ -186,17 +184,19 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
 
                 {keyInsights.length > 0 && (
                   <section className="space-y-3.5 pt-2">
-                    <h3 className="text-xl font-bold text-slate-900 tracking-tight">
-                      Key Insights
+                    <h3 className="text-xs font-bold text-slate-900 tracking-tight">
+                      Puntos Clave
                     </h3>
-                    <ul className="space-y-3">
+                    <ul className="space-y-2">
                       {keyInsights.map((insight, idx) => (
                         <li
                           key={idx}
-                          className="flex items-start gap-3 text-sm text-slate-700 leading-relaxed"
+                          className="flex items-start gap-2.5 text-xs text-slate-700 leading-relaxed"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400 mt-2 shrink-0" />
-                          <span>{insight}</span>
+                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400 mt-1.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <MarkdownMessage content={insight} />
+                          </div>
                         </li>
                       ))}
                     </ul>
