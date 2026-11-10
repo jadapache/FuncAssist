@@ -29,7 +29,8 @@ litellm.set_verbose = False
 
 def _handle_completion_error(err: Exception) -> Exception:
   err_str = str(err)
-  if "reduce max_tokens" in err_str or "OTPM" in err_str or "output tokens per minute" in err_str:
+  lower_err = err_str.lower()
+  if "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
     limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
     req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
     req_tokens = req_match.group(1) if req_match else "solicitada"
@@ -38,19 +39,32 @@ def _handle_completion_error(err: Exception) -> Exception:
       f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo. "
       "Te sugerimos seleccionar un modelo diferente en Configuración (Settings)."
     )
-  if "ITPM" in err_str or "input tokens per minute" in err_str or "Request too large for model" in err_str:
+  if "itpm" in lower_err or "input tokens per minute" in lower_err or "request too large for model" in lower_err:
     limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
     req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
     req_tokens = req_match.group(1) if req_match else "solicitada"
     limit_tokens = limit_match.group(1) if limit_match else "establecido"
     return RuntimeError(
-      f"El texto enviado ({req_tokens} tokens) supera el límite de {limit_tokens} tokens de entrada por minuto (ITPM) de este modelo en Groq. "
-      "Para audios o transcripciones extensas, selecciona Google Gemini (1M+ tokens sin costo) en Configuración."
+      f"El texto enviado ({req_tokens} tokens) supera el límite de {limit_tokens} tokens de entrada por minuto (ITPM) de este modelo. "
+      "Para audios o transcripciones extensas, selecciona un modelo con mayor cuota."
     )
-  if "contextwindowsizeexceeded" in err_str.lower() or "context length" in err_str.lower() or "context_window" in err_str.lower():
+  if "ratelimiterror" in lower_err or "rate limit reached" in lower_err or "rate_limit_exceeded" in lower_err or "429" in lower_err:
+    wait_match = re.search(r"try again in ([0-9.]+s?)", err_str, re.IGNORECASE)
+    wait_time = wait_match.group(1) if wait_match else "unos segundos"
+    limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
+    req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
+    if limit_match and req_match:
+      return RuntimeError(
+        f"Límite de tasa de tokens por minuto (TPM) alcanzado: ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
+        f"Espera {wait_time} o selecciona un modelo con mayor límite."
+      )
+    return RuntimeError(
+      f"Límite de peticiones por minuto alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo."
+    )
+  if "contextwindowsizeexceeded" in lower_err or "context length" in lower_err or "context_window" in lower_err:
     return RuntimeError(
       "La longitud del texto supera la ventana de contexto del modelo. "
-      "Te sugerimos seleccionar un modelo con ventana extendida como Google Gemini en Configuración."
+      "Te sugerimos seleccionar un modelo con ventana extendida."
     )
   return err
 
@@ -216,30 +230,3 @@ class LiteLLMProvider(AIProvider):
           delta_content = choice.delta.content
           if delta_content:
             yield delta_content
-
-
-
-# Backwards-compatible aliases mapping to the registry
-class OpenAIProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "gpt-4o-mini") -> None:
-    super().__init__("openai", api_key=api_key, default_model=default_model)
-
-
-class ClaudeProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "claude-3-5-haiku-latest") -> None:
-    super().__init__("claude", api_key=api_key, default_model=default_model)
-
-
-class GroqProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "llama-3.3-70b-versatile") -> None:
-    super().__init__("groq", api_key=api_key, default_model=default_model)
-
-
-class GeminiProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "gemini-1.5-flash") -> None:
-    super().__init__("gemini", api_key=api_key, default_model=default_model)
-
-
-class OllamaProvider(LiteLLMProvider):
-  def __init__(self, base_url: str, default_model: str = "qwen2.5:2b") -> None:
-    super().__init__("ollama", base_url=base_url, default_model=default_model)
