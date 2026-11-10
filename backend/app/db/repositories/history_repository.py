@@ -159,7 +159,22 @@ class ChatRepository:
         stmt = stmt.limit(limit)
       result = await db.execute(stmt)
       messages = result.scalars().all()
-      return [m.to_dict() for m in messages]
+      # Deduplicate consecutive identical messages or same id/content
+      seen_ids = set()
+      seen_hashes = set()
+      deduped = []
+      for m in messages:
+        if m.id and m.id in seen_ids:
+          continue
+        if m.id:
+          seen_ids.add(m.id)
+        # Check identical role + content hash to suppress duplicate spam rows
+        content_key = (m.role, (m.content or "").strip())
+        if content_key in seen_hashes and len(deduped) > 0 and (deduped[-1]["role"] == m.role and (deduped[-1]["content"] or "").strip() == (m.content or "").strip()):
+          continue
+        seen_hashes.add(content_key)
+        deduped.append(m.to_dict())
+      return deduped
 
   async def clear_session(self, session_id: str) -> bool:
     async with get_db() as db:

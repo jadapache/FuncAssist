@@ -460,6 +460,7 @@ async def handle_agentic_prompt(
             detail="Modelos GGUF no están admitidos en el backend.",
         )
 
+    template_content = await _load_active_template_content(req.template_id)
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
@@ -467,7 +468,7 @@ async def handle_agentic_prompt(
         sources=sources_to_use,
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
-        template_content=_load_active_template_content(req.template_id),
+        template_content=template_content,
         images=req.images,
         attached_docs=req.attached_docs,
         user_id=user_id,
@@ -599,6 +600,7 @@ async def handle_agentic_prompt_stream(
             detail="Modelos GGUF no están admitidos en el backend.",
         )
 
+    template_content = await _load_active_template_content(req.template_id)
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
@@ -606,7 +608,7 @@ async def handle_agentic_prompt_stream(
         sources=sources_to_use,
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
-        template_content=_load_active_template_content(req.template_id),
+        template_content=template_content,
         images=req.images,
         attached_docs=req.attached_docs,
         user_id=user_id,
@@ -846,6 +848,17 @@ def _format_stream_error(err: Exception) -> str:
         req_tokens = req_match.group(1) if req_match else "solicitada"
         limit_tokens = limit_match.group(1) if limit_match else "establecido"
         return f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo."
+    if "ratelimiterror" in lower_err or "rate limit reached" in lower_err or "rate_limit_exceeded" in lower_err or "429" in lower_err:
+        wait_match = re.search(r"try again in ([0-9.]+s?)", err_msg, re.IGNORECASE)
+        wait_time = wait_match.group(1) if wait_match else "unos segundos"
+        limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
+        req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
+        if limit_match and req_match:
+            return (
+                f"Límite de tasa de tokens por minuto (TPM) alcanzado en Groq ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
+                f"Espera {wait_time} o selecciona un modelo con mayor cuota como Llama 3.3 70B Versatile o Gemini Flash en Configuración."
+            )
+        return f"Límite de peticiones por minuto alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo en Configuración."
     return err_msg
 
 

@@ -52,17 +52,28 @@ async def save_draft(
     await chat_repo.save_session(payload)
 
     # 2. Save individual messages to PostgreSQL chat_messages
+    existing_messages = await chat_repo.get_session_messages(session_id=payload.get("id") or "default", limit=500, user_id=user_id)
+    existing_ids = {m.get("id") for m in existing_messages if m.get("id")}
+    existing_contents = {(m.get("role"), (m.get("content") or "").strip()) for m in existing_messages}
+
     for msg in body.messages:
       content = msg.get("content", "").strip()
-      if content:
+      msg_id = msg.get("id")
+      role = msg.get("role", "user")
+      key = (role, content)
+      if content and (not msg_id or msg_id not in existing_ids) and key not in existing_contents:
         await chat_repo.save_message(
           session_id=payload.get("id") or "default",
-          role=msg.get("role", "user"),
+          role=role,
           content=content,
           context_sources=msg.get("context_sources"),
           attachments=msg.get("attachments"),
           user_id=user_id,
+          id=msg_id,
         )
+        if msg_id:
+          existing_ids.add(msg_id)
+        existing_contents.add(key)
 
     # 3. Persist file-based draft backup
     saved = save_draft_session(payload)
