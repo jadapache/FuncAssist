@@ -168,13 +168,15 @@ async def run_grounded_feature(
     max_continuations = 3
     continuations_done = 0
     while is_artifact_truncated(accumulated_output) and continuations_done < max_continuations:
+        prev_len = len(accumulated_output)
         continuations_done += 1
         tail_context = accumulated_output[-800:] if len(accumulated_output) > 800 else accumulated_output
         continuation_prompt = (
-            "ATENCIÓN: Tu generación previa se interrumpió por el límite de tokens antes de cerrar el documento <artifact>.\n"
+            "ATENCIÓN: Tu generación previa se interrumpió antes de completar todo el documento.\n"
             f"El último fragmento emitido fue exactamente:\n\"\"\"{tail_context}\"\"\"\n\n"
-            "Continúa la redacción EXACTAMENTE en el punto exacto donde se cortó, completando todas las secciones "
-            "faltantes y cerrando finalmente con la etiqueta </artifact>. No repitas el texto ya emitido ni incluyas saludos."
+            "Continúa la redacción EXACTAMENTE en el punto donde se cortó, completando todas las secciones "
+            "faltantes sin repetir lo ya emitido ni agregar saludos ni notas introductorias. "
+            "Si estabas usando etiquetas <artifact>, ciérralas adecuadamente con </artifact> al terminar."
         )
         continuation_messages = [
             *prep.messages,
@@ -185,6 +187,8 @@ async def run_grounded_feature(
         if not next_part.text:
             break
         accumulated_output += next_part.text
+        if len(accumulated_output) <= prev_len:
+            break
 
     completion.text = accumulated_output
 
@@ -271,13 +275,15 @@ async def run_grounded_feature_stream(
     current_text = "".join(accumulated_text)
 
     while is_artifact_truncated(current_text) and continuations_done < max_continuations:
+        prev_len = len(current_text)
         continuations_done += 1
         tail_context = current_text[-800:] if len(current_text) > 800 else current_text
         continuation_prompt = (
-            "ATENCIÓN: Tu generación previa se interrumpió por el límite de tokens antes de cerrar el documento <artifact>.\n"
+            "ATENCIÓN: Tu generación previa se interrumpió antes de completar todo el documento.\n"
             f"El último fragmento emitido fue exactamente:\n\"\"\"{tail_context}\"\"\"\n\n"
-            "Continúa la redacción EXACTAMENTE en el punto exacto donde se cortó, completando todas las secciones "
-            "faltantes y cerrando finalmente con la etiqueta </artifact>. No repitas el texto ya emitido ni incluyas saludos."
+            "Continúa la redacción EXACTAMENTE en el punto donde se cortó, completando todas las secciones "
+            "faltantes sin repetir lo ya emitido ni agregar saludos ni notas introductorias. "
+            "Si estabas usando etiquetas <artifact>, ciérralas adecuadamente con </artifact> al terminar."
         )
         continuation_messages = [
             *prep.messages,
@@ -290,9 +296,9 @@ async def run_grounded_feature_stream(
             next_chunk_buffer.append(chunk)
             yield chunk
 
-        if not next_chunk_buffer:
-            break
         current_text = "".join(accumulated_text)
+        if len(current_text) <= prev_len or not next_chunk_buffer:
+            break
 
     full_output = "".join(accumulated_text)
     log_ai_call({
@@ -449,18 +455,20 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
         yield chunk
 
     # Detección de truncamiento y continuación automática (Auto-resume / Chunk stitching)
-    max_continuations = 3
+    max_continuations = 2
     continuations_done = 0
     current_text = "".join(accumulated_text)
 
     while is_artifact_truncated(current_text) and continuations_done < max_continuations:
+        prev_len = len(current_text)
         continuations_done += 1
         tail_context = current_text[-800:] if len(current_text) > 800 else current_text
         continuation_prompt = (
-            "ATENCIÓN: Tu generación previa se interrumpió por el límite de tokens antes de cerrar el documento <artifact>.\n"
+            "ATENCIÓN: Tu generación previa se interrumpió antes de completar todo el documento.\n"
             f"El último fragmento emitido fue exactamente:\n\"\"\"{tail_context}\"\"\"\n\n"
-            "Continúa la redacción EXACTAMENTE en el punto exacto donde se cortó, completando todas las secciones "
-            "faltantes y cerrando finalmente con la etiqueta </artifact>. No repitas el texto ya emitido ni incluyas saludos."
+            "Continúa la redacción EXACTAMENTE en el punto donde se cortó, completando todas las secciones "
+            "faltantes sin repetir lo ya emitido ni agregar saludos ni notas introductorias. "
+            "Si estabas usando etiquetas <artifact>, ciérralas adecuadamente con </artifact> al terminar."
         )
         continuation_messages = [
             AIMessage(role="system", content=sys_prompt),
@@ -474,9 +482,10 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
             next_chunk_buffer.append(chunk)
             yield chunk
 
-        if not next_chunk_buffer:
-            break
         current_text = "".join(accumulated_text)
+        # Si la continuación no añadió nuevo contenido real, evitar ciclo infinito
+        if len(current_text) <= prev_len or not next_chunk_buffer:
+            break
 
     full_output = "".join(accumulated_text)
     log_ai_call({

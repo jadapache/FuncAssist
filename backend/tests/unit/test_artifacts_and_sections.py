@@ -106,6 +106,19 @@ class TestTolerantArtifactsParser:
         no_artifact = "Solo un mensaje normal de chat."
         assert is_artifact_truncated(no_artifact) is False
 
+        # Long text ending abruptly in a markdown header or section
+        long_doc_with_cutoff_header = ("Lorem ipsum dolor sit amet " * 40) + "\n\n2.5 ACTIVIDADES MANUALES O EXTERNAS AL SISTEMA"
+        assert is_artifact_truncated(long_doc_with_cutoff_header) is True
+
+        long_doc_with_cutoff_benefit = ("Lorem ipsum dolor sit amet " * 40) + "\n\nBENEFICIO ESPERADO"
+        assert is_artifact_truncated(long_doc_with_cutoff_benefit) is True
+
+        long_doc_with_cutoff_bullet = ("Lorem ipsum dolor sit amet " * 40) + "\n\n*"
+        assert is_artifact_truncated(long_doc_with_cutoff_bullet) is True
+
+        long_doc_complete = ("Lorem ipsum dolor sit amet " * 40) + "\n\nEste es el cierre formal del informe."
+        assert is_artifact_truncated(long_doc_complete) is False
+
     def test_artifacts_to_dict_serialization(self):
         arts = [LLMArtifact(title="T1", extension="docx", content="C1", index=0)]
         dicts = artifacts_to_dict(arts)

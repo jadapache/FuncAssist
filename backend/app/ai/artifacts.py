@@ -41,15 +41,45 @@ class LLMArtifact:
 
 
 def is_artifact_truncated(raw_text: str) -> bool:
-    """Detecta si hay un bloque <artifact> abierto que no fue cerrado."""
-    if not raw_text or "<artifact" not in raw_text.lower():
+    """Detecta si la generación se cortó antes de finalizar.
+    
+    Verifica:
+    1. Si hay una etiqueta <artifact ...> abierta sin su correspondiente </artifact>.
+    2. Si el texto (markdown directo o dentro de artefacto) termina abruptamente
+       a mitad de una sección (ej. encabezado solo como '## BENEFICIO ESPERADO'),
+       a mitad de una línea o lista de viñetas, o con un bloque de código sin cerrar.
+    """
+    if not raw_text or not raw_text.strip():
         return False
-    openings = list(_ARTIFACT_OPEN.finditer(raw_text))
-    if not openings:
-        return False
-    # Contar cierres completos
-    closings = list(re.finditer(r"</artifact>", raw_text, re.IGNORECASE))
-    return len(closings) < len(openings)
+
+    # 1. Chequeo de etiquetas <artifact>
+    if "<artifact" in raw_text.lower():
+        openings = list(_ARTIFACT_OPEN.finditer(raw_text))
+        if openings:
+            closings = list(re.finditer(r"</artifact>", raw_text, re.IGNORECASE))
+            if len(closings) < len(openings):
+                return True
+
+    # 2. Chequeo heurístico para textos extensos (documentos o respuestas largas cortadas por token limit)
+    stripped = raw_text.rstrip()
+    if len(stripped) > 500:
+        # Termina en encabezado de markdown o número de sección sin contenido
+        # ej: "2.5 ACTIVIDADES MANUALES", "### BENEFICIO ESPERADO", "**BENEFICIO ESPERADO**"
+        last_line = stripped.splitlines()[-1].strip()
+        if re.match(r"^(#{1,6}\s+|(?:\d+\.)+\d*\s+|[A-Z0-9\s]{4,}:?\s*$|\*\*[^*]+\*\*\s*$)", last_line):
+            return True
+        # Termina en viñeta vacía o incompleta (ej. "-", "*", "1.")
+        if re.match(r"^[-*]\s*$", last_line) or re.match(r"^\d+\.\s*$", last_line):
+            return True
+        # Termina con un bloque de código markdown sin cerrar (número impar de triple backticks)
+        backtick_count = stripped.count("```")
+        if backtick_count % 2 != 0:
+            return True
+        # Termina a mitad de una fila de tabla markdown incompleta (ej: "| Col1 |")
+        if last_line.startswith("|") and not last_line.endswith("|"):
+            return True
+
+    return False
 
 
 def extract_artifacts(raw_text: str) -> tuple[list[LLMArtifact], str]:
