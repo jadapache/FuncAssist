@@ -28,21 +28,101 @@ export function formatTimestamp(seconds: number): string {
   return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`
 }
 
+export function condenseTranscriptForBrowser(transcript: string, maxChars: number = 8000): string {
+  if (!transcript || transcript.length <= maxChars) {
+    return transcript
+  }
+
+  const lines = transcript.split('\n').filter((l) => l.trim().length > 0)
+  if (lines.length <= 4) {
+    return transcript.slice(0, maxChars)
+  }
+
+  const headBudget = Math.floor(maxChars * 0.25)
+  const tailBudget = Math.floor(maxChars * 0.25)
+  const midBudget = maxChars - headBudget - tailBudget
+
+  const headLines: string[] = []
+  let headChars = 0
+  for (const line of lines) {
+    if (headChars + line.length + 1 > headBudget) break
+    headLines.push(line)
+    headChars += line.length + 1
+  }
+
+  const tailLines: string[] = []
+  let tailChars = 0
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]
+    if (tailChars + line.length + 1 > tailBudget) break
+    tailLines.unshift(line)
+    tailChars += line.length + 1
+  }
+
+  const midPool = lines.slice(headLines.length, Math.max(headLines.length, lines.length - tailLines.length))
+  const midLines: string[] = []
+  if (midPool.length > 0) {
+    const step = Math.max(1, Math.floor(midPool.length / 12))
+    let midChars = 0
+    for (let i = 0; i < midPool.length; i += step) {
+      const line = midPool[i]
+      if (midChars + line.length + 1 > midBudget) break
+      midLines.push(line)
+      midChars += line.length + 1
+    }
+  }
+
+  const note = '[Nota: Transcripción extensa sintetizada cronológicamente para adaptarse a la memoria del navegador.]'
+  const parts = [note]
+  if (headLines.length > 0) parts.push(headLines.join('\n'))
+  if (midLines.length > 0) parts.push('... [Continuación del debate] ...\n' + midLines.join('\n'))
+  if (tailLines.length > 0) parts.push('... [Acuerdos y cierre] ...\n' + tailLines.join('\n'))
+
+  return parts.join('\n\n')
+}
+
 function formatSegmentsForPrompt(
   segments?: Array<{ start?: number; speaker?: string; text?: string }>,
   rawText?: string,
 ): string {
   if (segments && segments.length > 0) {
-    return segments
-      .map((seg) => {
-        const secs = seg.start || 0
-        const m = Math.floor(secs / 60)
-        const s = Math.floor(secs % 60)
+    const lines: string[] = []
+    let currentSpeaker: string | null = null
+    let currentStart = 0
+    let currentTexts: string[] = []
+
+    const flush = () => {
+      if (currentTexts.length > 0 && currentSpeaker !== null) {
+        const m = Math.floor(currentStart / 60)
+        const s = Math.floor(currentStart % 60)
         const ts = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-        const spk = seg.speaker || 'Participante'
-        return `[${ts}] ${spk}: ${seg.text || ''}`
-      })
-      .join('\n')
+        const merged = currentTexts.join(' ').trim()
+        if (merged) {
+          lines.push(`[${ts}] ${currentSpeaker}: ${merged}`)
+        }
+      }
+    }
+
+    for (const seg of segments) {
+      const spk = seg.speaker || 'Participante'
+      const txt = (seg.text || '').trim()
+      if (!txt) continue
+      const start = seg.start || 0
+
+      if (spk === currentSpeaker) {
+        currentTexts.push(txt)
+      } else {
+        flush()
+        currentSpeaker = spk
+        currentStart = start
+        currentTexts = [txt]
+      }
+    }
+    flush()
+
+    if (lines.length > 0) {
+      return lines.join('\n')
+    }
   }
   return rawText || ''
 }
@@ -306,9 +386,10 @@ export function useTranscriptionActions(
           const systemPrompt = prompt?.system?.trim() || defaultSystem
           const userTemplate = prompt?.user_template?.trim() || defaultUserTemplate
 
+          const safeTranscript = condenseTranscriptForBrowser(transcriptContent, 8000)
           const userContent = userTemplate
             .replace('{title}', meetingTitle)
-            .replace('{transcript}', transcriptContent)
+            .replace('{transcript}', safeTranscript)
             .replace('{rubric}', rubricText)
 
           const genResult = await inferenceService.generateMessages(

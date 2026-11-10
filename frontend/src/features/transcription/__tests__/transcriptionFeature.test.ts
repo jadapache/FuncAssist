@@ -6,6 +6,7 @@ import {
   LOCAL_STORAGE_ACTIVE_JOBS,
 } from '../utils/transcriptionStorage'
 import { encodeFloat32ToWavBlob } from '../utils/audioExtractor'
+import { condenseTranscriptForBrowser } from '../hooks/useTranscriptionActions'
 import type { TranscriptionProgress } from '../api/transcriptionApi'
 
 describe('Transcription Feature - Frontend Utilities', () => {
@@ -75,6 +76,23 @@ describe('Transcription Feature - Frontend Utilities', () => {
       const buffer = await blob.arrayBuffer()
       const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)))
       expect(header).toBe('RIFF')
+    })
+  })
+
+  describe('Transcript Condensation for WebLLM Browser Execution', () => {
+    it('returns unmodified transcript when within character budget', () => {
+      const shortText = '[00:00] Participante: Hola\n[00:10] Participante: Fin'
+      expect(condenseTranscriptForBrowser(shortText, 500)).toBe(shortText)
+    })
+
+    it('condenses long transcripts and includes timeline representation', () => {
+      const lines = Array.from({ length: 60 }, (_, i) => `[0${Math.floor(i / 10)}:${(i % 10) * 6}] Juan: Debate punto ${i}`)
+      const longTranscript = lines.join('\n')
+      const condensed = condenseTranscriptForBrowser(longTranscript, 300)
+
+      expect(condensed.length).toBeLessThan(longTranscript.length)
+      expect(condensed).toContain('[Nota: Transcripción extensa sintetizada')
+      expect(condensed).toContain('Juan')
     })
   })
 })
