@@ -15,7 +15,9 @@ import {
 } from 'lucide-react'
 import { inferenceService } from '../../ai/services/InferenceService'
 import { transcriptionApi } from '../api/transcriptionApi'
-import { api, type CorporateTemplate } from '../../../api/client'
+import { condenseTranscriptForBrowser } from '../hooks/useTranscriptionActions'
+import { api, API_BASE, getAuthHeaders, type CorporateTemplate } from '../../../api/client'
+import { draftsApi } from '../../../features/document/api/draftsApi'
 import { useToast } from '../../../context/ToastContext'
 
 interface GenerateModalProps {
@@ -35,6 +37,7 @@ interface GeneratedDocState {
 
 export const GenerateModal: React.FC<GenerateModalProps> = ({
   isOpen,
+  transcriptionId,
   meetingTitle,
   onClose,
 }) => {
@@ -87,18 +90,42 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
         const detail = await api.getTemplateContent(template.id)
         templateContent = detail.content || ''
       } catch {
-        // Fallback to title/module prompt if content cannot be read
+        // Fallback si no se puede leer el contenido de la plantilla
+      }
+
+      let transcriptionContext = ''
+      if (transcriptionId) {
+        try {
+          const transResult = await transcriptionApi.getTranscriptionResult(transcriptionId)
+          const rawText = transResult.text || ''
+          const summary = transResult.summary?.summary_text || ''
+          const insights = transResult.summary?.key_insights?.join('\n- ') || ''
+
+          // Evitar exceder límites ITPM de modelos, se preserva el resumen e insights completos, y se condensa la transcripción si excede 10,000 caracteres
+          const safeText = condenseTranscriptForBrowser(rawText, 10000)
+
+          const parts = [
+            `Título de la Reunión: ${transResult.metadata?.title || meetingTitle || 'Reunión'}`,
+            summary ? `Resumen y Acuerdos de la Reunión:\n${summary}` : '',
+            insights ? `Puntos Clave y Decisiones:\n- ${insights}` : '',
+            safeText ? `Transcripción Relevante de la Discusión:\n${safeText}` : '',
+          ].filter(Boolean)
+
+          transcriptionContext = parts.join('\n\n')
+        } catch (fetchErr) {
+          console.warn('No se pudo recuperar la transcripción completa:', fetchErr)
+        }
       }
 
       const instructions = [
-        `Genera el documento corporativo "${template.title}" para el módulo "${template.module}" a partir de la transcripción y contexto de la reunión: ${meetingTitle || ''}.`,
+        `Genera el documento corporativo "${template.title}" para el módulo "${template.module}" basándote rigurosamente en la información de la transcripción y el contexto de la reunión.`,
         templateContent ? `\nEstructura y directrices de la plantilla de referencia:\n${templateContent}` : '',
-        `\nCompleta todas las secciones requeridas, tablas y criterios funcionales con alto nivel de detalle técnico.`,
+        `\nCompleta todas las secciones requeridas, tablas y criterios funcionales con alto nivel de detalle técnico sin omitir datos provistos.`,
       ].filter(Boolean).join('\n')
 
       const res = await inferenceService.generateArtifact({
         instructions,
-        context: meetingTitle ? `Reunión: ${meetingTitle}` : undefined,
+        context: transcriptionContext || (meetingTitle ? `Reunión: ${meetingTitle}` : undefined),
       })
 
       const text = res.content || 'Documento generado con éxito.'
@@ -125,10 +152,21 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     try {
       setIsExporting(true)
       const isXlsx = generatedDoc.fileType.includes('xlsx') || generatedDoc.fileType.includes('excel')
-      const blob = isXlsx
-        ? await transcriptionApi.exportInventarioXlsx(generatedDoc.content, generatedDoc.title)
-        : await transcriptionApi.exportLevantamientoDocx(generatedDoc.content, generatedDoc.title)
+      const endpoint = isXlsx
+        ? `${API_BASE}/api/doc-agent/export-xlsx`
+        : `${API_BASE}/api/doc-agent/export-docx`
 
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ title: generatedDoc.title, content: generatedDoc.content }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Error al exportar (${response.status})`)
+      }
+
+      const blob = await response.blob()
       const ext = isXlsx ? 'xlsx' : 'docx'
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -147,18 +185,58 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     }
   }
 
-  const handleOpenWorkspace = () => {
+  const handleOpenWorkspace = async () => {
     if (!generatedDoc) return
+
+    const rawModule = (generatedDoc.module || 'mejoras').trim().toLowerCase()
+    const targetSlug =
+      rawModule === 'inventario'
+        ? 'inventario'
+        : rawModule === 'levantamiento'
+        ? 'levantamiento'
+        : rawModule === 'mejoras' || rawModule === 'funcional' || rawModule === 'general'
+        ? 'mejoras'
+        : rawModule
+
+    const isXlsx = generatedDoc.fileType.includes('xlsx') || generatedDoc.fileType.includes('excel')
+    const ext = isXlsx ? 'xlsx' : 'docx'
+    const newSessionId = crypto.randomUUID()
+    const nowIso = new Date().toISOString()
+
+    const newArtifact = {
+      id: crypto.randomUUID(),
+      title: generatedDoc.title,
+      extension: ext as 'docx' | 'xlsx' | 'txt',
+      content: generatedDoc.content,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    }
+
+    try {
+      await draftsApi.saveDraft({
+        id: newSessionId,
+        name: generatedDoc.title,
+        title: generatedDoc.title,
+        feature_slug: targetSlug,
+        specification: targetSlug,
+        lastInteraction: nowIso,
+        messages: [
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `He generado el documento "${generatedDoc.title}" a partir de la transcripción de la reunión. Puedes revisarlo, editarlo o exportarlo.`,
+            timestamp: nowIso,
+          },
+        ],
+        documentContent: generatedDoc.content,
+        artifacts: [newArtifact],
+      })
+    } catch (saveErr) {
+      console.warn('No se pudo guardar la sesión de borrador previa:', saveErr)
+    }
+
     onClose()
-    const targetModule = generatedDoc.module.toLowerCase()
-    const path = targetModule === 'inventario'
-      ? '/funcional/inventario'
-      : targetModule === 'levantamiento'
-      ? '/funcional/levantamiento'
-      : targetModule === 'mejoras'
-      ? '/funcional/mejoras'
-      : `/funcional/${targetModule}`
-    navigate(path)
+    navigate(`/funcional/${targetSlug}/${newSessionId}`)
   }
 
   const handleResetToOptions = () => {
