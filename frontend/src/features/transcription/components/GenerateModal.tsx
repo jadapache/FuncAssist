@@ -1,5 +1,5 @@
 import type React from 'react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   X,
@@ -11,9 +11,11 @@ import {
   CheckCircle2,
   Loader2,
   ChevronLeft,
+  FileCode,
 } from 'lucide-react'
 import { inferenceService } from '../../ai/services/InferenceService'
 import { transcriptionApi } from '../api/transcriptionApi'
+import { api, type CorporateTemplate } from '../../../api/client'
 import { useToast } from '../../../context/ToastContext'
 
 interface GenerateModalProps {
@@ -23,6 +25,14 @@ interface GenerateModalProps {
   onClose: () => void
 }
 
+interface GeneratedDocState {
+  templateId: string
+  content: string
+  title: string
+  fileType: string
+  module: string
+}
+
 export const GenerateModal: React.FC<GenerateModalProps> = ({
   isOpen,
   meetingTitle,
@@ -30,41 +40,78 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
 }) => {
   const { toast } = useToast()
   const navigate = useNavigate()
-  const [selectedDoc, setSelectedDoc] = useState<'inventario' | 'levantamiento' | null>(null)
+  const [templates, setTemplates] = useState<CorporateTemplate[]>([])
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
-  const [generatedDoc, setGeneratedDoc] = useState<{
-    type: 'inventario' | 'levantamiento'
-    content: string
-    title: string
-  } | null>(null)
+  const [generatedDoc, setGeneratedDoc] = useState<GeneratedDocState | null>(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    let isMounted = true
+
+    const loadTemplates = async () => {
+      setIsLoadingTemplates(true)
+      try {
+        const res = await api.getTemplates()
+        if (isMounted) {
+          setTemplates(res.templates || [])
+        }
+      } catch (err: unknown) {
+        if (isMounted) {
+          const msg = err instanceof Error ? err.message : 'Error al cargar plantillas'
+          toast.error(`No se pudieron cargar las plantillas: ${msg}`)
+        }
+      } finally {
+        if (isMounted) setIsLoadingTemplates(false)
+      }
+    }
+
+    void loadTemplates()
+
+    return () => {
+      isMounted = false
+    }
+  }, [isOpen, toast])
 
   if (!isOpen) return null
 
-  const handleGenerate = async (type: 'inventario' | 'levantamiento') => {
-    setSelectedDoc(type)
+  const handleGenerate = async (template: CorporateTemplate) => {
+    setSelectedTemplateId(template.id)
     setIsGenerating(true)
 
     try {
-      const docQuery =
-        type === 'inventario'
-          ? `Genera el Inventario de Requerimientos y Contexto de Proyecto a partir de la transcripción de la reunión: ${meetingTitle || ''}`
-          : `Genera el Levantamiento Detallado de Requerimientos Funcionales, Casos de Uso y Matriz de Trazabilidad a partir de la transcripción de la reunión: ${meetingTitle || ''}`
+      let templateContent = ''
+      try {
+        const detail = await api.getTemplateContent(template.id)
+        templateContent = detail.content || ''
+      } catch {
+        // Fallback to title/module prompt if content cannot be read
+      }
+
+      const instructions = [
+        `Genera el documento corporativo "${template.title}" para el módulo "${template.module}" a partir de la transcripción y contexto de la reunión: ${meetingTitle || ''}.`,
+        templateContent ? `\nEstructura y directrices de la plantilla de referencia:\n${templateContent}` : '',
+        `\nCompleta todas las secciones requeridas, tablas y criterios funcionales con alto nivel de detalle técnico.`,
+      ].filter(Boolean).join('\n')
 
       const res = await inferenceService.generateArtifact({
-        instructions: docQuery,
+        instructions,
         context: meetingTitle ? `Reunión: ${meetingTitle}` : undefined,
       })
 
       const text = res.content || 'Documento generado con éxito.'
-      const docTitle = `${type === 'inventario' ? 'Inventario' : 'Levantamiento'} - ${meetingTitle || 'Reunion'}`
+      const docTitle = `${template.title} - ${meetingTitle || 'Reunion'}`
 
       setGeneratedDoc({
-        type,
+        templateId: template.id,
         content: text,
         title: docTitle,
+        fileType: (template.file_type || 'docx').toLowerCase(),
+        module: template.module || 'general',
       })
-      toast.success(`${type === 'inventario' ? 'Inventario' : 'Levantamiento'} generado con IA.`)
+      toast.success(`"${template.title}" generado con IA.`)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error desconocido'
       toast.error(`Error al generar documento: ${msg}`)
@@ -77,12 +124,12 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     if (!generatedDoc) return
     try {
       setIsExporting(true)
-      const isInventario = generatedDoc.type === 'inventario'
-      const blob = isInventario
+      const isXlsx = generatedDoc.fileType.includes('xlsx') || generatedDoc.fileType.includes('excel')
+      const blob = isXlsx
         ? await transcriptionApi.exportInventarioXlsx(generatedDoc.content, generatedDoc.title)
         : await transcriptionApi.exportLevantamientoDocx(generatedDoc.content, generatedDoc.title)
 
-      const ext = isInventario ? 'xlsx' : 'docx'
+      const ext = isXlsx ? 'xlsx' : 'docx'
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -103,12 +150,132 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
   const handleOpenWorkspace = () => {
     if (!generatedDoc) return
     onClose()
-    navigate(`/funcional/${generatedDoc.type}`)
+    const targetModule = generatedDoc.module.toLowerCase()
+    const path = targetModule === 'inventario'
+      ? '/funcional/inventario'
+      : targetModule === 'levantamiento'
+      ? '/funcional/levantamiento'
+      : targetModule === 'mejoras'
+      ? '/funcional/mejoras'
+      : `/funcional/${targetModule}`
+    navigate(path)
   }
 
   const handleResetToOptions = () => {
     setGeneratedDoc(null)
-    setSelectedDoc(null)
+    setSelectedTemplateId(null)
+  }
+
+  const renderTemplateCard = (template: CorporateTemplate) => {
+    const isSelected = selectedTemplateId === template.id
+    const isCurrentGenerating = isGenerating && isSelected
+    const isXlsx = (template.file_type || '').toLowerCase().includes('xlsx')
+    const IconComponent = isXlsx ? FileSpreadsheet : FileText
+    const formatBadge = isXlsx ? 'Excel (.xlsx)' : 'Word (.docx)'
+
+    return (
+      <div
+        key={template.id}
+        onClick={() => !isGenerating && handleGenerate(template)}
+        className={`card p-5 border transition rounded-2xl cursor-pointer flex flex-col justify-between space-y-4 hover:shadow-md ${
+          isSelected && isGenerating
+            ? 'border-blue-500 bg-blue-50/40 ring-2 ring-blue-500/20'
+            : isXlsx
+            ? 'border-slate-200 hover:border-blue-400 bg-white'
+            : 'border-slate-200 hover:border-emerald-400 bg-white'
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3.5">
+            <div
+              className={`flex h-11 w-11 items-center justify-center rounded-xl ring-1 shadow-xs ${
+                isXlsx
+                  ? 'bg-blue-50 text-[#002777] ring-blue-100'
+                  : 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+              }`}
+            >
+              <IconComponent className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-slate-900">{template.title}</h4>
+                <span
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                    isXlsx
+                      ? 'bg-blue-100/70 text-[#002777]'
+                      : 'bg-emerald-100/70 text-emerald-800'
+                  }`}
+                >
+                  {formatBadge}
+                </span>
+                {template.module && (
+                  <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-medium">
+                    {template.module}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {template.tags && template.tags.length > 0
+                  ? `Secciones: ${template.tags.slice(0, 4).join(', ')}${template.tags.length > 4 ? '...' : ''}`
+                  : `Plantilla corporativa registrada: ${template.filename}`}
+              </p>
+            </div>
+          </div>
+
+          {isCurrentGenerating ? (
+            <Loader2 className="h-5 w-5 animate-spin text-[#002777] shrink-0" />
+          ) : (
+            <Sparkles className="h-5 w-5 text-slate-400 group-hover:text-blue-600 shrink-0" />
+          )}
+        </div>
+
+        <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
+          <span className="text-slate-400 text-[11px]">
+            {template.module ? `Módulo: ${template.module}` : 'Plantilla Corporativa'}
+          </span>
+          <span
+            className={`font-bold flex items-center gap-1 ${
+              isXlsx ? 'text-[#002777]' : 'text-emerald-700'
+            }`}
+          >
+            {isCurrentGenerating ? 'Generando...' : 'Generar ahora →'}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  const renderContent = () => {
+    if (isLoadingTemplates) {
+      return (
+        <div className="py-12 flex flex-col items-center justify-center space-y-3 text-slate-500">
+          <Loader2 className="h-6 w-6 animate-spin text-[#002777]" />
+          <span className="text-xs font-medium">Cargando plantillas corporativas...</span>
+        </div>
+      )
+    }
+
+    if (templates.length === 0) {
+      return (
+        <div className="py-10 px-4 text-center space-y-3 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+          <FileCode className="h-8 w-8 text-slate-400 mx-auto" />
+          <div className="space-y-1">
+            <h4 className="text-sm font-semibold text-slate-700">
+              No hay plantillas corporativas registradas
+            </h4>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              Puedes configurar y subir plantillas desde la sección de Configuración de Plantillas.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="grid grid-cols-1 gap-4 pt-1">
+        {templates.map(renderTemplateCard)}
+      </div>
+    )
   }
 
   return (
@@ -143,6 +310,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition"
+            title="Cerrar"
           >
             <X className="h-5 w-5" />
           </button>
@@ -153,99 +321,9 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
           {!generatedDoc ? (
             <div className="space-y-4">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Selecciona el tipo de documento a estructurar a partir del contexto y la transcripción de la reunión.
+                Selecciona la plantilla corporativa a estructurar a partir del contexto y la transcripción de la reunión.
               </p>
-
-              {/* Options Cards Grid */}
-              <div className="grid grid-cols-1 gap-4 pt-1">
-                {/* Option 1: Inventario XLSX */}
-                <div
-                  onClick={() => !isGenerating && handleGenerate('inventario')}
-                  className={`card p-5 border transition rounded-2xl cursor-pointer flex flex-col justify-between space-y-4 hover:shadow-md ${
-                    selectedDoc === 'inventario' && isGenerating
-                      ? 'border-blue-500 bg-blue-50/40 ring-2 ring-blue-500/20'
-                      : 'border-slate-200 hover:border-blue-400 bg-white'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3.5">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-[#002777] ring-1 ring-blue-100 shadow-xs">
-                        <FileSpreadsheet className="h-6 w-6 text-[#002777]" />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-slate-900">
-                            Inventario de Requerimientos (.xlsx)
-                          </h4>
-                          <span className="px-2 py-0.5 rounded-md bg-blue-100/70 text-[#002777] text-[10px] font-bold">
-                            Excel
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Visión inicial y catálogo tabular. Consolida antecedentes, stakeholders, objetivos SMART y matriz de requerimientos preliminares (INV-001).
-                        </p>
-                      </div>
-                    </div>
-
-                    {isGenerating && selectedDoc === 'inventario' ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-[#002777] shrink-0" />
-                    ) : (
-                      <Sparkles className="h-5 w-5 text-slate-400 group-hover:text-blue-600 shrink-0" />
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
-                    <span className="text-slate-400 text-[11px]">Paso 1 Recomendado</span>
-                    <span className="font-bold text-[#002777] flex items-center gap-1">
-                      {isGenerating && selectedDoc === 'inventario' ? 'Generando...' : 'Generar ahora →'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Option 2: Levantamiento DOCX */}
-                <div
-                  onClick={() => !isGenerating && handleGenerate('levantamiento')}
-                  className={`card p-5 border transition rounded-2xl cursor-pointer flex flex-col justify-between space-y-4 hover:shadow-md ${
-                    selectedDoc === 'levantamiento' && isGenerating
-                      ? 'border-emerald-500 bg-emerald-50/40 ring-2 ring-emerald-500/20'
-                      : 'border-slate-200 hover:border-emerald-400 bg-white'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3.5">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 shadow-xs">
-                        <FileText className="h-6 w-6 text-emerald-600" />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-slate-900">
-                            Levantamiento Detallado de Requerimientos (.docx)
-                          </h4>
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-100/70 text-emerald-800 text-[10px] font-bold">
-                            Word
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Especificación funcional completa. Detalla requerimientos funcionales con criterios de aceptación (Given-When-Then), User Stories y Casos de Uso.
-                        </p>
-                      </div>
-                    </div>
-
-                    {isGenerating && selectedDoc === 'levantamiento' ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-emerald-600 shrink-0" />
-                    ) : (
-                      <Sparkles className="h-5 w-5 text-slate-400 group-hover:text-emerald-600 shrink-0" />
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
-                    <span className="text-slate-400 text-[11px]">Paso 2 Detallado</span>
-                    <span className="font-bold text-emerald-700 flex items-center gap-1">
-                      {isGenerating && selectedDoc === 'levantamiento' ? 'Generando...' : 'Generar ahora →'}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              {renderContent()}
             </div>
           ) : (
             /* Document Preview */
@@ -256,7 +334,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                   Documento Generado Exitosamente
                 </span>
                 <span className="text-xs font-semibold text-slate-500">
-                  Formato: {generatedDoc.type === 'inventario' ? 'Excel (.xlsx)' : 'Word (.docx)'}
+                  Formato: {generatedDoc.fileType.includes('xlsx') ? 'Excel (.xlsx)' : 'Word (.docx)'}
                 </span>
               </div>
 
@@ -267,45 +345,35 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer */}
-        <div className="flex items-center justify-between px-7 py-4.5 bg-slate-50 border-t border-slate-100 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 rounded-xl transition"
-          >
-            Cerrar
-          </button>
+        {/* Modal Actions when generated */}
+        {generatedDoc && (
+          <div className="flex items-center justify-end gap-2.5 px-7 py-4.5 bg-slate-50 border-t border-slate-100 shrink-0">
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={isExporting}
+              className="btn-primary px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md shadow-blue-900/10"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>
+                {isExporting
+                  ? 'Descargando...'
+                  : generatedDoc.fileType.includes('xlsx')
+                  ? 'Descargar en Excel (.xlsx)'
+                  : 'Descargar en Word (.docx)'}
+              </span>
+            </button>
 
-          {generatedDoc && (
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={handleDownload}
-                disabled={isExporting}
-                className="btn-primary px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md shadow-blue-900/10"
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span>
-                  {isExporting
-                    ? 'Descargando...'
-                    : generatedDoc.type === 'inventario'
-                    ? 'Descargar en Excel (.xlsx)'
-                    : 'Descargar en Word (.docx)'}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleOpenWorkspace}
-                className="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-[#002777] rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-blue-200"
-              >
-                <span>Editar en Workspace</span>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-        </div>
+            <button
+              type="button"
+              onClick={handleOpenWorkspace}
+              className="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-[#002777] rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-blue-200"
+            >
+              <span>Editar en Workspace</span>
+              <ExternalLink className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

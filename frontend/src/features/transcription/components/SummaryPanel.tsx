@@ -26,7 +26,7 @@ interface SummaryPanelProps {
   onToggleDownloadMenu: () => void
   onGenerateSummary: () => void
   onCopySummary: () => void
-  onDownloadTxt: () => void
+  onDownloadMd: () => void
   onDownloadJson: () => void
 }
 
@@ -47,16 +47,16 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
   onToggleDownloadMenu,
   onGenerateSummary,
   onCopySummary,
-  onDownloadTxt,
+  onDownloadMd,
   onDownloadJson,
 }) => {
   const downloadItems = [
     {
-      label: 'Texto (.txt)',
-      description: 'Formato lectura limpia',
+      label: 'Texto (.md)',
+      description: 'Formato Markdown limpio',
       icon: 'text' as const,
       color: 'blue' as const,
-      onSelect: onDownloadTxt,
+      onSelect: onDownloadMd,
     },
     {
       label: 'Estructurado (.json)',

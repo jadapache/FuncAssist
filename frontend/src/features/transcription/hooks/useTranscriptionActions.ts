@@ -624,21 +624,26 @@ export function useTranscriptionActions(
     toast.success('Resumen copiado al portapapeles.')
   }, [isSummaryReady, summaryText, summaryParagraphs, keyInsights, toast])
 
-  // Download summary as TXT
-  const handleDownloadSummaryTxt = useCallback(() => {
+  // Download summary as Markdown (.md)
+  const handleDownloadSummaryMd = useCallback(() => {
     if (!displayResult || !isSummaryReady) return
     const title = displayResult.metadata?.title || 'Resumen'
     const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_')
 
     let content = summaryText
     if (!content) {
-      content = `Summary\n\n`
-      content += `${summaryParagraphs.join('\n\n')}\n\n`
-      content += `Key Insights\n\n`
-      content += keyInsights.map((ki) => `• ${ki}`).join('\n\n')
+      content = `# Resumen: ${title}\n\n`
+      if (summaryParagraphs.length > 0) {
+        content += `## Puntos Clave\n\n${summaryParagraphs.join('\n\n')}\n\n`
+      }
+      if (keyInsights.length > 0) {
+        content += `## Insights Principales\n\n`
+        content += keyInsights.map((ki) => `- ${ki}`).join('\n')
+        content += '\n'
+      }
     }
 
-    downloadFile(content, `Resumen_${safeTitle}.txt`, 'text/plain;charset=utf-8')
+    downloadFile(content, `Resumen_${safeTitle}.md`, 'text/markdown;charset=utf-8')
     setShowSummaryDownloadMenu(false)
   }, [displayResult, isSummaryReady, summaryText, summaryParagraphs, keyInsights])
 
@@ -697,7 +702,7 @@ export function useTranscriptionActions(
     handleDownloadTranscriptTxt,
     handleDownloadTranscriptJson,
     handleCopySummary,
-    handleDownloadSummaryTxt,
+    handleDownloadSummaryMd,
     handleDownloadSummaryJson,
   }
 }

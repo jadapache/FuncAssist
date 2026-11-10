@@ -66,7 +66,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
     handleDownloadTranscriptTxt,
     handleDownloadTranscriptJson,
     handleCopySummary,
-    handleDownloadSummaryTxt,
+    handleDownloadSummaryMd,
     handleDownloadSummaryJson,
   } = useTranscriptionActions(
     transcriptionId,
@@ -225,7 +225,7 @@ export const TranscriptionStudio: React.FC<TranscriptionStudioProps> = ({
           onToggleDownloadMenu={() => setShowSummaryDownloadMenu((prev) => !prev)}
           onGenerateSummary={() => handleGenerateSummary()}
           onCopySummary={handleCopySummary}
-          onDownloadTxt={handleDownloadSummaryTxt}
+          onDownloadMd={handleDownloadSummaryMd}
           onDownloadJson={handleDownloadSummaryJson}
         />
       </div>
