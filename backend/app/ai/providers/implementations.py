@@ -36,7 +36,21 @@ def _handle_completion_error(err: Exception) -> Exception:
     limit_tokens = limit_match.group(1) if limit_match else "establecido"
     return RuntimeError(
       f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo. "
-      f"Te sugerimos seleccionar un modelo diferente en Configuración (Settings)."
+      "Te sugerimos seleccionar un modelo diferente en Configuración (Settings)."
+    )
+  if "ITPM" in err_str or "input tokens per minute" in err_str or "Request too large for model" in err_str:
+    limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
+    req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
+    req_tokens = req_match.group(1) if req_match else "solicitada"
+    limit_tokens = limit_match.group(1) if limit_match else "establecido"
+    return RuntimeError(
+      f"El texto enviado ({req_tokens} tokens) supera el límite de {limit_tokens} tokens de entrada por minuto (ITPM) de este modelo en Groq. "
+      "Para audios o transcripciones extensas, selecciona Google Gemini (1M+ tokens sin costo) en Configuración."
+    )
+  if "contextwindowsizeexceeded" in err_str.lower() or "context length" in err_str.lower() or "context_window" in err_str.lower():
+    return RuntimeError(
+      "La longitud del texto supera la ventana de contexto del modelo. "
+      "Te sugerimos seleccionar un modelo con ventana extendida como Google Gemini en Configuración."
     )
   return err
 
