@@ -40,6 +40,18 @@ class LLMArtifact:
     index: int = 0          # posición en la respuesta (0-based)
 
 
+def is_artifact_truncated(raw_text: str) -> bool:
+    """Detecta si hay un bloque <artifact> abierto que no fue cerrado."""
+    if not raw_text or "<artifact" not in raw_text.lower():
+        return False
+    openings = list(_ARTIFACT_OPEN.finditer(raw_text))
+    if not openings:
+        return False
+    # Contar cierres completos
+    closings = list(re.finditer(r"</artifact>", raw_text, re.IGNORECASE))
+    return len(closings) < len(openings)
+
+
 def extract_artifacts(raw_text: str) -> tuple[list[LLMArtifact], str]:
     """Extrae bloques <artifact> del texto crudo del LLM.
 

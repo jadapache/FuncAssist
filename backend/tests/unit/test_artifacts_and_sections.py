@@ -1,7 +1,12 @@
 """Unit tests for resilient artifact parsing, model max_tokens resolution, and section-by-section generation."""
 
 import pytest
-from app.ai.artifacts import extract_artifacts, artifacts_to_dict, LLMArtifact
+from app.ai.artifacts import (
+    extract_artifacts,
+    artifacts_to_dict,
+    is_artifact_truncated,
+    LLMArtifact,
+)
 from app.ai.providers.registry import resolve_model_max_tokens
 from app.ai.section_generator import (
     is_section_generation_candidate,
@@ -87,6 +92,19 @@ class TestTolerantArtifactsParser:
         artifacts, clean = extract_artifacts(raw)
         assert len(artifacts) == 0
         assert clean == raw
+
+    def test_is_artifact_truncated(self):
+        complete = '<artifact title="Doc" extension="docx">Contenido</artifact>'
+        assert is_artifact_truncated(complete) is False
+
+        truncated = '<artifact title="Doc" extension="docx">Contenido sin cerrar'
+        assert is_artifact_truncated(truncated) is True
+
+        partial_close = '<artifact title="Doc" extension="docx">Contenido</art'
+        assert is_artifact_truncated(partial_close) is True
+
+        no_artifact = "Solo un mensaje normal de chat."
+        assert is_artifact_truncated(no_artifact) is False
 
     def test_artifacts_to_dict_serialization(self):
         arts = [LLMArtifact(title="T1", extension="docx", content="C1", index=0)]
