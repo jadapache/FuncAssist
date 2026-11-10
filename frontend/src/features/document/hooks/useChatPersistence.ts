@@ -84,7 +84,18 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
         setConversations((current) => {
           const remoteIds = new Set(remoteSessions.map((conversation) => conversation.id))
           const localOnly = current.filter((conversation) => !remoteIds.has(conversation.id))
-          return [...localOnly, ...remoteSessions]
+          // Deduplicate messages within remoteSessions to ensure no duplicates are loaded
+          const cleanedRemote = remoteSessions.map((sess) => {
+            const seen = new Set<string>()
+            const dedupedMessages = sess.messages.filter((m) => {
+              const key = m.id ? m.id : `${m.role}-${m.content.trim()}`
+              if (seen.has(key)) return false
+              seen.add(key)
+              return true
+            })
+            return { ...sess, messages: dedupedMessages }
+          })
+          return [...localOnly, ...cleanedRemote]
         })
         const matched = initialUrlSessionId.current
           ? remoteSessions.find((c) => c.id === initialUrlSessionId.current)
@@ -115,6 +126,9 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
     }
   }, [urlSessionId, conversations, activeConversationId])
 
+  // Track last synced state snapshot to avoid redundant backend roundtrips
+  const lastSyncedHashRef = useRef<Record<string, string>>({})
+
   // Sync changes to the persisted chat entity whenever conversations change.
   useEffect(() => {
     const nonEmpties = conversations.filter(
@@ -123,6 +137,11 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
     // Debounced background sync to backend
     const timer = setTimeout(() => {
       nonEmpties.forEach((conv) => {
+        const hash = `${conv.messages.length}-${(conv.artifacts || []).length}-${(conv.documentContent || '').length}`
+        if (lastSyncedHashRef.current[conv.id] === hash) {
+          return
+        }
+        lastSyncedHashRef.current[conv.id] = hash
         draftsApi
           .saveDraft({
             id: conv.id,
