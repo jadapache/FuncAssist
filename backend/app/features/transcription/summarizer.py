@@ -21,14 +21,105 @@ def format_timestamp(seconds: float) -> str:
   return f"{mins:02d}:{secs:02d}"
 
 
-def format_transcript_for_llm(segments: List[Dict[str, Any]]) -> str:
-  lines = []
+def format_transcript_lines(segments: List[Dict[str, Any]]) -> List[str]:
+  if not segments:
+    return []
+
+  lines: list[str] = []
+  current_speaker: str | None = None
+  current_start: float = 0.0
+  current_texts: list[str] = []
+
+  def flush() -> None:
+    if current_texts and current_speaker is not None:
+      start_str = format_timestamp(current_start)
+      merged = " ".join(current_texts).strip()
+      if merged:
+        lines.append(f"[{start_str}] {current_speaker}: {merged}")
+
   for seg in segments:
-    start_str = format_timestamp(seg.get("start", 0.0))
-    speaker = seg.get("speaker", "Participante")
-    text = seg.get("text", "")
-    lines.append(f"[{start_str}] {speaker}: {text}")
-  return "\n".join(lines)
+    spk = seg.get("speaker") or "Participante"
+    txt = (seg.get("text") or "").strip()
+    if not txt:
+      continue
+    start = float(seg.get("start", 0.0))
+    if spk == current_speaker:
+      current_texts.append(txt)
+    else:
+      flush()
+      current_speaker = spk
+      current_start = start
+      current_texts = [txt]
+
+  flush()
+  return lines
+
+
+def format_transcript_for_llm(segments: List[Dict[str, Any]]) -> str:
+  return "\n".join(format_transcript_lines(segments))
+
+
+def resolve_transcript_character_budget(provider_id: str) -> int:
+  prov = (provider_id or "").strip().lower()
+  if prov in ("gemini", "google"):
+    return 1_000_000
+  if prov in ("openai", "claude"):
+    return 300_000
+  if prov == "groq":
+    return 20_000
+  return 15_000
+
+
+def condense_transcript_lines(lines: List[str], max_chars: int) -> str:
+  if not lines:
+    return ""
+  joined = "\n".join(lines)
+  if len(joined) <= max_chars:
+    return joined
+
+  head_budget = int(max_chars * 0.25)
+  tail_budget = int(max_chars * 0.25)
+  mid_budget = max_chars - head_budget - tail_budget
+
+  head_lines: list[str] = []
+  head_chars = 0
+  for line in lines:
+    if head_chars + len(line) + 1 > head_budget:
+      break
+    head_lines.append(line)
+    head_chars += len(line) + 1
+
+  tail_lines: list[str] = []
+  tail_chars = 0
+  for line in reversed(lines):
+    if tail_chars + len(line) + 1 > tail_budget:
+      break
+    tail_lines.insert(0, line)
+    tail_chars += len(line) + 1
+
+  consumed = len(head_lines) + len(tail_lines)
+  mid_pool = lines[len(head_lines): max(len(head_lines), len(lines) - len(tail_lines))]
+  mid_lines: list[str] = []
+  if mid_pool:
+    step = max(1, len(mid_pool) // 15)
+    sampled = mid_pool[::step]
+    mid_chars = 0
+    for line in sampled:
+      if mid_chars + len(line) + 1 > mid_budget:
+        break
+      mid_lines.append(line)
+      mid_chars += len(line) + 1
+
+  note = "[Nota: Transcripcion extensa sintetizada cronologicamente para ajustarse a la cuota del modelo.]"
+  sections = [note]
+  if head_lines:
+    sections.append("\n".join(head_lines))
+  if mid_lines:
+    sections.append("... [Continuacion del debate de la reunion] ...\n" + "\n".join(mid_lines))
+  if tail_lines:
+    sections.append("... [Conclusiones y acuerdos finales] ...\n" + "\n".join(tail_lines))
+
+  return "\n\n".join(sections)
 
 
 def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
@@ -149,7 +240,18 @@ async def summarize_transcript(
       template_id=target_feature,
     )
 
-  formatted_transcript = format_transcript_for_llm(segments)
+  try:
+    provider = resolve_provider(user_id=user_id)
+  except Exception as exc:
+    logger.error("Failed to resolve AI provider: %s", exc)
+    raise HTTPException(
+      status_code=400,
+      detail=f"Error al configurar proveedor de IA: {exc}",
+    ) from exc
+
+  max_chars = resolve_transcript_character_budget(provider.id)
+  transcript_lines = format_transcript_lines(segments)
+  formatted_transcript = condense_transcript_lines(transcript_lines, max_chars)
 
   prompt_cfg = await get_prompt(target_feature)
   try:
@@ -173,7 +275,6 @@ async def summarize_transcript(
 
   template_title = prompt_cfg.get("title", target_feature)
   try:
-    provider = resolve_provider(user_id=user_id)
     res = await provider.complete(messages, max_tokens=2000)
     summary = parse_summary_markdown_or_json(res.text)
     summary.template_id = target_feature

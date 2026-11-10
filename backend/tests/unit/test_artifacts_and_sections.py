@@ -165,3 +165,38 @@ class TestSectionGenerator:
         plan = _parse_plan_json("No es un json")
         assert plan is None
 
+
+class TestTranscriptCondensation:
+    def test_format_transcript_lines_merges_consecutive_speaker(self):
+        from app.features.transcription.summarizer import format_transcript_lines
+
+        segments = [
+            {"start": 0.0, "speaker": "Ana", "text": "Hola a todos."},
+            {"start": 3.0, "speaker": "Ana", "text": "Bienvenidos a la reunión."},
+            {"start": 8.0, "speaker": "Carlos", "text": "Hola Ana."},
+            {"start": 10.0, "speaker": "Carlos", "text": "Empecemos."},
+        ]
+        lines = format_transcript_lines(segments)
+        assert len(lines) == 2
+        assert lines[0] == "[00:00] Ana: Hola a todos. Bienvenidos a la reunión."
+        assert lines[1] == "[00:08] Carlos: Hola Ana. Empecemos."
+
+    def test_condense_transcript_lines_within_budget(self):
+        from app.features.transcription.summarizer import condense_transcript_lines
+
+        lines = ["[00:00] Ana: Inicio", "[00:10] Carlos: Fin"]
+        condensed = condense_transcript_lines(lines, max_chars=1000)
+        assert "[00:00] Ana: Inicio" in condensed
+        assert "[00:10] Carlos: Fin" in condensed
+        assert "[Nota:" not in condensed
+
+    def test_condense_transcript_lines_exceeding_budget(self):
+        from app.features.transcription.summarizer import condense_transcript_lines
+
+        long_lines = [f"[{i:02d}:00] Speaker{i % 3}: Debate punto {i} con amplio detalle..." for i in range(100)]
+        condensed = condense_transcript_lines(long_lines, max_chars=500)
+        assert len(condensed) <= 700  # including notes and section markers
+        assert "[Nota:" in condensed
+        assert "Speaker0" in condensed
+
+
