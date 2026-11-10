@@ -776,6 +776,8 @@ class TranscriptionModel(Base):
       "segments": segments,
       "text": self.text or "",
       "summary": summary,
+      "saved_to_knowledge": bool(meta.get("saved_to_knowledge", False)),
+      "document_id": meta.get("document_id"),
       "metadata": {
         "title": self.title,
         "description": self.description or "",
