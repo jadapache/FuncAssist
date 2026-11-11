@@ -11,10 +11,7 @@ from fastapi.testclient import TestClient
 from app.context.knowledge import (
   delete_document,
   ensure_knowledge_dirs,
-  get_chunks_for_documents,
   get_db_status,
-  get_knowledge_base_dir,
-  get_knowledge_documents_dir,
   ingest_document,
   is_postgres_configured,
   list_documents,
@@ -24,7 +21,6 @@ from app.context.knowledge import (
 )
 from app.context.knowledge_migration import (
   export_to_json,
-  migrate_knowledge_if_needed,
   rebuild_fts_index,
   verify_integrity,
 )

@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 
 from app.main import app
-from app.core.settings import USER_DRAFTS_DIR, USER_DOCUMENTS_DIR
 from app.features.drafts.storage import (
   delete_generated_draft,
   get_generated_draft,

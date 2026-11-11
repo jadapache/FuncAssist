@@ -3,16 +3,6 @@
 import pytest
 
 from app.db.database import set_session_override, set_sync_session_override
-from app.db.models import (
-  AIModelCatalogModel,
-  ChatMessageModel,
-  CorporateTemplateModel,
-  PRDReviewModel,
-  StandupModel,
-  TestPlanModel,
-  TranscriptionModel,
-  UserModel,
-)
 from app.db.repositories import (
   AIModelCatalogRepository,
   ChatRepository,

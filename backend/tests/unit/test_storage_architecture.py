@@ -1,15 +1,7 @@
 """Unit tests for modular storage sub-systems and public facade."""
 
 import pytest
-from app.core import (
-  storage,
-  storage_ai,
-  storage_cache,
-  storage_credentials,
-  storage_integrations,
-  storage_preferences,
-  storage_settings,
-)
+from app.core import storage, storage_cache
 from app.core.storage_cache import _CACHE_CONNECTIONS, make_conn_cache_key
 
 
@@ -140,19 +132,6 @@ def test_multi_tenant_same_provider_full_lifecycle():
   # Cache key check
   assert make_conn_cache_key(org_1, "github") not in _CACHE_CONNECTIONS
   assert make_conn_cache_key(org_2, "github") in _CACHE_CONNECTIONS
-
-
-def test_pbkdf2_salt_required_without_fallback(monkeypatch):
-  """Verify that PBKDF2_SALT is mandatory and raises RuntimeError when missing."""
-  from app.core import secrets as secrets_mod
-  from types import SimpleNamespace
-
-  monkeypatch.delenv("PBKDF2_SALT", raising=False)
-  secrets_mod._get_pbkdf2_salt.cache_clear()
-  monkeypatch.setattr("app.core.settings.get_settings", lambda: SimpleNamespace(pbkdf2_salt=None))
-
-  with pytest.raises(RuntimeError, match="PBKDF2_SALT environment variable is required"):
-    secrets_mod._get_pbkdf2_salt()
 
 
 def test_atomic_transaction_rollback_on_partial_failure(monkeypatch):

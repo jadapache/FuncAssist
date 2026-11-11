@@ -11,7 +11,6 @@ from app.ai.providers.registry import resolve_model_max_tokens
 from app.ai.section_generator import (
     is_section_generation_candidate,
     _parse_plan_json,
-    _clean_json_response,
     DocumentPlan,
 )
 
@@ -127,35 +126,21 @@ class TestTolerantArtifactsParser:
 
 
 class TestModelMaxTokensResolution:
-    def test_openai_gpt4o_family_cap(self):
-        tokens = resolve_model_max_tokens("openai", "gpt-4o", requested_max=None)
-        assert tokens == 16384
-
-    def test_openai_gpt4o_mini_family_cap(self):
-        tokens = resolve_model_max_tokens("openai", "gpt-4o-mini", requested_max=None)
-        assert tokens == 16384
-
-    def test_claude_sonnet_cap(self):
-        tokens = resolve_model_max_tokens("claude", "claude-3-5-sonnet-20241022", requested_max=None)
-        assert tokens == 8192
-
-    def test_gemini_cap(self):
-        tokens = resolve_model_max_tokens("gemini", "gemini-2.0-flash", requested_max=None)
-        assert tokens == 8192
-
-    def test_groq_ceiling_enforced(self):
-        """Groq has a conservative rate limit default of 4096."""
-        tokens = resolve_model_max_tokens("groq", "llama-3.3-70b-versatile", requested_max=None)
-        assert tokens <= 4096
-
-    def test_explicit_requested_max_constrained_by_model_limit(self):
-        # Requesting 32000 on a model with 16384 limit will cap to 16384
-        tokens = resolve_model_max_tokens("openai", "gpt-4o", requested_max=32000)
-        assert tokens == 16384
-
-        # Requesting lower (2000) will be respected
-        tokens_lower = resolve_model_max_tokens("openai", "gpt-4o", requested_max=2000)
-        assert tokens_lower == 2000
+    @pytest.mark.parametrize(
+        "provider,model,requested,expected",
+        [
+            ("openai", "gpt-4o", None, 16384),
+            ("openai", "gpt-4o-mini", None, 16384),
+            ("claude", "claude-3-5-sonnet-20241022", None, 8192),
+            ("gemini", "gemini-2.0-flash", None, 8192),
+            ("groq", "llama-3.3-70b-versatile", None, 4096),
+            ("openai", "gpt-4o", 32000, 16384),
+            ("openai", "gpt-4o", 2000, 2000),
+        ],
+    )
+    def test_model_max_tokens_caps_and_limits(self, provider, model, requested, expected):
+        tokens = resolve_model_max_tokens(provider, model, requested_max=requested)
+        assert tokens == expected or (provider == "groq" and tokens <= 4096)
 
 
 class TestSectionGenerator:
@@ -212,22 +197,18 @@ class TestTranscriptCondensation:
         assert lines[0] == "[00:00] Ana: Hola a todos. Bienvenidos a la reunión."
         assert lines[1] == "[00:08] Carlos: Hola Ana. Empecemos."
 
-    def test_condense_transcript_lines_within_budget(self):
+    def test_condense_transcript_lines_budget_handling(self):
         from app.features.transcription.summarizer import condense_transcript_lines
 
-        lines = ["[00:00] Ana: Inicio", "[00:10] Carlos: Fin"]
-        condensed = condense_transcript_lines(lines, max_chars=1000)
-        assert "[00:00] Ana: Inicio" in condensed
-        assert "[00:10] Carlos: Fin" in condensed
-        assert "[Nota:" not in condensed
-
-    def test_condense_transcript_lines_exceeding_budget(self):
-        from app.features.transcription.summarizer import condense_transcript_lines
+        short_lines = ["[00:00] Ana: Inicio", "[00:10] Carlos: Fin"]
+        condensed_short = condense_transcript_lines(short_lines, max_chars=1000)
+        assert "[00:00] Ana: Inicio" in condensed_short
+        assert "[Nota:" not in condensed_short
 
         long_lines = [f"[{i:02d}:00] Speaker{i % 3}: Debate punto {i} con amplio detalle..." for i in range(100)]
-        condensed = condense_transcript_lines(long_lines, max_chars=500)
-        assert len(condensed) <= 700
-        assert "Speaker" in condensed
-        assert "..." in condensed
+        condensed_long = condense_transcript_lines(long_lines, max_chars=500)
+        assert len(condensed_long) <= 700
+        assert "Speaker" in condensed_long
+        assert "..." in condensed_long
 
 

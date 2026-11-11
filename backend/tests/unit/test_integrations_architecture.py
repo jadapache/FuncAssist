@@ -23,8 +23,6 @@ from app.core import storage
 from app.core.storage_cache import clear_storage_caches
 from app.db.models import (
   McpServerModel,
-  OrganizationIntegrationModel,
-  UserIntegrationModel,
 )
 from app.integrations.executor import (
   IntegrationToolExecutor,
@@ -32,7 +30,7 @@ from app.integrations.executor import (
   validate_mcp_endpoint_url,
 )
 from app.integrations.jira.integration import JiraIntegration
-from tests.fake_session import FakeSyncSession, GLOBAL_FAKE_STORAGE
+from tests.fake_session import GLOBAL_FAKE_STORAGE
 
 
 @pytest.fixture(autouse=True)

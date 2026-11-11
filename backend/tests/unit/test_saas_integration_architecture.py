@@ -12,9 +12,6 @@ Verifies:
 
 from __future__ import annotations
 
-import time
-from typing import Any
-from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,7 +20,6 @@ from app.core.secret_store import secret_store
 from app.core.storage_credentials import (
   delete_user_credential,
   list_user_credentials_info,
-  load_all_user_credentials,
   load_user_credential,
   save_user_credential,
 )
@@ -36,7 +32,6 @@ from app.core.storage_user_integrations import (
 )
 from app.db.database import set_session_override, set_sync_session_override
 from app.db.models import (
-  AuditEventModel,
   OrganizationMemberModel,
   OrganizationModel,
   SettingModel,

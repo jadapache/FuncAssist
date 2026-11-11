@@ -1,16 +1,11 @@
-import json
 import pytest
-from unittest.mock import MagicMock, patch
 from app.core.secrets import (
     encrypt_secret,
     decrypt_secret,
     is_encrypted,
     encrypt_ai_settings,
     decrypt_ai_settings,
-    _get_master_secret,
-    _derive_fernet_key,
 )
-from cryptography.fernet import Fernet
 from app.core.storage import save_app_settings, load_app_settings, _CACHE_APP_SETTINGS
 
 
@@ -75,60 +70,49 @@ def test_storage_encryption_roundtrip():
     assert loaded["ai"]["groq_api_key"] == "gsk_real_secret_key_999"
 
 
-def test_missing_secret_key_raises_error(monkeypatch):
+@pytest.mark.parametrize(
+    "env_var,target_call",
+    [
+        ("SECRET_KEY", lambda: getattr(__import__("app.core.secrets", fromlist=["_get_master_secret"]), "_get_master_secret")()),
+        ("SECRET_KEY", lambda: getattr(__import__("app.core.storage", fromlist=["_resolve_secret"]), "_resolve_secret")()),
+        ("PBKDF2_SALT", lambda: getattr(__import__("app.core.secrets", fromlist=["_get_pbkdf2_salt"]), "_get_pbkdf2_salt")()),
+    ],
+)
+def test_missing_security_credentials_raise_error(monkeypatch, env_var, target_call):
     import app.core.secrets as secrets_mod
     monkeypatch.setattr(secrets_mod, "_MASTER_SECRET_CACHE", None)
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    from types import SimpleNamespace
-    fake_settings = SimpleNamespace(secret_key=None)
-    monkeypatch.setattr("app.core.settings.get_settings", lambda: fake_settings)
-
-    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
-        secrets_mod._get_master_secret()
-
-
-def test_storage_resolve_secret_missing_raises_error(monkeypatch):
-    import app.core.storage as storage_mod
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    from types import SimpleNamespace
-    fake_settings = SimpleNamespace(secret_key=None)
-    monkeypatch.setattr(storage_mod, "get_settings", lambda: fake_settings)
-
-    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required"):
-        storage_mod._resolve_secret()
-
-
-def test_startup_missing_secret_key_fails(monkeypatch):
-    import app.main as main_mod
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    from types import SimpleNamespace
-    fake_settings = SimpleNamespace(secret_key=None, pbkdf2_salt="salt-ok", cors_origins=[])
-    monkeypatch.setattr(main_mod, "get_settings", lambda: fake_settings)
-
-    with pytest.raises(RuntimeError, match="SECRET_KEY environment variable is required to start the application"):
-        main_mod.create_app()
-
-
-def test_startup_missing_pbkdf2_salt_fails(monkeypatch):
-    import app.main as main_mod
-    monkeypatch.setenv("SECRET_KEY", "valid-secret-key-123")
-    monkeypatch.delenv("PBKDF2_SALT", raising=False)
-    from types import SimpleNamespace
-    fake_settings = SimpleNamespace(secret_key="valid-secret-key-123", pbkdf2_salt=None, cors_origins=[])
-    monkeypatch.setattr(main_mod, "get_settings", lambda: fake_settings)
-
-    with pytest.raises(RuntimeError, match="PBKDF2_SALT environment variable is required to start the application"):
-        main_mod.create_app()
-
-
-def test_missing_pbkdf2_salt_raises_error(monkeypatch):
-    import app.core.secrets as secrets_mod
-    monkeypatch.delenv("PBKDF2_SALT", raising=False)
     secrets_mod._get_pbkdf2_salt.cache_clear()
-    from types import SimpleNamespace
-    fake_settings = SimpleNamespace(pbkdf2_salt=None)
-    monkeypatch.setattr("app.core.settings.get_settings", lambda: fake_settings)
+    monkeypatch.delenv(env_var, raising=False)
 
-    with pytest.raises(RuntimeError, match="PBKDF2_SALT environment variable is required"):
-        secrets_mod._get_pbkdf2_salt()
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(secret_key=None, pbkdf2_salt=None)
+    monkeypatch.setattr("app.core.settings.get_settings", lambda: fake_settings)
+    monkeypatch.setattr("app.core.storage.get_settings", lambda: fake_settings)
+
+    with pytest.raises(RuntimeError, match=f"{env_var} environment variable is required"):
+        target_call()
+
+
+@pytest.mark.parametrize(
+    "missing_var,expected_msg",
+    [
+        ("SECRET_KEY", "SECRET_KEY environment variable is required to start the application"),
+        ("PBKDF2_SALT", "PBKDF2_SALT environment variable is required to start the application"),
+    ],
+)
+def test_startup_missing_required_env_fails(monkeypatch, missing_var, expected_msg):
+    import app.main as main_mod
+    monkeypatch.setenv("SECRET_KEY", "valid-key" if missing_var != "SECRET_KEY" else "")
+    monkeypatch.delenv(missing_var, raising=False)
+
+    from types import SimpleNamespace
+    fake_settings = SimpleNamespace(
+        secret_key="valid-key" if missing_var != "SECRET_KEY" else None,
+        pbkdf2_salt="valid-salt" if missing_var != "PBKDF2_SALT" else None,
+        cors_origins=[],
+    )
+    monkeypatch.setattr(main_mod, "get_settings", lambda: fake_settings)
+
+    with pytest.raises(RuntimeError, match=expected_msg):
+        main_mod.create_app()
 

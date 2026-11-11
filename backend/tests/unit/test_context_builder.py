@@ -1,6 +1,5 @@
 """Unit tests for Hierarchical Memory and Context Builder."""
 
-import pytest
 from app.context.memory import ProjectKnowledge, ConversationMemory
 from app.context.models import ContextChunk, SourceType
 from app.context.builder import (
@@ -8,7 +7,6 @@ from app.context.builder import (
     ContextBuilder,
     BuildContextParams,
     deduplicate_chunks,
-    estimate_tokens,
     truncate_to_budget,
 )
 
