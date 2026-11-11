@@ -131,7 +131,7 @@ export function useTranscriptionStreamManager({
         eta: eta || null,
         onClick: () => {
           openStudio(id)
-          navigate('/funcional/transcripciones')
+          navigate('/transcripciones')
         },
         onCancel: () => void handleCancelTranscription(id),
         onDismiss: () => handleDismissJob(id),

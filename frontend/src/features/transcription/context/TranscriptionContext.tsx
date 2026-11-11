@@ -153,7 +153,7 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
         eta: job.eta || null,
         onClick: () => {
           openStudioRef.current(id)
-          navigate('/funcional/transcripciones')
+          navigate('/transcripciones')
         },
         onCancel: () => void cancelTranscriptionRef.current(id),
         onDismiss: () => dismissJobRef.current(id),

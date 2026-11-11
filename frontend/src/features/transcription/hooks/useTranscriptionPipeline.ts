@@ -89,7 +89,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       eta: null,
       onClick: () => {
         openStudio(transcriptionId)
-        navigate('/funcional/transcripciones')
+        navigate('/transcripciones')
       },
       onCancel: () => void handleCancelTranscription(transcriptionId),
       onDismiss: () => handleDismissJob(transcriptionId),
@@ -132,7 +132,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
           eta: prog.eta || null,
           onClick: () => {
             openStudio(transcriptionId)
-            navigate('/funcional/transcripciones')
+            navigate('/transcripciones')
           },
           onCancel: () => void handleCancelTranscription(transcriptionId),
           onDismiss: () => handleDismissJob(transcriptionId),
@@ -166,7 +166,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       stageText: 'Completado con éxito',
       onClick: () => {
         openStudio(transcriptionId)
-        navigate('/funcional/transcripciones')
+        navigate('/transcripciones')
       },
       onDismiss: () => handleDismissJob(transcriptionId),
     })
@@ -203,7 +203,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       eta: null,
       onClick: () => {
         openStudio(transcriptionId)
-        navigate('/funcional/transcripciones')
+        navigate('/transcripciones')
       },
       onCancel: () => void handleCancelTranscription(transcriptionId),
       onDismiss: () => handleDismissJob(transcriptionId),
@@ -265,7 +265,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       eta: null,
       onClick: () => {
         openStudio(transcriptionId)
-        navigate('/funcional/transcripciones')
+        navigate('/transcripciones')
       },
       onCancel: () => void handleCancelTranscription(transcriptionId),
       onDismiss: () => handleDismissJob(transcriptionId),
@@ -324,7 +324,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
       eta: null,
       onClick: () => {
         openStudio(transcriptionId)
-        navigate('/funcional/transcripciones')
+        navigate('/transcripciones')
       },
       onCancel: () => void handleCancelTranscription(transcriptionId),
       onDismiss: () => handleDismissJob(transcriptionId),
@@ -448,7 +448,7 @@ export function useTranscriptionPipeline(props: PipelineProps) {
           eta: null,
           onClick: () => {
             openStudio(transcriptionId)
-            navigate('/funcional/transcripciones')
+            navigate('/transcripciones')
           },
           onCancel: () => void handleCancelTranscription(transcriptionId),
           onDismiss: () => handleDismissJob(transcriptionId),

@@ -136,7 +136,7 @@ export const DashboardPage = () => {
           {role === 'funcional' ? (
             <>
               <QuickActionCard
-                to="/funcional/transcripciones"
+                to="/transcripciones"
                 title="Transcripción de Reuniones"
                 description="Convierte audio de reuniones en notas y especificaciones funcionales."
                 icon={Mic}
@@ -144,17 +144,31 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/funcional/chat"
+                to="/chat"
                 title="Chat"
                 description="Asistente interactivo para generar y mantener documentos de mejoras y requerimientos."
                 icon={MessageSquare}
                 gradient="from-[#004497] to-blue-600"
               />
+              <QuickActionCard
+                to="/chat?skill=inventario_doc"
+                title="Inventario"
+                description="Catálogo de componentes, módulos y funcionalidades."
+                icon={LayoutGrid}
+                gradient="from-blue-800 to-[#002777]"
+              />
+              <QuickActionCard
+                to="/chat?skill=levantamiento_doc"
+                title="Levantamiento"
+                description="Estructuración y desglose de requerimientos del cliente."
+                icon={FileSearch}
+                gradient="from-blue-900 to-[#002777]"
+              />
             </>
           ) : role === 'qa' ? (
             <>
               <QuickActionCard
-                to="/qa/regression"
+                to="/chat?skill=regression"
                 title="Regresión QA"
                 description="Ejecuta y valida casos de prueba de regresión automatizados."
                 icon={TestTube2}
@@ -162,7 +176,7 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/qa/api-qa"
+                to="/chat?skill=api_qa"
                 title="QA de API"
                 description="Pruebas de contratos, validación de endpoints y respuestas JSON."
                 icon={ClipboardCheck}
@@ -170,7 +184,7 @@ export const DashboardPage = () => {
                 gradient="from-[#004497] to-blue-600"
               />
               <QuickActionCard
-                to="/qa/visual-qa"
+                to="/chat?skill=visual_qa"
                 title="QA Visual"
                 description="Inspección visual de interfaces y análisis de discrepancias."
                 icon={Eye}
@@ -180,7 +194,7 @@ export const DashboardPage = () => {
           ) : (
             <>
               <QuickActionCard
-                to="/pm/standup"
+                to="/chat?skill=standup"
                 title="Generar Standup"
                 description="Ayer, hoy, bloqueos — obtenido automáticamente de Jira y GitHub."
                 icon={Sun}
@@ -188,7 +202,7 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/pm/prd-checker"
+                to="/chat?skill=prd_checker"
                 title="Revisor de PRD"
                 description="Analiza especificaciones, revisa vacíos y evalúa criterios."
                 icon={FileSearch}
@@ -196,7 +210,7 @@ export const DashboardPage = () => {
                 gradient="from-[#004497] to-blue-600"
               />
               <QuickActionCard
-                to="/pm/change-impact"
+                to="/chat?skill=change_impact"
                 title="Impacto de Cambios"
                 description="Mapea tickets, Pull Requests y documentos afectados por un cambio."
                 icon={GitCompareArrows}
@@ -305,7 +319,7 @@ export const DashboardPage = () => {
 
             <div className="mt-6 flex flex-wrap gap-3 border-t border-[var(--color-border)] pt-5">
               {role === 'funcional' ? (
-                <Link to="/funcional/transcripciones" className="btn-primary gap-2">
+                <Link to="/transcripciones" className="btn-primary gap-2">
                   <Mic className="h-4 w-4" aria-hidden />
                   Transcripciones
                 </Link>

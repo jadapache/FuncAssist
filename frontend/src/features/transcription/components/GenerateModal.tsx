@@ -142,7 +142,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     }
 
     onClose()
-    navigate(`/funcional/${targetSlug}/${newSessionId}`)
+    navigate(`/chat/${newSessionId}`)
   }
 
   const buildTranscriptionContext = async (): Promise<string> => {

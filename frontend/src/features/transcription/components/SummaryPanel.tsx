@@ -1,7 +1,7 @@
 import React from 'react'
 import { Loader2, Sparkles, Copy, Check, RefreshCw } from 'lucide-react'
 import { DownloadMenu } from './DownloadMenu'
-import { MarkdownMessage } from '../../document/components/MarkdownMessage'
+import { MarkdownMessage } from '../../../components/common'
 
 interface SummaryTemplateOption {
   id: string

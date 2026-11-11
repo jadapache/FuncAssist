@@ -4,28 +4,16 @@ import {
   BookOpen,
   ChevronDown,
   CircleHelp,
-  ClipboardCheck,
-  Database,
-  Eye,
-  FileSearch,
-  FlaskConical,
-  GitCompareArrows,
-  Layers,
   LayoutDashboard,
   MessageSquare,
   Mic,
-  Rocket,
   Settings,
   Sparkles,
-  Sun,
-  TestTube2,
   User,
-  Wrench,
   LogOut,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { toolsGroupLabel } from '../../constants/app'
 import { useUser, type UserRole } from '../../context/UserContext'
 import { useAuth } from '../../context/AuthContext'
 
@@ -41,37 +29,6 @@ type NavGroup = {
   label: string
   icon: LucideIcon
   items: NavItem[]
-}
-
-const buildPmGroup = (displayName: string): NavGroup => ({
-  label: toolsGroupLabel(displayName),
-  icon: Wrench,
-  items: [
-    { to: '/pm/standup', label: 'Standup Diario', icon: Sun },
-    { to: '/pm/prd-checker', label: 'Revisor de PRD', icon: FileSearch },
-    { to: '/pm/change-impact', label: 'Impacto de Cambios', icon: GitCompareArrows },
-  ],
-})
-
-const FUNCIONAL_GROUP: NavGroup = {
-  label: 'Funcional',
-  icon: Layers,
-  items: [
-    { to: '/funcional/transcripciones', label: 'Transcripción de Reuniones', icon: Mic },
-    { to: '/funcional/chat', label: 'Chat', icon: MessageSquare },
-  ],
-}
-
-const QA_GROUP: NavGroup = {
-  label: 'Herramientas QA',
-  icon: FlaskConical,
-  items: [
-    { to: '/qa/regression', label: 'Regresión', icon: TestTube2 },
-    { to: '/qa/api-qa', label: 'QA de API', icon: ClipboardCheck },
-    { to: '/qa/visual-qa', label: 'QA Visual', icon: Eye },
-    { to: '/qa/smart-test-data', label: 'Datos de Prueba Inteligentes', icon: Database },
-    { to: '/qa/release-readiness', label: 'Estado de Lanzamiento', icon: Rocket },
-  ],
 }
 
 const KNOWLEDGE_GROUP: NavGroup = {
@@ -246,7 +203,7 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
   const updateMenuPosition = () => {
     if (!buttonRef.current) return
     const rect = buttonRef.current.getBoundingClientRect()
-    const menuWidth = 256 // w-64 is 16rem = 256px
+    const menuWidth = 256
     const margin = 16
     const left = Math.min(
       Math.max(margin, rect.right - menuWidth),
@@ -414,15 +371,7 @@ const UserDropdown = ({ displayName }: { displayName: string }) => {
 
 export const TopNav = ({ displayName }: TopNavProps) => {
   const { user } = useUser()
-  const role: UserRole = user?.user_role || 'admin'
   const activeDisplayName = user?.display_name || displayName
-
-  const PM_GROUP = buildPmGroup(activeDisplayName)
-
-  const showPm = ['admin', 'pm'].includes(role)
-  const showFuncional = ['admin', 'funcional'].includes(role)
-  const showQa = ['admin', 'qa'].includes(role)
-  const showKnowledge = ['admin', 'pm', 'qa', 'funcional'].includes(role)
 
   return (
     <header className="sticky top-0 z-40 overflow-visible border-b border-[var(--color-border)] bg-white/90 backdrop-blur-xl">
@@ -452,10 +401,17 @@ export const TopNav = ({ displayName }: TopNavProps) => {
             <span>Inicio</span>
           </NavLink>
 
-          {showPm && <NavDropdown group={PM_GROUP} />}
-          {showFuncional && <NavDropdown group={FUNCIONAL_GROUP} />}
-          {showQa && <NavDropdown group={QA_GROUP} />}
-          {showKnowledge && <NavDropdown group={KNOWLEDGE_GROUP} />}
+          <NavLink to="/chat" className={({ isActive }) => navLinkClass(isActive)}>
+            <MessageSquare className="h-4 w-4 shrink-0" aria-hidden />
+            <span>Chat</span>
+          </NavLink>
+
+          <NavLink to="/transcripciones" className={({ isActive }) => navLinkClass(isActive)}>
+            <Mic className="h-4 w-4 shrink-0" aria-hidden />
+            <span>Transcripciones</span>
+          </NavLink>
+
+          <NavDropdown group={KNOWLEDGE_GROUP} />
         </nav>
 
         <div className="flex shrink-0 items-center gap-2.5">

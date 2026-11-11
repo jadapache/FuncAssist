@@ -95,12 +95,12 @@ export const TranscripcionesPage = () => {
 
   const handleOpenStudioWithSlug = (id: string, title?: string) => {
     const slugToUse = generateTranscriptionSlug(title || '', id)
-    navigate(`/funcional/transcripciones/${slugToUse}`)
+    navigate(`/transcripciones/${slugToUse}`)
   }
 
   const handleBackToDashboard = () => {
     closeStudio()
-    navigate('/funcional/transcripciones')
+    navigate('/transcripciones')
   }
 
   const isModelConfigured =
