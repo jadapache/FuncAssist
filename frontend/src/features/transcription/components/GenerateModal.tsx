@@ -74,13 +74,13 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
   if (!isOpen) return null
 
   const openWorkspaceWithDoc = async (doc: GeneratedDocState) => {
-    const rawModule = (doc.module || 'mejoras').trim().toLowerCase()
+    const rawModule = (doc.module || 'chat').trim().toLowerCase()
     const targetSlug =
       rawModule === 'inventario'
         ? 'inventario'
         : rawModule === 'levantamiento'
         ? 'levantamiento'
-        : 'mejoras'
+        : 'chat'
 
     const isXlsx = doc.fileType.includes('xlsx') || doc.fileType.includes('excel')
     const ext = isXlsx ? 'xlsx' : 'docx'

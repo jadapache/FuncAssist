@@ -26,8 +26,8 @@ export const FUNCIONAL_SOURCE_OPTIONS = [
 
 export const FUNCIONAL_FEATURES: FuncionalFeatureConfig[] = [
   {
-    slug: 'mejoras',
-    title: 'Generador de Documento de Mejoras',
+    slug: 'chat',
+    title: 'Chat',
     subtitle: 'Sube especificaciones o minutas y genera/mantiene el documento funcional corporativo en tiempo real.',
     uploadTags: 'mejoras_doc',
     placeholder: 'Escribe tu petición o consulta...',
@@ -195,6 +195,8 @@ export const FUNCIONAL_FEATURES: FuncionalFeatureConfig[] = [
   },
 ]
 
-export const FUNCIONAL_FEATURE_BY_SLUG = Object.fromEntries(
-  FUNCIONAL_FEATURES.map((item) => [item.slug, item])
-) as Record<string, FuncionalFeatureConfig>
+export const FUNCIONAL_FEATURE_BY_SLUG = Object.fromEntries([
+  ...FUNCIONAL_FEATURES.map((item) => [item.slug, item]),
+  // Compatibilidad hacia atrás con el slug 'mejoras'
+  ['mejoras', FUNCIONAL_FEATURES[0]],
+]) as Record<string, FuncionalFeatureConfig>

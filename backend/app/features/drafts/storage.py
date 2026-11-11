@@ -26,6 +26,7 @@ SPEC_MAP = {
   "requerimientos": "Levantamiento",
   "inventario": "Inventario",
   "inventario_requerimientos": "Inventario",
+  "chat": "Mejoras",
   "mejoras": "Mejoras",
   "analisis_qa": "Mejoras",
   "qa_improvements": "Mejoras",

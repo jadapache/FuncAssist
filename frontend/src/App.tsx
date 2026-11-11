@@ -68,12 +68,14 @@ export const App = () => {
                         <Route element={<ProtectedRoute allowedRoles={['admin', 'funcional']} />}>
                           <Route path="funcional/transcripciones" element={<TranscripcionesPage />} />
                           <Route path="funcional/transcripciones/:slug" element={<TranscripcionesPage />} />
+                          <Route path="funcional/chat" element={<MejorasPage />} />
+                          <Route path="funcional/chat/:sessionId" element={<MejorasPage />} />
+                          <Route path="funcional/mejoras" element={<Navigate to="/funcional/chat" replace />} />
+                          <Route path="funcional/mejoras/:sessionId" element={<MejorasPage />} />
                           <Route path="funcional/inventario" element={<InventarioPage />} />
                           <Route path="funcional/inventario/:sessionId" element={<InventarioPage />} />
                           <Route path="funcional/levantamiento" element={<LevantamientoPage />} />
                           <Route path="funcional/levantamiento/:sessionId" element={<LevantamientoPage />} />
-                          <Route path="funcional/mejoras" element={<MejorasPage />} />
-                          <Route path="funcional/mejoras/:sessionId" element={<MejorasPage />} />
                           <Route path="funcional/:slug" element={<FuncionalFeaturePage />} />
                           <Route path="funcional/:slug/:sessionId" element={<FuncionalFeaturePage />} />
                         </Route>
