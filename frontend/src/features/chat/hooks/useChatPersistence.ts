@@ -10,7 +10,7 @@ export type DocumentArtifact = Artifact
 export interface ChatConversation {
   id: string
   name: string
-  lastInteraction: string // ISO string
+  lastInteraction: string 
   messages: ChatPersistMessage[]
   documentContent: string
   artifacts?: DocumentArtifact[]
@@ -31,7 +31,6 @@ export interface ChatPersistMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
-  /** Collapsed thinking trace steps attached to assistant messages */
   thinkingSteps?: ThinkingStep[]
   attachments?: ChatAttachment[]
 }
@@ -77,6 +76,12 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
     [routeSessionId, setSearchParams],
   )
 
+  // Stable ref so the sessions effect doesn't re-run when syncUrlSession identity changes on navigation.
+  const syncUrlSessionRef = useRef(syncUrlSession)
+  useEffect(() => {
+    syncUrlSessionRef.current = syncUrlSession
+  })
+
   // Load sessions and messages directly from the remote PostgreSQL entity.
   useEffect(() => {
     let isCancelled = false
@@ -116,19 +121,20 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
             setConversations((current) => [newConv, ...current])
             hasLocalConversationRef.current = true
             setActiveConversationId(newConv.id)
-            syncUrlSession(newConv.id)
+            syncUrlSessionRef.current(newConv.id)
             return
           }
 
           const matched = initialUrlSessionId.current
             ? remoteSessions.find((c: ChatConversation) => c.id === initialUrlSessionId.current)
             : null
-          const initialId = matched?.id || remoteSessions[0]?.id || null
-          if (!hasLocalConversationRef.current) {
-            setActiveConversationId(initialId)
-          }
-          if (initialId && !initialUrlSessionId.current && !hasLocalConversationRef.current) {
-            syncUrlSession(initialId)
+
+          if (!hasLocalConversationRef.current && !matched) {
+            const fallbackId = remoteSessions[0]?.id || null
+            setActiveConversationId(fallbackId)
+            if (fallbackId && !initialUrlSessionId.current) {
+              syncUrlSessionRef.current(fallbackId)
+            }
           }
         })
         .catch((err: unknown) => {
@@ -138,7 +144,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
     return () => {
       isCancelled = true
     }
-  }, [featureSlug, userId, syncUrlSession])
+  }, [featureSlug, userId])
 
   // Sync state if user changes query param externally or navigates history
   useEffect(() => {
@@ -216,7 +222,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
    */
   const updateConversation = useCallback(
     (
-      updates: Partial<Pick<ChatConversation, 'messages' | 'documentContent' | 'name' | 'artifacts' | 'activeArtifactId'>>,
+      updates: Partial<Pick<ChatConversation, 'messages' | 'documentContent' | 'name' | 'artifacts' | 'activeArtifactId' | 'lastInteraction'>>,
       targetId?: string,
     ) => {
       const idToUpdate = targetId ?? activeConversationId
@@ -227,7 +233,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
             ? {
                 ...c,
                 ...updates,
-                lastInteraction: new Date().toISOString(),
+                lastInteraction: updates.lastInteraction ?? c.lastInteraction,
               }
             : c,
         ),
