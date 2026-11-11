@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
   app = FastAPI(
     title="FuncAssist API",
     description="FuncAssist - Functional Analysis & Requirements Assistant.",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
