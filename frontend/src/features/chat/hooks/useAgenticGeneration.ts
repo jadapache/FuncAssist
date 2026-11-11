@@ -310,7 +310,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       setGeneratingConversationId(targetConvId)
       const currentMsgs = targetConv?.messages ?? []
       const updatedMsgs = [...currentMsgs, userMessage]
-      onUpdateConversation({ messages: updatedMsgs }, targetConvId)
+      onUpdateConversation({ messages: updatedMsgs, lastInteraction: new Date().toISOString() }, targetConvId)
       onScrollToBottom()
 
       const defaultFeature = config?.uploadTags || config?.slug || 'chat'
