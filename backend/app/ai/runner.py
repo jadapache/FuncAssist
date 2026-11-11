@@ -359,6 +359,7 @@ class AgenticChatConfig:
     document_ids: list[str] | None = None
     chat_context: str | None = None
     template_content: str | None = None
+    template_extension: str | None = "docx"
     images: list[dict[str, str]] | None = None
     attached_docs: list[dict[str, Any]] | None = None
     user_id: str | None = None
@@ -366,22 +367,48 @@ class AgenticChatConfig:
     model: str | None = None
 
 
-async def _build_chat_system_prompt(intent: str, feature: str | None = None) -> str:
+_ARTIFACT_INTENTS = frozenset({"generic_plan", "generic_report", "template_mutation"})
+
+
+def _format_rule_for_intent(intent: str, extension: str = "docx") -> str:
+    ext = (extension or "docx").strip().lstrip(".").lower()
+    if intent in _ARTIFACT_INTENTS:
+        return (
+            "\n\n## REGLA DE FORMATO OBLIGATORIA (GENERACIÓN DE ARTEFACTO)\n"
+            "La solicitud exige generar un documento o artefacto formal. DEBES respetar estrictamente esta estructura:\n"
+            "1. Mensaje ejecutivo breve para el chat dentro de etiquetas <chat>...</chat>.\n"
+            f"2. El documento completo y estructurado dentro de etiquetas <artifact title=\"[Título del Documento]\" extension=\"{ext}\">...</artifact>.\n"
+            "3. NUNCA coloques el contenido completo del documento fuera del bloque <artifact>.\n"
+            "4. NO omitas el bloque <chat> inicial (debe ser una síntesis o presentación de 1 o 2 párrafos).\n"
+            "Ejemplo de salida esperada:\n"
+            "<chat>He elaborado el documento correspondiente con base en los lineamientos solicitados.</chat>\n"
+            f"<artifact title=\"Plan de Pruebas\" extension=\"{ext}\">\n"
+            "# 1. Objetivo\n...\n"
+            "</artifact>"
+        )
+    return (
+        "\n\n## REGLA DE FORMATO (RESPUESTA CONVERSACIONAL)\n"
+        "La solicitud es de tipo consulta o conversacional. DEBES responder directamente en formato Markdown estándar en la burbuja de chat. "
+        "NO utilices etiquetas <artifact> ni <chat> a menos que se haya solicitado explícitamente generar un documento descargable."
+    )
+
+
+async def _build_chat_system_prompt(intent: str, feature: str | None = None, template_extension: str | None = "docx") -> str:
     target_feature = intent if intent and intent != "chat" else (feature or "chat")
+    rule = _format_rule_for_intent(intent, template_extension or "docx")
     try:
         tmpl = await get_prompt(target_feature)
         if tmpl and tmpl.get("system"):
-            return tmpl["system"]
+            return tmpl["system"] + rule
     except Exception:
         pass
 
-    return (
+    base = (
         "Eres un asistente experto en Aseguramiento de Calidad (QA), Gestión de Requerimientos y Arquitectura de Software. "
-        "Responde a la consulta del usuario de forma conversacional, clara, didáctica y técnicamente precisa utilizando formato Markdown enriquecido. "
-        "Utiliza el contexto de los documentos cargados, historial de chat y las imágenes adjuntas cuando estén presentes. "
-        "Si generas un artefacto o informe descargable, delimítalo exactamente con etiquetas <artifact title=\"...\" extension=\"docx\">...</artifact> "
-        "y escribe antes un mensaje ejecutivo breve en un bloque <chat>...</chat> para la conversación."
+        "Responde con claridad, didáctica y precisión técnica utilizando formato Markdown enriquecido. "
+        "Utiliza el contexto de los documentos cargados, historial de chat y las imágenes adjuntas cuando estén presentes."
     )
+    return base + rule
 
 
 def _assemble_multimodal_message(text_prompt: str, images: list[dict[str, str]] | None) -> AIMessage:
@@ -432,9 +459,15 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
             if "chat_attachments" not in used_sources:
                 used_sources.append("chat_attachments")
 
-    sys_prompt = await _build_chat_system_prompt(cfg.intent, cfg.feature)
+    sys_prompt = await _build_chat_system_prompt(cfg.intent, cfg.feature, cfg.template_extension)
 
     user_prompt_sections = []
+    if cfg.intent in _ARTIFACT_INTENTS:
+        ext_label = (cfg.template_extension or "docx").upper()
+        user_prompt_sections.append(
+            f"[MODO DE TRABAJO: GENERACIÓN DE ARTEFACTO (Formato {ext_label})]\n"
+            "Debes separar la respuesta: un mensaje breve en <chat>...</chat> y el documento completo en <artifact>...</artifact>."
+        )
     if cfg.chat_context:
         user_prompt_sections.append(f"HISTORIAL PREVIO DEL CHAT:\n{cfg.chat_context}")
     if bundle_text:

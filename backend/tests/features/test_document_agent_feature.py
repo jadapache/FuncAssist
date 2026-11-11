@@ -47,11 +47,17 @@ class TestDocumentAgentIntents:
     assert classify_prompt_intent("/plan Pruebas de regresión") == "generic_plan"
     assert classify_prompt_intent("/informe Hallazgos de QA") == "generic_report"
     assert classify_prompt_intent("/report Estado del sprint") == "generic_report"
+    assert classify_prompt_intent("/pregunta Cuántos casos fallaron") == "ask_product"
+    assert classify_prompt_intent("/ask Detalles del servicio de autenticación") == "ask_product"
 
   def test_conversational_and_template_intents(self):
     assert classify_prompt_intent("¿Cómo estructurar una prueba de carga?") == "chat"
     assert classify_prompt_intent("Genera el documento de mejora para login") == "template_mutation"
     assert classify_prompt_intent("Completa la plantilla con los hallazgos") == "template_mutation"
+    # Prompt descriptivo sin palabras clave pero con template corporativo activo:
+    assert classify_prompt_intent("De acuerdo a las transcripciones de los embargos", template_id="tmpl-inventario") == "template_mutation"
+    # Si es pregunta directa, preserva modo chat aun con template activo:
+    assert classify_prompt_intent("¿Qué campos requiere este formulario?", template_id="tmpl-inventario") == "chat"
 
   def test_explicit_mode_override(self):
     assert classify_prompt_intent("texto", mode="plan") == "generic_plan"

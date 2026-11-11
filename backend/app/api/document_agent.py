@@ -56,7 +56,11 @@ router = APIRouter(
 )
 
 
-def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
+def classify_prompt_intent(
+    prompt: str,
+    mode: Optional[str] = None,
+    template_id: Optional[str] = None,
+) -> str:
     """Classifies user prompt intent into: generic_plan, generic_report, custom feature slug, template_mutation, or chat."""
     if mode and mode not in {"auto", "default"}:
         if mode in {"plan", "generic_plan"}:
@@ -78,6 +82,8 @@ def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
             return "generic_report"
         if first_token in {"plantilla", "template", "template_mutation"}:
             return "template_mutation"
+        if first_token in {"pregunta", "question", "ask"}:
+            return "ask_product"
         if first_token:
             return first_token
 
@@ -90,6 +96,11 @@ def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
     )
     if is_question:
         return "chat"
+
+    # If the user has an active corporate template selected and isn't asking a general question,
+    # default to mutating/populating that template artifact directly.
+    if template_id and template_id.strip():
+        return "template_mutation"
 
     if (
         "plan de prueba" in p_lower
@@ -124,15 +135,17 @@ def classify_prompt_intent(prompt: str, mode: Optional[str] = None) -> str:
     return "chat"
 
 
-async def _load_active_template_content(template_id: str | None = None) -> str:
-    """Load the active mejoras template content to inject into the AI prompt."""
+async def _load_active_template_info(template_id: str | None = None) -> tuple[str, str]:
+    """Load the active template content and file extension (e.g. ('...content...', 'docx'/'xlsx'))."""
     try:
         from app.core.template_storage import list_templates, get_template_detail
 
         if template_id:
             detail = await get_template_detail(template_id)
             if detail and detail.get("content", "").strip():
-                return detail["content"].strip()
+                filename = detail.get("filename", "")
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "docx"
+                return detail["content"].strip(), ext
 
         templates = await list_templates()
         candidates = [
@@ -145,10 +158,17 @@ async def _load_active_template_content(template_id: str | None = None) -> str:
         for tmpl in candidates:
             detail = await get_template_detail(tmpl["id"])
             if detail and detail.get("content", "").strip():
-                return detail["content"].strip()
+                filename = detail.get("filename", "")
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "docx"
+                return detail["content"].strip(), ext
     except Exception:
         pass
-    return ""
+    return "", "docx"
+
+
+async def _load_active_template_content(template_id: str | None = None) -> str:
+    content, _ = await _load_active_template_info(template_id)
+    return content
 
 
 class AgenticPromptRequest(CamelModel):
@@ -436,7 +456,7 @@ async def handle_agentic_prompt(
             chat_ctx_str = str(req.chat_context)
 
     sources_to_use = req.sources or ["knowledge"]
-    intent = classify_prompt_intent(prompt_str, req.mode)
+    intent = classify_prompt_intent(prompt_str, req.mode, template_id=req.template_id)
 
     query_text = prompt_str
     if prompt_str.startswith("/plan"):
@@ -460,7 +480,7 @@ async def handle_agentic_prompt(
             detail="Modelos GGUF no están admitidos en el backend.",
         )
 
-    template_content = await _load_active_template_content(req.template_id)
+    template_content, template_ext = await _load_active_template_info(req.template_id)
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
@@ -469,6 +489,7 @@ async def handle_agentic_prompt(
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
         template_content=template_content,
+        template_extension=template_ext,
         images=req.images,
         attached_docs=req.attached_docs,
         user_id=user_id,
@@ -576,7 +597,7 @@ async def handle_agentic_prompt_stream(
             chat_ctx_str = str(req.chat_context)
 
     sources_to_use = req.sources or ["knowledge"]
-    intent = classify_prompt_intent(prompt_str, req.mode)
+    intent = classify_prompt_intent(prompt_str, req.mode, template_id=req.template_id)
 
     query_text = prompt_str
     if prompt_str.startswith("/plan"):
@@ -600,7 +621,7 @@ async def handle_agentic_prompt_stream(
             detail="Modelos GGUF no están admitidos en el backend.",
         )
 
-    template_content = await _load_active_template_content(req.template_id)
+    template_content, template_ext = await _load_active_template_info(req.template_id)
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
@@ -609,6 +630,7 @@ async def handle_agentic_prompt_stream(
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
         template_content=template_content,
+        template_extension=template_ext,
         images=req.images,
         attached_docs=req.attached_docs,
         user_id=user_id,
