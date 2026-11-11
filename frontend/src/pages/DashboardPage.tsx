@@ -2,10 +2,8 @@ import {
   Activity,
   ArrowRight,
   ClipboardCheck,
-  ClipboardList,
   Eye,
   FileSearch,
-  FileText,
   GitBranch,
   GitCompareArrows,
   Kanban,
@@ -19,13 +17,14 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { api } from '../api/client'
+import { DEFAULT_DISPLAY_NAME } from '../constants/app'
 import { IntegrationTile } from '../components/ui/IntegrationTile'
 import { QuickActionCard } from '../components/ui/QuickActionCard'
 import { useUser } from '../context/UserContext'
 import type { IntegrationInfo } from '../types'
 
 type OutletContext = {
-  displayName: string
+  displayName?: string
 }
 
 const getGreeting = () => {
@@ -36,7 +35,8 @@ const getGreeting = () => {
 }
 
 export const DashboardPage = () => {
-  const { displayName } = useOutletContext<OutletContext>()
+  const outletCtx = useOutletContext<OutletContext | undefined>()
+  const displayName = outletCtx?.displayName || DEFAULT_DISPLAY_NAME
   const { user } = useUser()
   const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
   const [backendOk, setBackendOk] = useState<boolean | null>(null)
@@ -144,18 +144,11 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/funcional/inventario"
-                title="Inventario"
-                description="Catálogo de componentes, módulos y funcionalidades."
-                icon={FileText}
+                to="/funcional/chat"
+                title="Chat"
+                description="Asistente interactivo para generar y mantener documentos de mejoras y requerimientos."
+                icon={MessageSquare}
                 gradient="from-[#004497] to-blue-600"
-              />
-              <QuickActionCard
-                to="/funcional/levantamiento"
-                title="Levantamiento"
-                description="Estructuración y desglose de requerimientos del cliente."
-                icon={ClipboardList}
-                gradient="from-blue-900 to-[#002777]"
               />
             </>
           ) : role === 'qa' ? (
