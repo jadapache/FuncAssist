@@ -231,27 +231,4 @@ class LiteLLMProvider(AIProvider):
           if delta_content:
             yield delta_content
 
-# Backwards-compatible aliases mapping to the registry
-class OpenAIProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "gpt-4o-mini") -> None:
-    super().__init__("openai", api_key=api_key, default_model=default_model)
 
-
-class ClaudeProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "claude-3-5-haiku-latest") -> None:
-    super().__init__("claude", api_key=api_key, default_model=default_model)
-
-
-class GroqProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "llama-3.3-70b-versatile") -> None:
-    super().__init__("groq", api_key=api_key, default_model=default_model)
-
-
-class GeminiProvider(LiteLLMProvider):
-  def __init__(self, api_key: str, default_model: str = "gemini-1.5-flash") -> None:
-    super().__init__("gemini", api_key=api_key, default_model=default_model)
-
-
-class OllamaProvider(LiteLLMProvider):
-  def __init__(self, base_url: str, default_model: str = "qwen2.5:2b") -> None:
-    super().__init__("ollama", base_url=base_url, default_model=default_model)
