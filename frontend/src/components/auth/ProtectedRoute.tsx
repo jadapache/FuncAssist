@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useOutletContext } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import type { UserRole } from '../../context/UserContext'
 
@@ -29,5 +29,6 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
     return <Navigate to="/" replace />
   }
 
-  return <Outlet />
+  const outletContext = useOutletContext()
+  return <Outlet context={outletContext} />
 }

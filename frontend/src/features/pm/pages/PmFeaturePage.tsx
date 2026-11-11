@@ -1,15 +1,16 @@
 import { Navigate, useParams, useOutletContext } from 'react-router-dom'
 import { FeatureWorkspace } from '../../../features/document'
 import { PM_FEATURE_BY_SLUG } from '../../../features/pm'
-import { toolsGroupLabel } from '../../../constants/app'
+import { DEFAULT_DISPLAY_NAME, toolsGroupLabel } from '../../../constants/app'
 
 type OutletContext = {
-  displayName: string
+  displayName?: string
 }
 
 export const PmFeaturePage = () => {
   const { slug } = useParams<{ slug: string }>()
-  const { displayName } = useOutletContext<OutletContext>()
+  const outletCtx = useOutletContext<OutletContext | undefined>()
+  const displayName = outletCtx?.displayName || DEFAULT_DISPLAY_NAME
   const config = slug ? PM_FEATURE_BY_SLUG[slug] : undefined
 
   if (!config) {

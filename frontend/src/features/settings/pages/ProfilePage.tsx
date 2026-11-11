@@ -36,8 +36,8 @@ import type { JiraConnectionStatus, McpServerInfo, McpServerPayload } from '../t
 import type { IntegrationInfo } from '../../../types'
 
 type OutletContext = {
-  displayName: string
-  setDisplayName: (name: string) => void
+  displayName?: string
+  setDisplayName?: (name: string) => void
 }
 
 type ProfileTab = 'personal' | 'ai_providers' | 'integrations' | 'mcp'
@@ -65,7 +65,9 @@ const formatDate = (isoStr?: string) => {
 }
 
 export const ProfilePage = () => {
-  const { displayName, setDisplayName } = useOutletContext<OutletContext>()
+  const outletCtx = useOutletContext<OutletContext | undefined>()
+  const displayName = outletCtx?.displayName || 'Usuario'
+  const setDisplayName = outletCtx?.setDisplayName || (() => {})
   const { user: authUser } = useAuth()
   const { user, updateProfile } = useUser()
   const { toast } = useToast()
