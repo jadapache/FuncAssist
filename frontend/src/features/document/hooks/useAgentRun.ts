@@ -85,7 +85,7 @@ export function useAgentRun() {
 
       try {
         const settings = await inferenceService.getAiSettings()
-        if (settings?.provider === 'builtin') {
+        if (inferenceService.isBrowserExecution(settings)) {
           const requestedFeature = payload.feature || 'builtin_agent'
           const [prompt, rubric] = await Promise.all([
             api.getAiPrompt(requestedFeature).catch(() => api.getAiPrompt('builtin_agent')),
