@@ -11,7 +11,7 @@ import {
   PanelLeftOpen,
   Edit3,
 } from 'lucide-react'
-import type { ChatConversation } from '../../../features/document/hooks/useChatPersistence'
+import type { ChatConversation } from '../hooks/useChatPersistence'
 
 interface ChatHistorySidebarProps {
   conversations: ChatConversation[]

@@ -1,5 +1,6 @@
 import type { FormEvent, UIEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ArrowUp,
   BookOpen,
@@ -16,25 +17,24 @@ import {
   Minimize2,
   ChevronDown,
 } from 'lucide-react'
-import { UniverAdapter } from '../../../features/document/agent/adapters/UniverAdapter'
-import { DocumentAgent } from '../../../features/document/agent/core/DocumentAgent'
-import type { FuncionalFeatureConfig } from '../../../features/funcional'
-import { FUNCIONAL_SOURCE_OPTIONS } from '../../../features/funcional'
-import { useDocumentHistory } from '../hooks/useDocumentHistory'
+import { UniverAdapter } from '../../document/agent/adapters/UniverAdapter'
+import { DocumentAgent } from '../../document/agent/core/DocumentAgent'
+import type { AgenticGenerationConfig } from '../hooks/useAgenticGeneration'
+import { useDocumentHistory } from '../../document/hooks/useDocumentHistory'
 import { useCorporateTemplate } from '../../../features/settings'
 import {
   useChatPersistence,
   type ChatPersistMessage,
   type DocumentArtifact,
-} from '../../../features/document/hooks/useChatPersistence'
+} from '../hooks/useChatPersistence'
 import { ChatHistorySidebar } from './ChatHistorySidebar'
 import { useAuth } from '../../../context/AuthContext'
-import { ArtifactsStudio } from './ArtifactsStudio'
+import { ArtifactsStudio } from '../../document/components/ArtifactsStudio'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { useAgenticGeneration } from '../hooks/useAgenticGeneration'
 import { useToast } from '../../../context/ToastContext'
 import { PageHeader } from '../../../components/common'
-import { MarkdownMessage } from './MarkdownMessage'
+import { MarkdownMessage } from '../../../components/common'
 import { VoiceInput } from '../../transcription/components/VoiceInput'
 import { docAgentApi, type EphemeralAttachmentDoc } from '../api/docAgentApi'
 
@@ -44,22 +44,71 @@ import { userApi } from '../../../api/modules/user'
 import { FEATURE_METAS } from '../../settings/components/prompts_rubrics/types'
 
 
-interface AgenticDocumentWorkspaceProps {
-  config: FuncionalFeatureConfig
+export const CHAT_SOURCE_OPTIONS = [
+  { id: 'knowledge', label: 'Biblioteca' },
+  { id: 'jira', label: 'Jira' },
+  { id: 'github', label: 'GitHub' },
+]
+
+export const DEFAULT_CHAT_CONFIG: AgenticGenerationConfig & {
+  slug: string
+  title: string
+  subtitle: string
+  placeholder: string
+  defaultTemplate: string
+  defaultSources: string[]
+} = {
+  slug: 'chat',
+  title: 'Chat Asistente',
+  subtitle: 'Conversa, adjunta contexto o especificaciones y genera entregables con IA en tiempo real.',
+  uploadTags: 'chat_doc',
+  placeholder: 'Escribe tu petición o usa /...',
+  defaultTemplate: `# Documento de Trabajo y Requerimientos
+
+## 1. Información General
+- **Fecha:** {{FECHA}}
+- **Responsables:** {{RESPONSABLES}}
+
+## 2. Contexto y Objetivos
+{{OBJETIVOS}}
+
+## 3. Especificaciones y Solución Propuesta
+{{SOLUCIÓN}}
+
+## 4. Criterios de Aceptación y Pruebas
+- Validación funcional y de negocio.`,
+  defaultSources: ['knowledge'],
+  docxTitle: 'Documento de Trabajo',
+  defaultExtension: 'docx',
+}
+
+interface ChatWorkspaceProps {
+  config?: AgenticGenerationConfig & {
+    slug?: string
+    title?: string
+    subtitle?: string
+    placeholder?: string
+    defaultTemplate?: string
+    defaultSources?: string[]
+  }
   eyebrow?: string
 }
 
-export const AgenticDocumentWorkspace = ({
-  config,
-  eyebrow = 'FUNCIONAL TOOLS',
-}: AgenticDocumentWorkspaceProps) => {
+export const ChatWorkspace = ({
+  config = DEFAULT_CHAT_CONFIG,
+  eyebrow = 'ASISTENTE VIRTUAL',
+}: ChatWorkspaceProps) => {
+  const effectiveConfig = useMemo(() => ({
+    ...DEFAULT_CHAT_CONFIG,
+    ...config,
+  }), [config])
   const { user } = useAuth()
   const { toast } = useToast()
   const chatBottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch dynamic corporate template or fallback
-  const { templateContent } = useCorporateTemplate(config.slug, config.defaultTemplate)
+  const { templateContent } = useCorporateTemplate(effectiveConfig.slug, effectiveConfig.defaultTemplate)
 
   // Engine & Agent instances
   const adapter = useMemo(() => new UniverAdapter('document'), [])
@@ -75,7 +124,7 @@ export const AgenticDocumentWorkspace = ({
     renameConversation,
     deleteConversation,
     switchConversation,
-  } = useChatPersistence(config.slug, user?.id)
+  } = useChatPersistence(effectiveConfig.slug, user?.id)
 
   // UI state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -83,14 +132,14 @@ export const AgenticDocumentWorkspace = ({
   const [draft, setDraft] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
-  // Filter available integrations dynamically from FUNCIONAL_SOURCE_OPTIONS
+  // Filter available integrations dynamically from CHAT_SOURCE_OPTIONS
   const availableIntegrations = useMemo(
-    () => FUNCIONAL_SOURCE_OPTIONS.filter((opt) => opt.id !== 'knowledge'),
+    () => CHAT_SOURCE_OPTIONS.filter((opt) => opt.id !== 'knowledge'),
     [],
   )
 
   const [sources, setSources] = useState<string[]>(
-    config.defaultSources || ['knowledge', ...availableIntegrations.map((i) => i.id)],
+    effectiveConfig.defaultSources || ['knowledge', ...availableIntegrations.map((i) => i.id)],
   )
 
   // Integrations flyout menu state
@@ -112,8 +161,21 @@ export const AgenticDocumentWorkspace = ({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
-  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
-  const [selectedFeatureLabel, setSelectedFeatureLabel] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  const [selectedFeatures, setSelectedFeatures] = useState<Array<{ id: string; label: string }>>([])
+
+  useEffect(() => {
+    const skillParam = searchParams.get('skill') || searchParams.get('rubric')
+    if (skillParam) {
+      const meta = FEATURE_METAS.find((item) => item.id === skillParam)
+      const label = (meta?.title || skillParam).replace(/\s*\(\/[^)]+\)/, '')
+      setSelectedFeatures((prev) => {
+        if (prev.some((s) => s.id === skillParam)) return prev
+        return [...prev, { id: skillParam, label }]
+      })
+      textareaRef.current?.focus()
+    }
+  }, [searchParams])
 
   useEffect(() => {
     void api.getTemplates()
@@ -202,22 +264,17 @@ export const AgenticDocumentWorkspace = ({
   }, [visiblePrompts, visibleRubrics])
 
   // Dynamic prompt textarea height & expansion (capped at 40% max of chat container height)
-  const editorRef = useRef<HTMLDivElement>(null)
-  const editorBodyRef = useRef<HTMLSpanElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const focusEditorEnd = useCallback(() => {
-    const body = editorBodyRef.current
-    if (!body) return
-    body.focus()
-    const range = document.createRange()
-    range.selectNodeContents(body)
-    range.collapse(false)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
+    if (textareaRef.current) {
+      textareaRef.current.focus()
+      const len = textareaRef.current.value.length
+      textareaRef.current.setSelectionRange(len, len)
+    }
   }, [])
 
-  const BASE_TEXTAREA_HEIGHT = 35
+  const BASE_TEXTAREA_HEIGHT = 28
   const MAX_PANEL_PERCENT_HEIGHT = 230 // Maximum 40% of chat panel height cap
 
   const [textareaHeight, setTextareaHeight] = useState<number>(BASE_TEXTAREA_HEIGHT)
@@ -233,15 +290,15 @@ export const AgenticDocumentWorkspace = ({
       return
     }
 
-    if (!editorRef.current) return
+    if (!textareaRef.current) return
 
     if (!draft || draft.trim() === '') {
       setTextareaHeight(BASE_TEXTAREA_HEIGHT)
       return
     }
 
-    editorRef.current.style.height = 'auto'
-    const scrollH = editorRef.current.scrollHeight
+    textareaRef.current.style.height = 'auto'
+    const scrollH = textareaRef.current.scrollHeight
     const lineCount = draft.split('\n').length
 
     // Auto-expand to fit text smoothly up to 40% max height cap
@@ -489,18 +546,11 @@ export const AgenticDocumentWorkspace = ({
     renameConversation,
     onResetPromptInputs: () => {
       setDraft('')
-      setSelectedFeature(null)
-      setSelectedFeatureLabel(null)
+      setSelectedFeatures([])
       setRubricMenuOpen(false)
       setUserResizedHeight(null)
       setIsMaximized(false)
       setTextareaHeight(BASE_TEXTAREA_HEIGHT)
-      if (editorBodyRef.current) {
-        editorBodyRef.current.innerText = ''
-      }
-      if (editorRef.current) {
-        editorRef.current.innerText = ''
-      }
     },
     onError: (errMsg, isAuthError, errorCategory) => {
       let title = 'Error del Modelo LLM'
@@ -521,16 +571,19 @@ export const AgenticDocumentWorkspace = ({
 
   const handleSubmitForm = (e?: FormEvent) => {
     e?.preventDefault()
-    const textFromDom = editorBodyRef.current?.innerText?.trim() || editorRef.current?.innerText?.trim() || ''
-    const effectiveDraft = draft.trim() || textFromDom
-    const query = selectedFeature ? `/${selectedFeature}${effectiveDraft ? ` ${effectiveDraft}` : ''}` : effectiveDraft
+    const effectiveDraft = draft.trim()
+    const commandsPrefix = selectedFeatures.map((s) => `/${s.id}`).join(' ')
+    const query = commandsPrefix
+      ? `${commandsPrefix}${effectiveDraft ? ` ${effectiveDraft}` : ''}`
+      : effectiveDraft
     if ((!query.trim() && attachedImages.length === 0 && uploadedDocs.length === 0) || isGenerating) return
     const imagesToSend = [...attachedImages]
     const docsToSend = [...uploadedDocs]
     setAttachedImages([])
     setUploadedDocs([])
-    setSelectedFeature(null)
-    setSelectedFeatureLabel(null)
+    setSelectedFeatures([])
+    setDraft('')
+    setTextareaHeight(BASE_TEXTAREA_HEIGHT)
     void handleSendMessage(query, imagesToSend, docsToSend)
   }
 
@@ -549,8 +602,8 @@ export const AgenticDocumentWorkspace = ({
       {/* Top Page Title Banner Header (Standardized) */}
       <PageHeader
         eyebrow={eyebrow}
-        title={config.title}
-        subtitle={config.subtitle}
+        title={effectiveConfig.title}
+        subtitle={effectiveConfig.subtitle}
       />
 
       {/* Main Workspace Card Container (Encloses Sidebar + Chat Panel + Artefactos Studio) */}
@@ -583,8 +636,8 @@ export const AgenticDocumentWorkspace = ({
                   <Sparkles className="h-6 w-6" />
                 </div>
                 <div className="space-y-1">
-                  <h2 className="text-base font-bold text-slate-900">{config.title}</h2>
-                  <p className="text-xs text-slate-500 leading-relaxed">{config.subtitle}</p>
+                  <h2 className="text-base font-bold text-slate-900">{effectiveConfig.title}</h2>
+                  <p className="text-xs text-slate-500 leading-relaxed">{effectiveConfig.subtitle}</p>
                 </div>
               </div>
             ) : (
@@ -724,58 +777,77 @@ export const AgenticDocumentWorkspace = ({
                   </button>
                 </div>
 
-                <div
-                  ref={editorRef}
-                  contentEditable={!isGenerating}
-                  suppressContentEditableWarning
-                  role="textbox"
-                  aria-multiline="true"
-                  data-placeholder={selectedFeature ? 'Describe qué debe generar el agente...' : (config.placeholder || 'Escribe tu petición o usa /...')}
-                  onInput={(e) => {
-                    // Depending on where the browser places the caret, text can
-                    // land in the editable body span or directly in the root.
-                    const value = editorBodyRef.current?.innerText || e.currentTarget.innerText || ''
-                    setDraft(value)
-                    setRubricMenuOpen(!selectedFeature && value.trimStart().startsWith('/'))
-                  }}
-                  onPaste={(e) => {
-                    const items = e.clipboardData?.items
-                    if (items) {
-                      const pastedFiles: File[] = []
-                      for (let i = 0; i < items.length; i++) {
-                        if (items[i].type.startsWith('image/')) {
-                          const file = items[i].getAsFile()
-                          if (file) pastedFiles.push(file)
-                        }
-                      }
-                      if (pastedFiles.length > 0) {
-                        void handlePickFiles(pastedFiles)
-                      }
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSubmitForm(e)
-                    }
-                  }}
-                  onFocus={() => setRubricMenuOpen(!selectedFeature && draft.trimStart().startsWith('/'))}
-                  style={{ height: `${textareaHeight}px` }}
-                  className="w-full min-h-[35px] bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal empty:before:content-[attr(data-placeholder)] empty:before:text-slate-400"
-                >
-                  {selectedFeature && (
-                    <span contentEditable={false} className="font-bold text-[#002777]">
-                      {selectedFeatureLabel || selectedFeature}{' '}
+                {/* Textarea Row with Inline Selected Skill Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 min-h-[28px]">
+                  {selectedFeatures.map((skill) => (
+                    <span
+                      key={skill.id}
+                      className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-xs font-semibold text-[#002777] shrink-0 select-none"
+                    >
+                      <Sparkles className="h-3 w-3 text-blue-600 shrink-0" />
+                      <span>/{skill.label || skill.id}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedFeatures((prev) => prev.filter((s) => s.id !== skill.id))
+                          textareaRef.current?.focus()
+                        }}
+                        className="ml-0.5 rounded p-0.5 text-blue-400 hover:bg-blue-100 hover:text-blue-700 transition cursor-pointer"
+                        title="Quitar skill"
+                        aria-label={`Quitar skill ${skill.label || skill.id}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
                     </span>
-                  )}
-                  <span ref={editorBodyRef} contentEditable={!isGenerating} />
+                  ))}
+
+                  <textarea
+                    ref={textareaRef}
+                    value={draft}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setDraft(value)
+                      setRubricMenuOpen(value.trimStart().startsWith('/'))
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSubmitForm(e)
+                      }
+                    }}
+                    onFocus={() => setRubricMenuOpen(draft.trimStart().startsWith('/'))}
+                    placeholder={
+                      selectedFeatures.length > 0
+                        ? 'Describe qué debe generar el agente...'
+                        : (effectiveConfig.placeholder || 'Escribe tu petición o usa /...')
+                    }
+                    disabled={isGenerating}
+                    style={{ height: `${textareaHeight}px` }}
+                    className="flex-1 min-w-[120px] bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none resize-none placeholder:text-slate-400 disabled:opacity-60 font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal"
+                  />
                 </div>
 
                 {rubricMenuOpen && (
-                  <div className="absolute left-3 right-3 bottom-14 z-40 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                    <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-100 mb-1">
-                      <span className="text-[11px] font-bold text-slate-800">Prompts disponibles</span>
-                      <span className="text-[10px] text-slate-400">/{activeRole}</span>
+                  <div
+                    tabIndex={-1}
+                    className="absolute left-3 right-3 bottom-14 z-40 max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl"
+                  >
+                    {/* Botón flotante para cerrar el modal fuera del flujo del listado */}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        setRubricMenuOpen(false)
+                      }}
+                      className="absolute top-2.5 right-2.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition shadow-xs cursor-pointer"
+                      title="Cerrar prompts disponibles"
+                      aria-label="Cerrar prompts disponibles"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+
+                    <div className="flex items-center px-2 py-2 border-b border-slate-100 mb-1 pr-10">
+                      <span className="text-xs font-bold text-slate-800">Prompts y Skills disponibles</span>
                     </div>
                     {visiblePromptFeatures.length === 0 ? (
                       <div className="px-2 py-3 text-xs text-slate-500">No hay prompts disponibles para este rol.</div>
@@ -786,14 +858,21 @@ export const AgenticDocumentWorkspace = ({
                         <button
                           key={feature}
                           type="button"
-                          onClick={() => {
-                            setSelectedFeature(feature)
-                            setSelectedFeatureLabel((meta?.title || feature).replace(/\s*\(\/[^)]+\)/, ''))
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            const meta = FEATURE_METAS.find((item) => item.id === feature)
+                            const label = (meta?.title || feature).replace(/\s*\(\/[^)]+\)/, '')
+                            setSelectedFeatures((prev) => {
+                              if (prev.some((s) => s.id === feature)) return prev
+                              return [...prev, { id: feature, label }]
+                            })
                             setDraft('')
                             setRubricMenuOpen(false)
-                            focusEditorEnd()
+                            setTimeout(() => {
+                              textareaRef.current?.focus()
+                            }, 0)
                           }}
-                          className="w-full rounded-xl px-2.5 py-2 text-left hover:bg-blue-50 transition"
+                          className="w-full rounded-xl px-2.5 py-2 text-left hover:bg-blue-50 transition cursor-pointer"
                         >
                           <span className="block text-xs font-semibold text-slate-800">/{feature}</span>
                           <span className="block text-[10px] text-slate-500 truncate">{meta?.title || `Prompt de ${feature}`}</span>

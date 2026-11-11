@@ -1,5 +1,5 @@
 import { API_BASE, getAuthHeaders, handleResponse } from '../../../api/client'
-import type { ChatPersistMessage, DocumentArtifact } from '../hooks/useChatPersistence'
+import type { ChatPersistMessage, DocumentArtifact } from '../../chat/hooks/useChatPersistence'
 
 export interface SaveDraftPayload {
   id: string

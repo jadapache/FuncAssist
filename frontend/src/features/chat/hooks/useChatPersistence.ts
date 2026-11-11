@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import type { Artifact } from '../../../types/artifacts'
-import { draftsApi } from '../../../features/document/api/draftsApi'
-import { chatSessionsApi } from '../../../features/document/api/chatSessionsApi'
+import { draftsApi } from '../../document/api/draftsApi'
+import { chatSessionsApi } from '../api/chatSessionsApi'
 
 export type DocumentArtifact = Artifact
 
@@ -77,40 +77,40 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
   // Load sessions and messages directly from the remote PostgreSQL entity.
   useEffect(() => {
     let isCancelled = false
-    chatSessionsApi
-      .getSessions(featureSlug)
-      .then((remoteSessions) => {
-        if (isCancelled) return
-        setConversations((current) => {
-          const remoteIds = new Set(remoteSessions.map((conversation) => conversation.id))
-          const localOnly = current.filter((conversation) => !remoteIds.has(conversation.id))
-          // Deduplicate messages within remoteSessions to ensure no duplicates are loaded
-          const cleanedRemote = remoteSessions.map((sess) => {
-            const seen = new Set<string>()
-            const dedupedMessages = sess.messages.filter((m) => {
-              const key = m.id ? m.id : `${m.role}-${m.content.trim()}`
-              if (seen.has(key)) return false
-              seen.add(key)
-              return true
+      chatSessionsApi
+        .getSessions(featureSlug)
+        .then((remoteSessions: ChatConversation[]) => {
+          if (isCancelled) return
+          setConversations((current) => {
+            const remoteIds = new Set(remoteSessions.map((conversation: ChatConversation) => conversation.id))
+            const localOnly = current.filter((conversation) => !remoteIds.has(conversation.id))
+            // Deduplicate messages within remoteSessions to ensure no duplicates are loaded
+            const cleanedRemote = remoteSessions.map((sess: ChatConversation) => {
+              const seen = new Set<string>()
+              const dedupedMessages = sess.messages.filter((m: ChatPersistMessage) => {
+                const key = m.id ? m.id : `${m.role}-${m.content.trim()}`
+                if (seen.has(key)) return false
+                seen.add(key)
+                return true
+              })
+              return { ...sess, messages: dedupedMessages }
             })
-            return { ...sess, messages: dedupedMessages }
+            return [...localOnly, ...cleanedRemote]
           })
-          return [...localOnly, ...cleanedRemote]
+          const matched = initialUrlSessionId.current
+            ? remoteSessions.find((c: ChatConversation) => c.id === initialUrlSessionId.current)
+            : null
+          const initialId = matched?.id || remoteSessions[0]?.id || null
+          if (!hasLocalConversationRef.current) {
+            setActiveConversationId(initialId)
+          }
+          if (initialId && !initialUrlSessionId.current && !hasLocalConversationRef.current) {
+            syncUrlSession(initialId)
+          }
         })
-        const matched = initialUrlSessionId.current
-          ? remoteSessions.find((c) => c.id === initialUrlSessionId.current)
-          : null
-        const initialId = matched?.id || remoteSessions[0]?.id || null
-        if (!hasLocalConversationRef.current) {
-          setActiveConversationId(initialId)
-        }
-        if (initialId && !initialUrlSessionId.current && !hasLocalConversationRef.current) {
-          syncUrlSession(initialId)
-        }
-      })
-      .catch((err) => {
-        console.debug('[useChatPersistence] Failed to fetch remote sessions:', err)
-      })
+        .catch((err: unknown) => {
+          console.debug('[useChatPersistence] Failed to fetch remote sessions:', err)
+        })
 
     return () => {
       isCancelled = true
@@ -236,10 +236,10 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
         }
         return filtered
       })
-      draftsApi.deleteDraft(id).catch((err) => {
+      draftsApi.deleteDraft(id).catch((err: unknown) => {
         console.debug('[useChatPersistence] Delete draft error:', err)
       })
-      chatSessionsApi.deleteSession(id).catch((err) => {
+      chatSessionsApi.deleteSession(id).catch((err: unknown) => {
         console.debug('[useChatPersistence] Delete chat session error:', err)
       })
     },

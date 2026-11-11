@@ -2,7 +2,7 @@
  * Capa de acceso a localStorage para persistencia de conversaciones de chat.
  */
 
-import type { ChatConversation } from '../features/document/hooks/useChatPersistence'
+import type { ChatConversation } from '../features/chat/hooks/useChatPersistence'
 
 const STORAGE_PREFIX = 'funcassist_chats_'
 

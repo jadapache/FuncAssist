@@ -10,13 +10,22 @@ import { useAgentRun } from './useAgentRun'
 import type { AgentRunState } from '../types/agentEvents'
 import type { ChatPersistMessage, DocumentArtifact, ChatConversation, ChatAttachment } from './useChatPersistence'
 import type { Artifact } from '../../../types/artifacts'
-import type { FuncionalFeatureConfig } from '../../../features/funcional'
 import type { CanonicalDocumentOperation } from '../../../features/document/agent/core/types'
 import type { DocumentAgent } from '../../../features/document/agent/core/DocumentAgent'
 import type { UniverAdapter } from '../../../features/document/agent/adapters/UniverAdapter'
 
+export interface AgenticGenerationConfig {
+  slug?: string
+  title?: string
+  subtitle?: string
+  uploadTags?: string
+  placeholder?: string
+  docxTitle?: string
+  defaultExtension?: 'docx' | 'xlsx' | 'txt'
+}
+
 interface UseAgenticGenerationOptions {
-  config: FuncionalFeatureConfig
+  config?: AgenticGenerationConfig
   templateContent: string
   templateId: string | null
   sources: string[]
@@ -304,7 +313,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       onUpdateConversation({ messages: updatedMsgs }, targetConvId)
       onScrollToBottom()
 
-      const defaultFeature = config.uploadTags || config.slug
+      const defaultFeature = config?.uploadTags || config?.slug || 'chat'
       const resolution = resolveIntentAndStatus(queryText, defaultFeature)
       setGenerationStatus(resolution.initialStatus)
 
@@ -337,7 +346,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
 
             const parsedStream = parseStreamForChatAndArtifacts(
               accumulatedText,
-              config.docxTitle || config.title,
+              config?.docxTitle || config?.title || 'Documento',
               'docx',
               templateContent,
             )
@@ -425,7 +434,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         )
 
         if (operations.length > 0) {
-          await adapter.loadTemplate(currentDocContent, 'document', config.docxTitle || config.title)
+          await adapter.loadTemplate(currentDocContent, 'document', config?.docxTitle || config?.title || 'Documento')
           for (const op of operations) {
             try {
               await agent.dispatch(op)
@@ -441,13 +450,13 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           backendArtifacts && backendArtifacts.length > 0
             ? backendArtifacts.map((a) => ({
               title: a.title,
-              extension: (a.extension as 'docx' | 'xlsx' | 'txt') || config.defaultExtension || 'docx',
+              extension: (a.extension as 'docx' | 'xlsx' | 'txt') || config?.defaultExtension || 'docx',
               content: a.content,
             }))
             : parseMultipleArtifacts(
               finalContent,
-              config.docxTitle || config.title,
-              config.defaultExtension || 'docx',
+              config?.docxTitle || config?.title || 'Documento',
+              config?.defaultExtension || 'docx',
               templateContent,
               false,
             )
@@ -476,8 +485,8 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           // Si ya existe un artefacto activo en la sesión, actualizamos su contenido en lugar de duplicarlo
           const targetId = activeArtifact?.id || convArtifacts[0]?.id
           const newContent = extractedArtifacts[0]?.content || finalContent
-          const newTitle = extractedArtifacts[0]?.title || activeArtifact?.title || config.docxTitle || config.title
-          const newExt = extractedArtifacts[0]?.extension || activeArtifact?.extension || config.defaultExtension || 'docx'
+          const newTitle = extractedArtifacts[0]?.title || activeArtifact?.title || config?.docxTitle || config?.title || 'Documento'
+          const newExt = extractedArtifacts[0]?.extension || activeArtifact?.extension || config?.defaultExtension || 'docx'
 
           updatedArtifacts = convArtifacts.map((a) =>
             a.id === targetId
@@ -500,14 +509,14 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             extractedArtifacts[0]?.title ||
             (resolution.commandSlug
               ? `${resolution.commandSlug.toUpperCase()}: ${resolution.cleanQuery.slice(0, 30)}`
-              : config.docxTitle || config.title)
+              : config?.docxTitle || config?.title || 'Documento')
 
           const newContent = extractedArtifacts[0]?.content || finalContent
           const newArtifact: Artifact = {
             id: newArtId,
             title: artifactTitle,
             subtitle: generateArtifactSubtitle(newContent) || 'Documento generado por IA',
-            extension: extractedArtifacts[0]?.extension || config.defaultExtension || 'docx',
+            extension: extractedArtifacts[0]?.extension || config?.defaultExtension || 'docx',
             content: newContent,
             createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             updatedAt: 'Hace un momento',
@@ -523,7 +532,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           finalContent,
           resolution.targetMode,
           detectedIntent,
-          config.docxTitle || config.title,
+          config?.docxTitle || config?.title || 'Documento',
         )
 
         const assistantMessage: ChatPersistMessage = {

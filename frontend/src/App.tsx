@@ -13,17 +13,8 @@ import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { KnowledgePage, AskProductPage } from './features/knowledge'
 import { SettingsPage, ProfilePage } from './features/settings'
-import {
-  MejorasPage,
-  LevantamientoPage,
-  InventarioPage,
-  FuncionalFeaturePage,
-} from './features/funcional'
+import { ChatPage } from './features/chat'
 import { TranscripcionesPage } from './features/transcription'
-import { StandupPage, PmFeaturePage } from './features/pm'
-import { QaFeaturePage } from './features/qa'
-
-
 
 const GlobalFloatingJobs: React.FC = () => {
   const { jobs, cancelJob, removeJob } = useBackgroundJobs()
@@ -57,34 +48,13 @@ export const App = () => {
                         {/* Dashboard - all roles */}
                         <Route index element={<DashboardPage />} />
 
-                        {/* PM Routes - admin, pm */}
-                        <Route element={<ProtectedRoute allowedRoles={['admin', 'pm']} />}>
-                          <Route path="pm/standup" element={<StandupPage />} />
-                          <Route path="pm/:slug" element={<PmFeaturePage />} />
-                          <Route path="pm/:slug/:sessionId" element={<PmFeaturePage />} />
-                        </Route>
+                        {/* Chat Routes - all authenticated users */}
+                        <Route path="chat" element={<ChatPage />} />
+                        <Route path="chat/:sessionId" element={<ChatPage />} />
 
-                        {/* Funcional Routes - admin, funcional */}
-                        <Route element={<ProtectedRoute allowedRoles={['admin', 'funcional']} />}>
-                          <Route path="funcional/transcripciones" element={<TranscripcionesPage />} />
-                          <Route path="funcional/transcripciones/:slug" element={<TranscripcionesPage />} />
-                          <Route path="funcional/chat" element={<MejorasPage />} />
-                          <Route path="funcional/chat/:sessionId" element={<MejorasPage />} />
-                          <Route path="funcional/mejoras" element={<Navigate to="/funcional/chat" replace />} />
-                          <Route path="funcional/mejoras/:sessionId" element={<MejorasPage />} />
-                          <Route path="funcional/inventario" element={<InventarioPage />} />
-                          <Route path="funcional/inventario/:sessionId" element={<InventarioPage />} />
-                          <Route path="funcional/levantamiento" element={<LevantamientoPage />} />
-                          <Route path="funcional/levantamiento/:sessionId" element={<LevantamientoPage />} />
-                          <Route path="funcional/:slug" element={<FuncionalFeaturePage />} />
-                          <Route path="funcional/:slug/:sessionId" element={<FuncionalFeaturePage />} />
-                        </Route>
-
-                        {/* QA Routes - admin, qa */}
-                        <Route element={<ProtectedRoute allowedRoles={['admin', 'qa']} />}>
-                          <Route path="qa/:slug" element={<QaFeaturePage />} />
-                          <Route path="qa/:slug/:sessionId" element={<QaFeaturePage />} />
-                        </Route>
+                        {/* Transcription Tool */}
+                        <Route path="transcripciones" element={<TranscripcionesPage />} />
+                        <Route path="transcripciones/:slug" element={<TranscripcionesPage />} />
 
                         {/* Knowledge Routes - admin, pm, dev, qa, funcional */}
                         <Route element={<ProtectedRoute allowedRoles={['admin', 'pm', 'qa', 'funcional']} />}>
