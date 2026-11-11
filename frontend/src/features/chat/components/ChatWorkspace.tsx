@@ -777,12 +777,55 @@ export const ChatWorkspace = ({
                   </button>
                 </div>
 
+                {/* Attached Previews (Top of Text/Skill Area) */}
+                {attachedImages.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pb-1 border-b border-slate-200/50">
+                    {attachedImages.map((img) => (
+                      <div
+                        key={img.id}
+                        className="relative group h-12 w-12 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
+                      >
+                        <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setAttachedImages((prev) => prev.filter((i) => i.id !== img.id))}
+                          className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition cursor-pointer"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Attached Files Inline Badge Row (Top of Text/Skill Area) */}
+                {uploadedDocs.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pb-1 border-b border-slate-200/50">
+                    {uploadedDocs.map((doc) => (
+                      <span
+                        key={doc.id}
+                        className="inline-flex items-center gap-1.5 bg-blue-50 text-[#002777] border border-blue-200/80 text-xs font-medium px-2.5 py-1 rounded-xl shrink-0 shadow-2xs"
+                      >
+                        <FileText className="h-3.5 w-3.5 text-[#002777]" />
+                        <span className="truncate max-w-[180px]">{doc.filename}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveUploaded(doc.id)}
+                          className="hover:text-red-600 transition ml-0.5 cursor-pointer"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 {/* Textarea Row with Inline Selected Skill Chips */}
-                <div className="flex flex-wrap items-center gap-1.5 min-h-[28px]">
+                <div className="flex flex-wrap items-baseline gap-1.5 min-h-[28px]">
                   {selectedFeatures.map((skill) => (
                     <span
                       key={skill.id}
-                      className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-xs font-semibold text-[#002777] shrink-0 select-none"
+                      className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-xs font-semibold text-[#002777] shrink-0 select-none align-baseline"
                     >
                       <Sparkles className="h-3 w-3 text-blue-600 shrink-0" />
                       <span>/{skill.label || skill.id}</span>
@@ -807,7 +850,10 @@ export const ChatWorkspace = ({
                     onChange={(e) => {
                       const value = e.target.value
                       setDraft(value)
-                      setRubricMenuOpen(value.trimStart().startsWith('/'))
+                      const cursor = e.target.selectionStart ?? value.length
+                      const textBeforeCursor = value.slice(0, cursor)
+                      const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([a-zA-Z0-9_-]*)$/)
+                      setRubricMenuOpen(Boolean(slashMatch))
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -815,7 +861,12 @@ export const ChatWorkspace = ({
                         handleSubmitForm(e)
                       }
                     }}
-                    onFocus={() => setRubricMenuOpen(draft.trimStart().startsWith('/'))}
+                    onFocus={() => {
+                      const cursor = textareaRef.current?.selectionStart ?? draft.length
+                      const textBeforeCursor = draft.slice(0, cursor)
+                      const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([a-zA-Z0-9_-]*)$/)
+                      setRubricMenuOpen(Boolean(slashMatch))
+                    }}
                     placeholder={
                       selectedFeatures.length > 0
                         ? 'Describe qué debe generar el agente...'
@@ -823,7 +874,7 @@ export const ChatWorkspace = ({
                     }
                     disabled={isGenerating}
                     style={{ height: `${textareaHeight}px` }}
-                    className="flex-1 min-w-[120px] bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none resize-none placeholder:text-slate-400 disabled:opacity-60 font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal"
+                    className="flex-1 min-w-[120px] bg-transparent px-1 pr-16 text-xs text-slate-800 outline-none resize-none placeholder:text-slate-400 disabled:opacity-60 font-sans overflow-y-auto scrollbar-thin transition-[height] duration-150 ease-out leading-normal m-0 p-0 align-baseline"
                   />
                 </div>
 
@@ -866,7 +917,13 @@ export const ChatWorkspace = ({
                               if (prev.some((s) => s.id === feature)) return prev
                               return [...prev, { id: feature, label }]
                             })
-                            setDraft('')
+                            // Clean the slash trigger word from the input instead of erasing the whole draft
+                            setDraft((prev) => {
+                              const cursor = textareaRef.current?.selectionStart ?? prev.length
+                              const before = prev.slice(0, cursor).replace(/(?:^|\s)\/([a-zA-Z0-9_-]*)$/, '')
+                              const after = prev.slice(cursor)
+                              return `${before} ${after}`.trimStart()
+                            })
                             setRubricMenuOpen(false)
                             setTimeout(() => {
                               textareaRef.current?.focus()
@@ -880,49 +937,6 @@ export const ChatWorkspace = ({
                         )
                       })
                     )}
-                  </div>
-                )}
-
-                {/* Attached Images Thumbnail Row */}
-                {attachedImages.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 px-1 py-1 border-t border-slate-200/40">
-                    {attachedImages.map((img) => (
-                      <div
-                        key={img.id}
-                        className="relative group h-12 w-12 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
-                      >
-                        <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => setAttachedImages((prev) => prev.filter((i) => i.id !== img.id))}
-                          className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition cursor-pointer"
-                        >
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Attached Files Inline Badge Row (Inside prompt card) */}
-                {uploadedDocs.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 px-1 py-1 border-t border-slate-200/40">
-                    {uploadedDocs.map((doc) => (
-                      <span
-                        key={doc.id}
-                        className="inline-flex items-center gap-1.5 bg-blue-50 text-[#002777] border border-blue-200/80 text-xs font-medium px-2.5 py-1 rounded-xl shrink-0 shadow-2xs"
-                      >
-                        <FileText className="h-3.5 w-3.5 text-[#002777]" />
-                        <span className="truncate max-w-[180px]">{doc.filename}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveUploaded(doc.id)}
-                          className="hover:text-red-600 transition ml-0.5 cursor-pointer"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </span>
-                    ))}
                   </div>
                 )}
 
