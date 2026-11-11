@@ -50,8 +50,10 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
   const [conversations, setConversations] = useState<ChatConversation[]>([])
   const [searchParams, setSearchParams] = useSearchParams()
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>()
-  const urlSessionId = routeSessionId || searchParams.get('session')
+  const isExplicitNew = searchParams.get('new') === '1' || searchParams.get('new') === 'true'
+  const urlSessionId = routeSessionId || (isExplicitNew ? null : searchParams.get('session'))
   const initialUrlSessionId = useRef(urlSessionId)
+  const isExplicitNewRef = useRef(isExplicitNew)
   const hasLocalConversationRef = useRef(false)
   const [activeConversationId, setActiveConversationId] = useState<string | null>(urlSessionId || null)
 
@@ -61,6 +63,7 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev)
+          next.delete('new')
           if (sessionId) {
             next.set('session', sessionId)
           } else {
@@ -95,8 +98,28 @@ export function useChatPersistence(featureSlug: string, userId?: string | null) 
               })
               return { ...sess, messages: dedupedMessages }
             })
-            return [...localOnly, ...cleanedRemote]
+            const sorted = [...localOnly, ...cleanedRemote].sort(
+              (a, b) => new Date(b.lastInteraction).getTime() - new Date(a.lastInteraction).getTime(),
+            )
+            return sorted
           })
+          if (isExplicitNewRef.current) {
+            const newConv: ChatConversation = {
+              id: crypto.randomUUID(),
+              name: 'Nueva conversación',
+              lastInteraction: new Date().toISOString(),
+              messages: [],
+              documentContent: '',
+              artifacts: [],
+              activeArtifactId: undefined,
+            }
+            setConversations((current) => [newConv, ...current])
+            hasLocalConversationRef.current = true
+            setActiveConversationId(newConv.id)
+            syncUrlSession(newConv.id)
+            return
+          }
+
           const matched = initialUrlSessionId.current
             ? remoteSessions.find((c: ChatConversation) => c.id === initialUrlSessionId.current)
             : null

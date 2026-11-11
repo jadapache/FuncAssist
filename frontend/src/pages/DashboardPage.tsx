@@ -144,21 +144,21 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/chat"
+                to="/chat?new=1"
                 title="Chat"
                 description="Asistente interactivo para generar y mantener documentos de mejoras y requerimientos."
                 icon={MessageSquare}
                 gradient="from-[#004497] to-blue-600"
               />
               <QuickActionCard
-                to="/chat?skill=inventario_doc"
+                to="/chat?new=1&skill=inventario_doc"
                 title="Inventario"
                 description="Catálogo de componentes, módulos y funcionalidades."
                 icon={LayoutGrid}
                 gradient="from-blue-800 to-[#002777]"
               />
               <QuickActionCard
-                to="/chat?skill=levantamiento_doc"
+                to="/chat?new=1&skill=levantamiento_doc"
                 title="Levantamiento"
                 description="Estructuración y desglose de requerimientos del cliente."
                 icon={FileSearch}
@@ -168,7 +168,7 @@ export const DashboardPage = () => {
           ) : role === 'qa' ? (
             <>
               <QuickActionCard
-                to="/chat?skill=regression"
+                to="/chat?new=1&skill=regression"
                 title="Regresión QA"
                 description="Ejecuta y valida casos de prueba de regresión automatizados."
                 icon={TestTube2}
@@ -176,7 +176,7 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/chat?skill=api_qa"
+                to="/chat?new=1&skill=api_qa"
                 title="QA de API"
                 description="Pruebas de contratos, validación de endpoints y respuestas JSON."
                 icon={ClipboardCheck}
@@ -184,7 +184,7 @@ export const DashboardPage = () => {
                 gradient="from-[#004497] to-blue-600"
               />
               <QuickActionCard
-                to="/chat?skill=visual_qa"
+                to="/chat?new=1&skill=visual_qa"
                 title="QA Visual"
                 description="Inspección visual de interfaces y análisis de discrepancias."
                 icon={Eye}
@@ -194,7 +194,7 @@ export const DashboardPage = () => {
           ) : (
             <>
               <QuickActionCard
-                to="/chat?skill=standup"
+                to="/chat?new=1&skill=standup"
                 title="Generar Standup"
                 description="Ayer, hoy, bloqueos — obtenido automáticamente de Jira y GitHub."
                 icon={Sun}
@@ -202,7 +202,7 @@ export const DashboardPage = () => {
                 gradient="from-[#002777] to-[#004497]"
               />
               <QuickActionCard
-                to="/chat?skill=prd_checker"
+                to="/chat?new=1&skill=prd_checker"
                 title="Revisor de PRD"
                 description="Analiza especificaciones, revisa vacíos y evalúa criterios."
                 icon={FileSearch}
@@ -210,7 +210,7 @@ export const DashboardPage = () => {
                 gradient="from-[#004497] to-blue-600"
               />
               <QuickActionCard
-                to="/chat?skill=change_impact"
+                to="/chat?new=1&skill=change_impact"
                 title="Impacto de Cambios"
                 description="Mapea tickets, Pull Requests y documentos afectados por un cambio."
                 icon={GitCompareArrows}

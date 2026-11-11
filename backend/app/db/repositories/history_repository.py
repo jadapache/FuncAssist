@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.db.database import get_db
 from app.db.models import (
@@ -44,6 +45,7 @@ class ChatRepository:
         session.feature_slug = feature_slug
         session.document_content = document_content
         session.artifacts_json = artifacts_json
+        session.updated_at = datetime.now(timezone.utc)
         if active_art_id:
           session.active_artifact_id = active_art_id
         if user_id and not session.user_id:
@@ -71,7 +73,13 @@ class ChatRepository:
     limit: int = 50,
   ) -> List[dict[str, Any]]:
     async with get_db() as db:
-      stmt = select(ChatSessionModel).order_by(ChatSessionModel.updated_at.desc())
+      stmt = (
+        select(ChatSessionModel)
+        .order_by(
+          func.coalesce(ChatSessionModel.updated_at, ChatSessionModel.created_at).desc(),
+          ChatSessionModel.created_at.desc(),
+        )
+      )
       if user_id:
         stmt = stmt.where(ChatSessionModel.user_id == user_id)
       if feature_slug:
@@ -139,7 +147,7 @@ class ChatRepository:
       res = await db.execute(stmt)
       session = res.scalar_one_or_none()
       if session:
-        session.updated_at = msg.created_at
+        session.updated_at = msg.created_at or datetime.now(timezone.utc)
       await db.commit()
       await db.refresh(msg)
       return msg.to_dict()

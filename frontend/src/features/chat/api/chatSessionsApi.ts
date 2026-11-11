@@ -47,15 +47,16 @@ export const chatSessionsApi = {
         }))
 
       return {
-      id: s.id,
-      name: s.title || 'Conversación',
-      lastInteraction: s.updated_at || s.created_at || new Date().toISOString(),
-      messages,
-      documentContent: s.document_content || s.documentContent || '',
-      artifacts: s.artifacts || [],
-      activeArtifactId: s.active_artifact_id || s.activeArtifactId,
+        id: s.id,
+        name: s.title || 'Conversación',
+        lastInteraction: s.updated_at || s.created_at || new Date().toISOString(),
+        messages,
+        documentContent: s.document_content || s.documentContent || '',
+        artifacts: s.artifacts || [],
+        activeArtifactId: s.active_artifact_id || s.activeArtifactId,
       }
     }))
+    sessions.sort((a, b) => new Date(b.lastInteraction).getTime() - new Date(a.lastInteraction).getTime())
     return sessions
   },
 
