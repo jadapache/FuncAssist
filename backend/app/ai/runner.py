@@ -7,6 +7,7 @@ from typing import Any
 
 from app.ai.artifacts import artifacts_to_dict, extract_artifacts, is_artifact_truncated
 from app.ai.logging import log_ai_call
+from app.ai.map_reduce import map_reduce_condense_context, resolve_input_character_budget
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import resolve_provider
 from app.ai.request_types import (
@@ -468,19 +469,40 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig):
             f"[MODO DE TRABAJO: GENERACIÓN DE ARTEFACTO (Formato {ext_label})]\n"
             "Debes separar la respuesta: un mensaje breve en <chat>...</chat> y el documento completo en <artifact>...</artifact>."
         )
-    if cfg.chat_context:
-        user_prompt_sections.append(f"HISTORIAL PREVIO DEL CHAT:\n{cfg.chat_context}")
-    if bundle_text:
-        user_prompt_sections.append(f"DOCUMENTOS Y CONTEXTO DISPONIBLE:\n{bundle_text}")
-    if cfg.template_content and cfg.intent == "template_mutation":
-        user_prompt_sections.append(f"PLANTILLA CORPORATIVA:\n{cfg.template_content}")
+
+    provider = resolve_provider(provider_name=cfg.provider, model_name=cfg.model, user_id=cfg.user_id)
+    input_budget = resolve_input_character_budget(getattr(provider, "id", "groq"))
+
+    chat_ctx_text = cfg.chat_context or ""
+    context_docs_text = bundle_text or ""
+    template_text = cfg.template_content or ""
+
+    # Map-Reduce & Chunking Protection against Input Token Per Minute (ITPM) limit
+    combined_ctx_len = len(chat_ctx_text) + len(context_docs_text) + len(template_text) + len(cfg.query)
+    if combined_ctx_len > input_budget:
+        budget_for_docs = max(3000, input_budget - len(template_text) - len(cfg.query) - 2000)
+        if len(context_docs_text) > budget_for_docs:
+            context_docs_text = await map_reduce_condense_context(
+                context_docs_text,
+                target_budget=budget_for_docs,
+                provider=provider,
+                feature_goal=f"Contexto relevante para {cfg.intent}",
+            )
+        if len(chat_ctx_text) > 3000:
+            chat_ctx_text = chat_ctx_text[-3000:]
+
+    if chat_ctx_text:
+        user_prompt_sections.append(f"HISTORIAL PREVIO DEL CHAT:\n{chat_ctx_text}")
+    if context_docs_text:
+        user_prompt_sections.append(f"DOCUMENTOS Y CONTEXTO DISPONIBLE:\n{context_docs_text}")
+    if template_text and cfg.intent == "template_mutation":
+        user_prompt_sections.append(f"PLANTILLA CORPORATIVA:\n{template_text}")
     user_prompt_sections.append(f"SOLICITUD DEL USUARIO:\n{cfg.query}")
 
     full_user_text = "\n\n".join(user_prompt_sections)
     user_message = _assemble_multimodal_message(full_user_text, cfg.images)
     messages = [AIMessage(role="system", content=sys_prompt), user_message]
 
-    provider = resolve_provider(provider_name=cfg.provider, model_name=cfg.model, user_id=cfg.user_id)
     accumulated_text: list[str] = []
 
     async for chunk in provider.complete_stream(messages, max_tokens=8192):

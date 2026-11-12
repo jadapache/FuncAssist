@@ -864,12 +864,23 @@ def _format_stream_error(err: Exception) -> str:
     lower_err = err_msg.lower()
     if any(term in lower_err for term in ["api key", "unauthorized", "authentication", "auth", "401", "forbidden", "403", "invalid_api_key"]):
         return "Hubo un error de autenticación con el modelo, revisa la API key."
-    if "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
+    if "reduce max_tokens" in lower_err:
         limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
         req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
         req_tokens = req_match.group(1) if req_match else "solicitada"
         limit_tokens = limit_match.group(1) if limit_match else "establecido"
         return f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo."
+    if "otpm" in lower_err or "output tokens per minute" in lower_err:
+        wait_match = re.search(r"try again in ([0-9.]+s?)", err_msg, re.IGNORECASE)
+        wait_time = wait_match.group(1) if wait_match else "unos segundos"
+        limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
+        req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
+        if limit_match and req_match:
+            return (
+                f"Límite de tokens de salida por minuto (OTPM) alcanzado en Groq ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
+                f"Espera {wait_time} o selecciona un modelo con mayor cuota como Llama 3.3 70B Versatile o Gemini Flash en Configuración."
+            )
+        return f"Límite de tokens de salida por minuto (OTPM) alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo."
     if "ratelimiterror" in lower_err or "rate limit reached" in lower_err or "rate_limit_exceeded" in lower_err or "429" in lower_err:
         wait_match = re.search(r"try again in ([0-9.]+s?)", err_msg, re.IGNORECASE)
         wait_time = wait_match.group(1) if wait_match else "unos segundos"

@@ -211,4 +211,20 @@ class TestTranscriptCondensation:
         assert "Speaker" in condensed_long
         assert "..." in condensed_long
 
+    def test_map_reduce_chunk_splitting(self):
+        from app.ai.map_reduce import split_text_into_chunks, resolve_input_character_budget
+
+        budget_groq = resolve_input_character_budget("groq")
+        assert budget_groq == 14_000
+
+        budget_gemini = resolve_input_character_budget("gemini")
+        assert budget_gemini == 800_000
+
+        text = "Párrafo número uno con detalle.\n\n" * 50
+        chunks = split_text_into_chunks(text, max_chars=400)
+        assert len(chunks) > 1
+        for ch in chunks:
+            assert len(ch) <= 450
+
+
 

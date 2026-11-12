@@ -30,7 +30,7 @@ litellm.set_verbose = False
 def _handle_completion_error(err: Exception) -> Exception:
   err_str = str(err)
   lower_err = err_str.lower()
-  if "reduce max_tokens" in lower_err or "otpm" in lower_err or "output tokens per minute" in lower_err:
+  if "reduce max_tokens" in lower_err:
     limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
     req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
     req_tokens = req_match.group(1) if req_match else "solicitada"
@@ -38,6 +38,19 @@ def _handle_completion_error(err: Exception) -> Exception:
     return RuntimeError(
       f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo. "
       "Te sugerimos seleccionar un modelo diferente en Configuración (Settings)."
+    )
+  if "otpm" in lower_err or "output tokens per minute" in lower_err:
+    wait_match = re.search(r"try again in ([0-9.]+s?)", err_str, re.IGNORECASE)
+    wait_time = wait_match.group(1) if wait_match else "unos segundos"
+    limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)
+    req_match = re.search(r"Requested\s+(\d+)", err_str, re.IGNORECASE)
+    if limit_match and req_match:
+      return RuntimeError(
+        f"Límite de tokens de salida por minuto (OTPM) alcanzado en Groq ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
+        f"Espera {wait_time} o selecciona un modelo con mayor cuota como Llama 3.3 70B Versatile o Gemini Flash en Configuración."
+      )
+    return RuntimeError(
+      f"Límite de tokens de salida por minuto (OTPM) alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo."
     )
   if "itpm" in lower_err or "input tokens per minute" in lower_err or "request too large for model" in lower_err:
     limit_match = re.search(r"Limit\s+(\d+)", err_str, re.IGNORECASE)

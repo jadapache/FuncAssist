@@ -124,20 +124,36 @@ def resolve_model_max_tokens(
 
   model_limit = None
   try:
-    from app.ai.catalog import load_local_catalog
+    from app.ai.frontier_sync import KNOWN_FRONTIER_MODELS
 
-    catalog = load_local_catalog()
-    for m in catalog:
-      if m.provider == prov_clean and (
-        m.id == model_clean
-        or m.raw_id == model_clean
-        or ("/" in model_clean and (m.id == model_clean.split("/")[-1] or m.raw_id == model_clean.split("/")[-1]))
+    for km in KNOWN_FRONTIER_MODELS:
+      if km.get("provider", "").lower() == prov_clean and (
+        km.get("id") == model_clean
+        or km.get("raw_id") == model_clean
+        or ("/" in model_clean and (km.get("id") == model_clean.split("/")[-1] or km.get("raw_id") == model_clean.split("/")[-1]))
       ):
-        if m.max_output_tokens:
-          model_limit = m.max_output_tokens
+        if km.get("max_output_tokens"):
+          model_limit = km["max_output_tokens"]
           break
   except Exception:
     pass
+
+  if model_limit is None:
+    try:
+      from app.ai.catalog import load_local_catalog
+
+      catalog = load_local_catalog()
+      for m in catalog:
+        if m.provider == prov_clean and (
+          m.id == model_clean
+          or m.raw_id == model_clean
+          or ("/" in model_clean and (m.id == model_clean.split("/")[-1] or m.raw_id == model_clean.split("/")[-1]))
+        ):
+          if m.max_output_tokens:
+            model_limit = m.max_output_tokens
+            break
+    except Exception:
+      pass
 
   ceiling = model_limit if model_limit is not None else (spec.default_max_tokens if spec else None)
 

@@ -566,7 +566,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           /api\s*key|autenticaci[oó]n|authentication|unauthorized|401|forbidden|403|invalid_api_key/i.test(errMsg)
 
         const isRateLimitError =
-          /reduce max_tokens|OTPM|output tokens per minute|RateLimitError/i.test(errMsg)
+          /reduce max_tokens|RateLimitError/i.test(errMsg) && !/OTPM|tokens de salida por minuto/i.test(errMsg)
 
         const isContextMissingError =
           /not found in connected sources|no matching chunks|no documents uploaded|sin coincidencias en el contexto|no se encontr[oó] informaci[oó]n/i.test(errMsg)
