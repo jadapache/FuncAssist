@@ -13,7 +13,7 @@ from app.db.repositories import (
   TranscriptionRepository,
   UserRepository,
 )
-from tests.fake_session import GLOBAL_FAKE_STORAGE, fake_async_db, fake_sync_db
+from tests.fake_session import GLOBAL_FAKE_STORAGE, FakeAsyncSession, FakeSyncSession, fake_async_db, fake_sync_db
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,8 @@ def setup_fake_db():
 
 @pytest.mark.asyncio
 async def test_user_repository_orm_crud():
-  repo = UserRepository()
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = UserRepository(session)
 
   # 1. Count should start at 0
   assert await repo.count() == 0
@@ -84,7 +85,8 @@ async def test_user_repository_orm_crud():
 
 @pytest.mark.asyncio
 async def test_chat_repository_orm():
-  repo = ChatRepository()
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = ChatRepository(session)
 
   msg = await repo.save_message(
     session_id="sess-100",
@@ -106,7 +108,8 @@ async def test_chat_repository_orm():
 
 @pytest.mark.asyncio
 async def test_standup_repository_orm():
-  repo = StandupRepository()
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = StandupRepository(session)
 
   standup = await repo.create_standup(
     title="Daily Standup",
@@ -122,7 +125,8 @@ async def test_standup_repository_orm():
 
 @pytest.mark.asyncio
 async def test_prd_repository_orm():
-  repo = PRDRepository()
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = PRDRepository(session)
 
   prd = await repo.create_prd_review(
     prd_title="User Onboarding",
@@ -140,7 +144,8 @@ async def test_prd_repository_orm():
 
 @pytest.mark.asyncio
 async def test_test_plan_repository_orm():
-  repo = TestPlanRepository()
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = TestPlanRepository(session)
 
   plan = await repo.create_test_plan(
     feature_name="Payment Gateway",
@@ -154,8 +159,10 @@ async def test_test_plan_repository_orm():
   assert plans[0]["feature_name"] == "Payment Gateway"
 
 
-def test_transcription_repository_crud():
-  repo = TranscriptionRepository()
+@pytest.mark.asyncio
+async def test_transcription_repository_crud():
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = TranscriptionRepository(session)
 
   record = {
     "id": "tx-1001",
@@ -174,7 +181,7 @@ def test_transcription_repository_crud():
   }
 
   # 1. Upsert
-  saved = repo.upsert_sync(record)
+  saved = await repo.upsert(record)
   assert saved["id"] == "tx-1001"
   assert saved["title"] == "Daily Planning Sprint 24"
   assert saved["duration_seconds"] == 125.5
@@ -182,24 +189,25 @@ def test_transcription_repository_crud():
   assert saved["summary"]["topics"] == ["Sprint 24", "QA Automation"]
 
   # 2. Get
-  fetched = repo.get_sync("tx-1001")
+  fetched = await repo.get("tx-1001")
   assert fetched is not None
   assert fetched["text"] == "Bienvenidos a la planeación del sprint."
 
   # 3. List
-  all_items = repo.list_sync()
+  all_items = await repo.list()
   assert len(all_items) == 1
   assert all_items[0]["id"] == "tx-1001"
 
   # 4. Delete
-  deleted = repo.delete_sync("tx-1001")
+  deleted = await repo.delete("tx-1001")
   assert deleted is True
-  assert repo.get_sync("tx-1001") is None
+  assert await repo.get("tx-1001") is None
 
 
 @pytest.mark.asyncio
 async def test_corporate_template_repository_crud():
-  repo = CorporateTemplateRepository()
+  session = FakeAsyncSession(GLOBAL_FAKE_STORAGE)
+  repo = CorporateTemplateRepository(session)
 
   tmpl = {
     "id": "corp-tpl-1",
@@ -230,7 +238,8 @@ async def test_corporate_template_repository_crud():
 
 
 def test_ai_model_catalog_repository():
-  repo = AIModelCatalogRepository()
+  session = FakeSyncSession(GLOBAL_FAKE_STORAGE)
+  repo = AIModelCatalogRepository(session)
 
   models = [
     {
@@ -251,13 +260,13 @@ def test_ai_model_catalog_repository():
     },
   ]
 
-  count = repo.bulk_upsert_sync(models)
+  count = repo.bulk_upsert(models)
   assert count == 2
 
-  chat_models = repo.list_sync(task_type="chat_writing")
+  chat_models = repo.list(task_type="chat_writing")
   assert len(chat_models) == 1
   assert chat_models[0]["id"] == "llama-3.3-70b-versatile"
 
-  single = repo.get_sync("whisper-large-v3")
+  single = repo.get("whisper-large-v3")
   assert single is not None
   assert single["provider"] == "groq"

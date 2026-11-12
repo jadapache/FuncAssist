@@ -121,6 +121,9 @@ class FakeAsyncSession:
   async def refresh(self, obj: Any) -> None:
     pass
 
+  async def flush(self) -> None:
+    pass
+
   async def delete(self, obj: Any) -> None:
     t = type(obj)
     if t in self.storage.tables:
@@ -254,6 +257,9 @@ class FakeSyncSession:
       self.storage.tables[model_cls] = {k: copy.copy(v) for k, v in table_dict.items()}
 
   def refresh(self, obj: Any) -> None:
+    pass
+
+  def flush(self) -> None:
     pass
 
   def delete(self, obj: Any) -> None:
