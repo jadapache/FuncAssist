@@ -82,14 +82,16 @@ def _save_index(items: List[Dict[str, Any]]) -> None:
 
 async def list_templates() -> List[Dict[str, Any]]:
     try:
-        from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
-        repo = CorporateTemplateRepository()
-        items = await repo.list()
-        if items is not None:
-            for item in items:
-                if "tags" not in item:
-                    item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
-            return items
+        from app.db.database import get_db
+        from app.db.repositories.corporate_template_repository import CorporateTemplateRepository
+        async with get_db() as db:
+            repo = CorporateTemplateRepository(db)
+            items = await repo.list()
+            if items is not None:
+                for item in items:
+                    if "tags" not in item:
+                        item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
+                return items
     except Exception as exc:
         logger.debug(f"DB list_templates fallback to index: {exc}")
 
@@ -102,13 +104,15 @@ async def list_templates() -> List[Dict[str, Any]]:
 
 async def get_template(template_id: str) -> Optional[Dict[str, Any]]:
     try:
-        from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
-        repo = CorporateTemplateRepository()
-        item = await repo.get(template_id)
-        if item:
-            if "tags" not in item:
-                item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
-            return item
+        from app.db.database import get_db
+        from app.db.repositories.corporate_template_repository import CorporateTemplateRepository
+        async with get_db() as db:
+            repo = CorporateTemplateRepository(db)
+            item = await repo.get(template_id)
+            if item:
+                if "tags" not in item:
+                    item["tags"] = [t["tag"] for t in DEFAULT_SYSTEM_TAGS]
+                return item
     except Exception as exc:
         logger.debug(f"DB get_template fallback to index: {exc}")
 
@@ -333,8 +337,12 @@ async def save_template_file(
     _save_index(items)
 
     try:
-        from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
-        await CorporateTemplateRepository().upsert(item)
+        from app.db.database import get_db
+        from app.db.repositories.corporate_template_repository import CorporateTemplateRepository
+        async with get_db() as db:
+            repo = CorporateTemplateRepository(db)
+            await repo.upsert(item)
+            await db.commit()
     except Exception as exc:
         logger.debug(f"DB save_template_file error: {exc}")
 
@@ -373,8 +381,12 @@ async def update_template_metadata(
             _save_index(items)
 
             try:
-                from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
-                await CorporateTemplateRepository().upsert(item)
+                from app.db.database import get_db
+                from app.db.repositories.corporate_template_repository import CorporateTemplateRepository
+                async with get_db() as db:
+                    repo = CorporateTemplateRepository(db)
+                    await repo.upsert(item)
+                    await db.commit()
             except Exception as exc:
                 logger.debug(f"DB update_template error: {exc}")
 
@@ -446,8 +458,12 @@ async def delete_template(template_id: str) -> bool:
                 pass
 
         try:
-            from app.db.repositories.catalog_and_corporate_repository import CorporateTemplateRepository
-            await CorporateTemplateRepository().delete(template_id)
+            from app.db.database import get_db
+            from app.db.repositories.corporate_template_repository import CorporateTemplateRepository
+            async with get_db() as db:
+                repo = CorporateTemplateRepository(db)
+                await repo.delete(template_id)
+                await db.commit()
         except Exception as exc:
             logger.debug(f"DB delete_template error: {exc}")
 

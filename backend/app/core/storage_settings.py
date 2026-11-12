@@ -17,7 +17,7 @@ from app.core.secrets import (
 )
 from app.core.storage_cache import _CACHE_APP_SETTINGS, DEFAULT_APP_SETTINGS
 from app.core.storage_preferences import save_user_preferences
-from app.db.models import SettingModel, UserPreferencesModel
+from app.db.repositories.settings_repository import SettingsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -53,29 +53,21 @@ def get_setting(
   db: Optional[Any] = None,
 ) -> Any:
   """Retrieve a specific setting entry for a user, falling back to global scope."""
-  target_user = user_id or ""
-
-  def _read(session: Any) -> Any:
-    item = session.scalar(
-      select(SettingModel).where(SettingModel.key == key)
-    )
-    if item is not None and item.value_json is not None:
-      return deserialize_setting_val(key, item.value_json)
-    return None
-
   if db is not None:
-    val = _read(db)
-    if val is not None:
-      return val
-
-  try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      val = _read(session)
-      if val is not None:
-        return val
-  except Exception as exc:
-    logger.debug("Failed reading setting %s from DB: %s", key, exc)
+    repo = SettingsRepository(session=db)
+    val_json = repo.get_setting(key)
+    if val_json is not None:
+      return deserialize_setting_val(key, val_json)
+  else:
+    try:
+      from app.db.database import get_sync_db
+      with get_sync_db() as session:
+        repo = SettingsRepository(session=session)
+        val_json = repo.get_setting(key)
+        if val_json is not None:
+          return deserialize_setting_val(key, val_json)
+    except Exception as exc:
+      logger.debug("Failed reading setting %s from DB: %s", key, exc)
 
   if _CACHE_APP_SETTINGS and key in _CACHE_APP_SETTINGS:
     return deserialize_setting_val(key, json.dumps(_CACHE_APP_SETTINGS[key]))
@@ -89,27 +81,17 @@ def set_setting(
   db: Optional[Any] = None,
 ) -> None:
   """Save a single setting record per key in settings entity."""
-  target_user = user_id or ""
   serialized = serialize_setting_val(key, value)
-
-  def _persist(session: Any) -> None:
-    item = session.scalar(
-      select(SettingModel).where(SettingModel.key == key)
-    )
-    if item:
-      item.value_json = serialized
-    else:
-      item = SettingModel(key=key, value_json=serialized)
-      session.add(item)
-
   if db is not None:
-    _persist(db)
+    repo = SettingsRepository(session=db)
+    repo.set_setting(key, serialized)
     return
 
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as session:
-      _persist(session)
+      repo = SettingsRepository(session=session)
+      repo.set_setting(key, serialized)
       session.commit()
   except Exception as exc:
     logger.error("Failed writing setting %s to DB: %s", key, exc)
@@ -123,23 +105,17 @@ def load_app_settings(user_id: Optional[str] = None) -> dict[str, Any]:
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as db:
-      global_rows = db.scalars(
-        select(SettingModel)
-      ).all()
-
-      for row in global_rows:
-        if row.key.startswith("conn:") or row.key.startswith("user_ai:"):
+      repo = SettingsRepository(session=db)
+      all_settings = repo.get_all_settings()
+      for k, val_json in all_settings.items():
+        if k.startswith("conn:") or k.startswith("user_ai:"):
           continue
-        res[row.key] = deserialize_setting_val(row.key, row.value_json)
+        res[k] = deserialize_setting_val(k, val_json)
 
-        prefs = db.scalar(
-          select(UserPreferencesModel).where(UserPreferencesModel.user_id == user_id)
-        )
+      if user_id:
+        prefs = repo.get_user_preferences(user_id)
         if prefs:
-          pdict = prefs.to_dict()
-          extra = pdict.pop("settings_json", {}) or {}
-          res.update(extra)
-          res.update({k: v for k, v in pdict.items() if v is not None})
+          res.update(prefs)
   except Exception as exc:
     logger.debug("Could not load app settings from DB: %s", exc)
 

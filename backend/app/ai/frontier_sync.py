@@ -668,9 +668,12 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
 
         # Persist directly to PostgreSQL database entity
         try:
-            from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
-            _cat_repo = AIModelCatalogRepository()
-            _cat_repo.replace_external_sync(validated_list)
+            from app.db.database import get_sync_db
+            from app.db.repositories.catalog_repository import AIModelCatalogRepository
+            with get_sync_db() as db:
+                _cat_repo = AIModelCatalogRepository(db)
+                _cat_repo.replace_external(validated_list)
+                db.commit()
         except Exception as db_err:
             logger.warning(f"Failed to persist frontier models catalog into DB: {db_err}")
 

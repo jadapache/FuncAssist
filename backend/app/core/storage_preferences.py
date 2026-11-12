@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app.db.models import UserPreferencesModel
+from app.db.repositories.settings_repository import SettingsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -29,23 +29,15 @@ def get_user_preferences(user_id: str, db: Optional[Any] = None) -> dict[str, An
   if not user_id:
     return {}
 
-  def _read(session: Any) -> dict[str, Any]:
-    prefs = session.scalar(
-      select(UserPreferencesModel).where(UserPreferencesModel.user_id == user_id)
-    )
-    if prefs:
-      res = prefs.to_dict()
-      extra = res.pop("settings_json", {}) or {}
-      return {**extra, **res}
-    return {}
-
   if db is not None:
-    return _read(db)
+    repo = SettingsRepository(session=db)
+    return repo.get_user_preferences(user_id) or {}
 
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as session:
-      return _read(session)
+      repo = SettingsRepository(session=session)
+      return repo.get_user_preferences(user_id) or {}
   except Exception as exc:
     logger.debug("Failed reading user_preferences for %s: %s", user_id, exc)
   return {}
@@ -60,44 +52,17 @@ def save_user_preferences(
   if not user_id:
     return payload
 
-  def _persist(session: Any) -> dict[str, Any]:
-    item = session.scalar(
-      select(UserPreferencesModel).where(UserPreferencesModel.user_id == user_id)
-    )
-    if not item:
-      item = UserPreferencesModel(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        settings_json={},
-      )
-      session.add(item)
-
-    extra = dict(item.settings_json or {})
-    for k, v in payload.items():
-      if k in ("inference_provider", "provider"):
-        item.inference_provider = v
-      elif k in ("inference_model", "model"):
-        item.inference_model = v
-      elif k in ("language", "lang"):
-        item.language = v
-      elif k in CORE_PREFERENCE_FIELDS:
-        setattr(item, k, v)
-      elif k not in ("user_id", "id"):
-        extra[k] = v
-    item.settings_json = extra
-    res = item.to_dict()
-    extra = res.pop("settings_json", {}) or {}
-    return {**extra, **res}
-
   if db is not None:
-    return _persist(db)
+    repo = SettingsRepository(session=db)
+    return repo.save_user_preferences(user_id, payload)
 
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as session:
-      result = _persist(session)
+      repo = SettingsRepository(session=session)
+      res = repo.save_user_preferences(user_id, payload)
       session.commit()
-      return result
+      return res
   except Exception as exc:
     logger.error("Failed saving user_preferences for %s: %s", user_id, exc)
     raise

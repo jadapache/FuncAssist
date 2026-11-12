@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.core.secret_store import secret_store
 from app.core.secrets import decrypt_secret
-from app.db.models import UserProviderCredentialModel
+from app.db.repositories.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -41,28 +41,13 @@ def save_user_credential(
       db=session,
     )
     enc_ref = f"sec::{secret_id}"
-
-    cred = session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
+    repo = IntegrationRepository(session=session)
+    repo.save_user_credential(
+      user_id=user_id,
+      provider=provider,
+      secret_id=secret_id,
+      secret_ref=enc_ref,
     )
-    if cred:
-      cred.secret_id = secret_id
-      cred.secret_ref = enc_ref
-      cred.status = "active"
-      cred.validation_error = None
-    else:
-      cred = UserProviderCredentialModel(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        provider=provider,
-        secret_id=secret_id,
-        secret_ref=enc_ref,
-        status="active",
-      )
-      session.add(cred)
     return secret_id
 
   if db is not None:
@@ -85,16 +70,12 @@ def load_user_credential(user_id: str, provider: str, db: Optional[Any] = None) 
     return ""
 
   def _read(session: Any) -> str:
-    cred = session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
+    repo = IntegrationRepository(session=session)
+    cred = repo.get_user_credential(user_id, provider)
     if not cred:
       return ""
 
-    ref_or_id = cred.secret_id or cred.secret_ref
+    ref_or_id = cred.get("secret_id") or cred.get("secret_ref")
     if ref_or_id:
       try:
         val = secret_store.get_secret(
@@ -108,8 +89,8 @@ def load_user_credential(user_id: str, provider: str, db: Optional[Any] = None) 
       except Exception as exc:
         logger.debug("SecretStore read error for %s/%s: %s", user_id, provider, exc)
 
-      if cred.secret_ref:
-        return decrypt_secret(cred.secret_ref)
+      if cred.get("secret_ref"):
+        return decrypt_secret(cred["secret_ref"])
     return ""
 
   if db is not None:
@@ -130,24 +111,19 @@ def delete_user_credential(user_id: str, provider: str, db: Optional[Any] = None
     return False
 
   def _delete(session: Any) -> bool:
-    cred = session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
+    repo = IntegrationRepository(session=session)
+    cred = repo.get_user_credential(user_id, provider)
     if not cred:
       return False
 
-    secret_ref = cred.secret_id or cred.secret_ref
+    secret_ref = cred.get("secret_id") or cred.get("secret_ref")
     if secret_ref:
       try:
         secret_store.delete_secret(user_id, secret_ref, db=session)
       except Exception as exc:
         logger.debug("Could not delete secret entity: %s", exc)
 
-    session.delete(cred)
-    return True
+    return repo.delete_user_credential(user_id, provider)
 
   if db is not None:
     return _delete(db)
@@ -168,31 +144,15 @@ def list_user_credentials_info(user_id: str, db: Optional[Any] = None) -> List[d
   if not user_id:
     return []
 
-  def _list(session: Any) -> List[dict[str, Any]]:
-    creds = session.scalars(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id
-      )
-    ).all()
-    return [
-      {
-        "provider": c.provider,
-        "status": c.status,
-        "is_configured": True,
-        "last_validated_at": c.last_validated_at.isoformat() if c.last_validated_at else None,
-        "validation_error": c.validation_error,
-        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-      }
-      for c in creds
-    ]
-
   if db is not None:
-    return _list(db)
+    repo = IntegrationRepository(session=db)
+    return repo.list_user_credentials(user_id)
 
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as session:
-      return _list(session)
+      repo = IntegrationRepository(session=session)
+      return repo.list_user_credentials(user_id)
   except Exception as exc:
     logger.debug("Failed listing credentials for %s: %s", user_id, exc)
     return []
@@ -206,26 +166,16 @@ def update_credential_validation(
   db: Optional[Any] = None,
 ) -> None:
   """Update last validation timestamp and result without storing secret details."""
-  def _update(session: Any) -> None:
-    cred = session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
-    if cred:
-      cred.status = status
-      cred.last_validated_at = datetime.now(timezone.utc)
-      cred.validation_error = error_msg
-
   if db is not None:
-    _update(db)
+    repo = IntegrationRepository(session=db)
+    repo.update_credential_validation(user_id, provider, status, error_msg)
     return
 
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as session:
-      _update(session)
+      repo = IntegrationRepository(session=session)
+      repo.update_credential_validation(user_id, provider, status, error_msg)
       session.commit()
   except Exception as exc:
     logger.debug("Failed updating credential validation: %s", exc)

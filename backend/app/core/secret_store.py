@@ -22,7 +22,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import delete, select
 
 from app.core.secrets import _derive_fernet_key, _get_master_secret, _get_pbkdf2_salt, decrypt_secret, is_encrypted
-from app.db.models import AuditEventModel, UserSecretModel
+from app.db.interfaces.secret_repository import IUserSecretRepository
+from app.db.repositories.secret_repository import UserSecretRepository
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,18 @@ def _extract_secret_id(secret_id_or_ref: str) -> str:
 class SecretStore:
   """Manages encrypted secrets lifecycle in the user_secrets database table."""
 
-  def __init__(self) -> None:
-    pass
+  def __init__(self, repo_factory: Optional[Any] = None) -> None:
+    self.repo_factory = repo_factory
+
+  def _get_repo(self, db: Optional[Any] = None, session_manager: Optional[Any] = None) -> tuple[IUserSecretRepository, Optional[Any]]:
+    if db is not None:
+      return UserSecretRepository(session=db), None
+    if self.repo_factory:
+      return self.repo_factory(), None
+    from app.db.database import get_sync_db
+    cm = get_sync_db()
+    session = cm.__enter__()
+    return UserSecretRepository(session=session), (cm, session)
 
   def create_secret(
     self,
@@ -89,18 +100,24 @@ class SecretStore:
     b64_cipher = base64.b64encode(ciphertext).decode("utf-8")
     b64_nonce = base64.b64encode(nonce).decode("utf-8")
 
-    def _persist(session: Any) -> None:
-      record = UserSecretModel(
-        id=secret_id,
+    repo, cm_tuple = self._get_repo(db)
+    try:
+      repo.create(
+        secret_id=secret_id,
         user_id=user_id,
         purpose=purpose,
         ciphertext=b64_cipher,
         nonce=b64_nonce,
         key_version=CURRENT_KEY_VERSION,
       )
-      session.add(record)
+      if cm_tuple:
+        cm, session = cm_tuple
+        session.commit()
+    finally:
+      if cm_tuple:
+        cm, session = cm_tuple
+        cm.__exit__(None, None, None)
 
-    self._run_in_session(_persist, db)
     return secret_id
 
   def get_secret(
@@ -118,40 +135,44 @@ class SecretStore:
       return decrypt_secret(secret_id_or_ref)
 
     secret_id = _extract_secret_id(secret_id_or_ref)
-
-    def _read(session: Any) -> Optional[UserSecretModel]:
-      stmt = select(UserSecretModel).where(UserSecretModel.id == secret_id)
-      return session.scalar(stmt)
-
-    record = self._run_in_session(_read, db)
-    if not record:
-      return ""
-
-    if record.user_id != user_id:
-      self._record_audit_event(
-        user_id=user_id,
-        action="secret_access_denied",
-        resource_id=secret_id,
-        db=db,
-      )
-      raise PermissionError("Unauthorized access to requested secret")
-
-    if purpose and record.purpose != purpose:
-      raise ValueError("Secret purpose mismatch")
-
-    return self._decrypt_record(record, user_id)
-
-  def _decrypt_record(self, record: UserSecretModel, user_id: str) -> str:
-    """Decrypt a UserSecretModel record with AES-256-GCM verification."""
+    repo, cm_tuple = self._get_repo(db)
     try:
-      nonce = base64.b64decode(record.nonce)
-      ciphertext = base64.b64decode(record.ciphertext)
-      aad = _make_aad(user_id, record.purpose, record.id)
+      record = repo.get_by_id(secret_id)
+      if not record:
+        return ""
+
+      if record.get("user_id") != user_id:
+        repo.record_audit_event(
+          user_id=user_id,
+          action="secret_access_denied",
+          resource_type="secret",
+          resource_id=secret_id,
+        )
+        if cm_tuple:
+          cm, session = cm_tuple
+          session.commit()
+        raise PermissionError("Unauthorized access to requested secret")
+
+      if purpose and record.get("purpose") != purpose:
+        raise ValueError("Secret purpose mismatch")
+
+      return self._decrypt_record(record, user_id)
+    finally:
+      if cm_tuple:
+        cm, session = cm_tuple
+        cm.__exit__(None, None, None)
+
+  def _decrypt_record(self, record: dict[str, Any], user_id: str) -> str:
+    """Decrypt a secret record with AES-256-GCM verification."""
+    try:
+      nonce = base64.b64decode(record["nonce"])
+      ciphertext = base64.b64decode(record["ciphertext"])
+      aad = _make_aad(user_id, record["purpose"], record["id"])
       aesgcm = _get_aesgcm()
       decrypted = aesgcm.decrypt(nonce, ciphertext, aad)
       return decrypted.decode("utf-8")
     except Exception as exc:
-      logger.warning("Decryption failed for secret %s: %s", record.id, exc)
+      logger.warning("Decryption failed for secret %s: %s", record.get("id"), exc)
       return ""
 
   def rotate_secret(
@@ -166,24 +187,32 @@ class SecretStore:
       raise ValueError("Invalid parameters for rotate_secret")
 
     secret_id = _extract_secret_id(secret_id_or_ref)
-
-    def _rotate(session: Any) -> str:
-      stmt = select(UserSecretModel).where(UserSecretModel.id == secret_id)
-      record = session.scalar(stmt)
-      if not record or record.user_id != user_id:
+    repo, cm_tuple = self._get_repo(db)
+    try:
+      record = repo.get_by_id(secret_id)
+      if not record or record.get("user_id") != user_id:
         raise PermissionError("Secret not found or access denied")
 
       nonce = secrets.token_bytes(12)
-      aad = _make_aad(user_id, record.purpose, secret_id)
+      aad = _make_aad(user_id, record["purpose"], secret_id)
       aesgcm = _get_aesgcm()
       ciphertext = aesgcm.encrypt(nonce, new_plain_value.encode("utf-8"), aad)
 
-      record.ciphertext = base64.b64encode(ciphertext).decode("utf-8")
-      record.nonce = base64.b64encode(nonce).decode("utf-8")
-      record.key_version = CURRENT_KEY_VERSION
+      repo.update_ciphertext(
+        secret_id=secret_id,
+        user_id=user_id,
+        ciphertext=base64.b64encode(ciphertext).decode("utf-8"),
+        nonce=base64.b64encode(nonce).decode("utf-8"),
+        key_version=CURRENT_KEY_VERSION,
+      )
+      if cm_tuple:
+        cm, session = cm_tuple
+        session.commit()
       return secret_id
-
-    return self._run_in_session(_rotate, db)
+    finally:
+      if cm_tuple:
+        cm, session = cm_tuple
+        cm.__exit__(None, None, None)
 
   def delete_secret(
     self,
@@ -196,19 +225,23 @@ class SecretStore:
       return False
 
     secret_id = _extract_secret_id(secret_id_or_ref)
-
-    def _delete(session: Any) -> bool:
-      stmt = select(UserSecretModel).where(UserSecretModel.id == secret_id)
-      record = session.scalar(stmt)
+    repo, cm_tuple = self._get_repo(db)
+    try:
+      record = repo.get_by_id(secret_id)
       if not record:
         return False
-      if record.user_id != user_id:
+      if record.get("user_id") != user_id:
         raise PermissionError("Cannot delete secret owned by another user")
 
-      session.delete(record)
-      return True
-
-    return self._run_in_session(_delete, db)
+      deleted = repo.delete(secret_id, user_id)
+      if cm_tuple:
+        cm, session = cm_tuple
+        session.commit()
+      return deleted
+    finally:
+      if cm_tuple:
+        cm, session = cm_tuple
+        cm.__exit__(None, None, None)
 
   def validate_secret_access(
     self,
@@ -221,17 +254,18 @@ class SecretStore:
     if not user_id or not secret_id_or_ref:
       return False
     secret_id = _extract_secret_id(secret_id_or_ref)
-
-    def _check(session: Any) -> bool:
-      stmt = select(UserSecretModel).where(UserSecretModel.id == secret_id)
-      record = session.scalar(stmt)
-      if not record or record.user_id != user_id:
+    repo, cm_tuple = self._get_repo(db)
+    try:
+      record = repo.get_by_id(secret_id)
+      if not record or record.get("user_id") != user_id:
         return False
-      if expected_purpose and record.purpose != expected_purpose:
+      if expected_purpose and record.get("purpose") != expected_purpose:
         return False
       return True
-
-    return bool(self._run_in_session(_check, db))
+    finally:
+      if cm_tuple:
+        cm, session = cm_tuple
+        cm.__exit__(None, None, None)
 
   def _record_audit_event(
     self,
@@ -240,31 +274,21 @@ class SecretStore:
     resource_id: str,
     db: Optional[Any] = None,
   ) -> None:
-    """Write an entry to audit_events for security monitoring."""
-    def _audit(session: Any) -> None:
-      event = AuditEventModel(
-        id=str(uuid.uuid4()),
+    repo, cm_tuple = self._get_repo(db)
+    try:
+      repo.record_audit_event(
         user_id=user_id,
         action=action,
         resource_type="secret",
         resource_id=resource_id,
       )
-      session.add(event)
-
-    try:
-      self._run_in_session(_audit, db)
-    except Exception as exc:
-      logger.debug("Failed logging audit event: %s", exc)
-
-  def _run_in_session(self, func_op: Any, db: Optional[Any] = None) -> Any:
-    """Execute a callable inside the passed session or a new sync session."""
-    if db is not None:
-      return func_op(db)
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      res = func_op(session)
-      session.commit()
-      return res
+      if cm_tuple:
+        cm, session = cm_tuple
+        session.commit()
+    finally:
+      if cm_tuple:
+        cm, session = cm_tuple
+        cm.__exit__(None, None, None)
 
 
 # Singleton accessor

@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.core.settings import get_settings
 from app.core.storage_cache import _CACHE_CONNECTIONS, make_conn_cache_key
-from app.db.models import OrganizationIntegrationModel
+from app.db.repositories.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -54,27 +54,16 @@ def save_connection(integration_id: str, payload: dict[str, Any], org_id: str = 
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
       enc_str = encrypted.decode("ascii")
-      if item:
-        item.client_secret_ref = enc_str
-        item.client_id = payload.get("client_id")
-        item.status = "active"
-      else:
-        new_item = OrganizationIntegrationModel(
-          id=str(uuid.uuid4()),
-          organization_id=org_id,
-          provider=integration_id,
-          client_id=payload.get("client_id"),
-          client_secret_ref=enc_str,
-          status="active",
-        )
-        db.add(new_item)
+      repo = IntegrationRepository(session=db)
+      repo.save_organization_integration(
+        organization_id=org_id,
+        provider=integration_id,
+        client_id=payload.get("client_id"),
+        client_secret_ref=enc_str,
+        status="active",
+        settings_payload=None,
+      )
       db.commit()
   except Exception as exc:
     logger.error("Failed to persist organization integration to DB: %s", exc)
@@ -89,14 +78,10 @@ def load_connection(integration_id: str, org_id: str = "default") -> dict[str, A
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
-      if item and item.client_secret_ref:
-        encrypted = item.client_secret_ref.encode("ascii")
+      repo = IntegrationRepository(session=db)
+      item = repo.get_organization_integration(org_id, integration_id)
+      if item and item.get("client_secret_ref"):
+        encrypted = item["client_secret_ref"].encode("ascii")
         _CACHE_CONNECTIONS[cache_key] = encrypted
       elif item is None:
         # If DB explicitly has no record, invalidate cache
@@ -125,17 +110,10 @@ def delete_connection(integration_id: str, org_id: str = "default") -> bool:
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
-      if item:
-        db.delete(item)
-        db.commit()
-        return True
-      return existed
+      repo = IntegrationRepository(session=db)
+      deleted = repo.delete_organization_integration(org_id, integration_id)
+      db.commit()
+      return bool(deleted or existed)
   except Exception as exc:
     logger.error("Could not delete connection from DB: %s", exc)
     raise
@@ -150,13 +128,8 @@ def connection_exists(integration_id: str, org_id: str = "default") -> bool:
   try:
     from app.db.database import get_sync_db
     with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel.id).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
-      return item is not None
+      repo = IntegrationRepository(session=db)
+      return repo.organization_integration_exists(org_id, integration_id)
   except Exception:
     return False
 
