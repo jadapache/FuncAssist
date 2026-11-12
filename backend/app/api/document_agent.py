@@ -31,7 +31,7 @@ from app.core.document_agent.schema import (
     AssetLocator,
     VerificationReport,
 )
-from app.ai.artifacts import extract_artifacts, artifacts_to_dict
+from app.ai.artifacts import extract_artifacts, artifacts_to_dict, build_fallback_artifact
 from app.ai.runner import (
     AgenticChatConfig,
     run_agentic_chat_stream,
@@ -128,6 +128,22 @@ def classify_prompt_intent(
         "genera el inventario",
         "redacta el documento corporativo",
         "actualiza la plantilla",
+        "generar artefacto",
+        "genera el artefacto",
+        "genera artefacto",
+        "crear artefacto",
+        "crea el artefacto",
+        "generar documento",
+        "genera el documento",
+        "genera documento",
+        "crear documento",
+        "crea el documento",
+        "redacta el documento",
+        "elabora el documento",
+        "regenera y completa",
+        "regenera el documento",
+        "regenerar documento",
+        "regenerar el documento",
     ]
     if any(kw in p_lower for kw in template_keywords):
         return "template_mutation"
@@ -505,11 +521,21 @@ async def handle_agentic_prompt(
         full_content = "".join(accumulated)
         parsed_arts, clean_ans = extract_artifacts(full_content)
         art_dicts = artifacts_to_dict(parsed_arts)
+        is_generative_intent = intent in ("template_mutation", "generic_plan", "generic_report")
+
+        if not art_dicts and is_generative_intent and full_content.strip():
+            fallback_title = "Documento" if intent == "template_mutation" else ("Plan" if intent == "generic_plan" else "Informe")
+            fallback_art = build_fallback_artifact(full_content, default_title=fallback_title, default_extension=template_ext)
+            art_dicts = artifacts_to_dict([fallback_art])
+
         is_template = (intent == "template_mutation")
 
-        asst_msg = clean_ans if art_dicts else (
+        asst_msg = clean_ans if parsed_arts else (
             "He generado y estructurado el documento corporativo en el visor de artefactos."
-            if is_template else full_content
+            if is_template else (
+                "He elaborado el documento solicitado en el panel de artefactos."
+                if is_generative_intent else full_content
+            )
         )
 
         conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
@@ -673,6 +699,13 @@ async def handle_agentic_prompt_stream(
 
             parsed_arts, clean_ans = extract_artifacts(full_content)
             art_dicts = artifacts_to_dict(parsed_arts)
+            is_generative_intent = intent in ("template_mutation", "generic_plan", "generic_report")
+
+            if not art_dicts and is_generative_intent and full_content.strip():
+                fallback_title = "Documento" if intent == "template_mutation" else ("Plan" if intent == "generic_plan" else "Informe")
+                fallback_art = build_fallback_artifact(full_content, default_title=fallback_title, default_extension=template_ext)
+                art_dicts = artifacts_to_dict([fallback_art])
+
             is_template = (intent == "template_mutation")
 
             for idx, art in enumerate(art_dicts):
@@ -690,9 +723,12 @@ async def handle_agentic_prompt_stream(
                 rubric_score, rubric_feedback = _evaluate_artifacts_rubric(art_dicts)
                 yield emitter.step_completed("step-rubric", f"Calidad de artefacto: {rubric_score}/100").to_sse_packet()
 
-            asst_msg = clean_ans if art_dicts else (
+            asst_msg = clean_ans if parsed_arts else (
                 "He generado y estructurado el documento corporativo en el panel de artefactos."
-                if is_template else full_content
+                if is_template else (
+                    "He elaborado el documento solicitado en el panel de artefactos."
+                    if is_generative_intent else full_content
+                )
             )
 
             yield emitter.completed(

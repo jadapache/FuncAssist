@@ -79,6 +79,7 @@ interface IntentResolution {
 function resolveIntentAndStatus(
   queryText: string,
   defaultFeature: string,
+  templateId?: string | null,
 ): IntentResolution {
   const pLower = queryText.toLowerCase()
   const isQuestion =
@@ -150,6 +151,17 @@ function resolveIntentAndStatus(
     }
   }
 
+  if (templateId && templateId.trim()) {
+    return {
+      commandSlug: 'plantilla',
+      cleanQuery,
+      targetFeature: defaultFeature,
+      targetMode: 'template',
+      initialStatus: 'Estructurando documento corporativo...',
+      isChatOnly: false,
+    }
+  }
+
   if (pLower.includes('plan de') || pLower.includes('genera un plan') || pLower.includes('crea un plan')) {
     return {
       commandSlug: 'plan',
@@ -172,7 +184,24 @@ function resolveIntentAndStatus(
     }
   }
 
-  if (pLower.includes('completa la plantilla') || pLower.includes('genera el documento')) {
+  const isDocumentGeneration = [
+    'completa la plantilla',
+    'llena la plantilla',
+    'genera el documento',
+    'generar documento',
+    'crear documento',
+    'crea el documento',
+    'generar artefacto',
+    'genera el artefacto',
+    'genera artefacto',
+    'crear artefacto',
+    'crea el artefacto',
+    'redacta el documento',
+    'elabora el documento',
+    'regenera',
+  ].some((kw) => pLower.includes(kw))
+
+  if (isDocumentGeneration) {
     return {
       commandSlug: 'plantilla',
       cleanQuery,
@@ -314,7 +343,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       onScrollToBottom()
 
       const defaultFeature = config?.uploadTags || config?.slug || 'chat'
-      const resolution = resolveIntentAndStatus(queryText, defaultFeature)
+      const resolution = resolveIntentAndStatus(queryText, defaultFeature, templateId)
       setGenerationStatus(resolution.initialStatus)
 
       try {
@@ -446,6 +475,14 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         }
 
         const backendArtifacts = res.artifacts
+        const isDocumentTarget =
+          resolution.targetMode === 'template' ||
+          resolution.targetMode === 'plan' ||
+          resolution.targetMode === 'report' ||
+          detectedIntent === 'template_mutation' ||
+          detectedIntent === 'generic_plan' ||
+          detectedIntent === 'generic_report'
+
         const extractedArtifacts =
           backendArtifacts && backendArtifacts.length > 0
             ? backendArtifacts.map((a) => ({
@@ -458,7 +495,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
               config?.docxTitle || config?.title || 'Documento',
               config?.defaultExtension || 'docx',
               templateContent,
-              false,
+              isDocumentTarget,
             )
 
         const convArtifacts = (targetConv?.artifacts || []) as Artifact[]

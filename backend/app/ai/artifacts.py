@@ -16,17 +16,17 @@ from dataclasses import dataclass, field
 
 
 _ARTIFACT_PATTERN = re.compile(
-    r'<artifact\s+title="([^"]+)"\s+extension="([^"]+)">(.*?)</artifact>',
+    r'<artifact\s+title=[\'"]([^\'"]+)[\'"]\s+extension=[\'"]([^\'"]+)[\'"]>(.*?)</artifact>',
     re.DOTALL | re.IGNORECASE,
 )
 
 # También soportar orden invertido de atributos: extension primero, luego title
 _ARTIFACT_PATTERN_ALT = re.compile(
-    r'<artifact\s+extension="([^"]+)"\s+title="([^"]+)">(.*?)</artifact>',
+    r'<artifact\s+extension=[\'"]([^\'"]+)[\'"]\s+title=[\'"]([^\'"]+)[\'"]>(.*?)</artifact>',
     re.DOTALL | re.IGNORECASE,
 )
 _ARTIFACT_OPEN = re.compile(
-    r'<artifact\s+(?:title="([^"]+)"\s+extension="([^"]+)"|extension="([^"]+)"\s+title="([^"]+)")>',
+    r'<artifact\s+(?:title=[\'"]([^\'"]+)[\'"]\s+extension=[\'"]([^\'"]+)[\'"]|extension=[\'"]([^\'"]+)[\'"]\s+title=[\'"]([^\'"]+)[\'"])>',
     re.IGNORECASE,
 )
 
@@ -143,6 +143,22 @@ def extract_artifacts(raw_text: str) -> tuple[list[LLMArtifact], str]:
         clean = re.sub(r'</?chat>', '', clean).strip()
 
     return artifacts, clean
+
+
+def build_fallback_artifact(
+    content: str,
+    default_title: str = "Documento",
+    default_extension: str = "docx",
+) -> LLMArtifact:
+    """Builds a primary LLMArtifact when generative intent produced raw markdown without XML tags."""
+    first_heading = re.search(r"^\s*#\s+(.+)$", content, re.MULTILINE)
+    title = first_heading.group(1).strip() if first_heading else default_title
+    return LLMArtifact(
+        title=title,
+        extension=default_extension.lower(),
+        content=content.strip(),
+        index=0,
+    )
 
 
 def artifacts_to_dict(artifacts: list[LLMArtifact]) -> list[dict]:

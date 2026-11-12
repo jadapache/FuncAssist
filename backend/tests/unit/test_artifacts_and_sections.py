@@ -92,6 +92,14 @@ class TestTolerantArtifactsParser:
         assert len(artifacts) == 0
         assert clean == raw
 
+    def test_extract_artifacts_single_quotes(self):
+        raw = "<artifact title='Acta de Reunion' extension='docx'>Contenido con comillas simples</artifact>"
+        artifacts, clean = extract_artifacts(raw)
+        assert len(artifacts) == 1
+        assert artifacts[0].title == "Acta de Reunion"
+        assert artifacts[0].extension == "docx"
+        assert artifacts[0].content == "Contenido con comillas simples"
+
     def test_is_artifact_truncated(self):
         complete = '<artifact title="Doc" extension="docx">Contenido</artifact>'
         assert is_artifact_truncated(complete) is False
