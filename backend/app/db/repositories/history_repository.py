@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM History Repositories for PostgreSQL.
+"""SQLAlchemy ORM History Repositories for PostgreSQL with injected AsyncSession.
 
 Replaces all JSON file writing with pure PostgreSQL persistence.
 """
@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db
 from app.db.models import (
   ChatMessageModel,
   ChatSessionModel,
@@ -25,6 +25,9 @@ from app.db.models import (
 class ChatRepository:
   """PostgreSQL ORM repository for chat conversations and sessions."""
 
+  def __init__(self, session: AsyncSession) -> None:
+    self.session = session
+
   async def save_session(self, session_data: dict[str, Any]) -> dict[str, Any]:
     session_id = session_data.get("id") or str(uuid.uuid4())
     user_id = session_data.get("user_id")
@@ -35,36 +38,39 @@ class ChatRepository:
     active_art_id = session_data.get("activeArtifactId") or session_data.get("active_artifact_id")
     artifacts_json = json.dumps(artifacts, ensure_ascii=False) if artifacts else "[]"
 
-    async with get_db() as db:
-      stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
-      result = await db.execute(stmt)
-      session = result.scalar_one_or_none()
+    stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
+    result = await self.session.execute(stmt)
+    session = result.scalar_one_or_none()
 
-      if session:
-        session.title = title
-        session.feature_slug = feature_slug
-        session.document_content = document_content
-        session.artifacts_json = artifacts_json
-        session.updated_at = datetime.now(timezone.utc)
-        if active_art_id:
-          session.active_artifact_id = active_art_id
-        if user_id and not session.user_id:
-          session.user_id = user_id
-      else:
-        session = ChatSessionModel(
-          id=session_id,
-          user_id=user_id,
-          title=title,
-          feature_slug=feature_slug,
-          document_content=document_content,
-          artifacts_json=artifacts_json,
-          active_artifact_id=active_art_id,
-        )
-        db.add(session)
+    if session:
+      session.title = title
+      session.feature_slug = feature_slug
+      session.document_content = document_content
+      session.artifacts_json = artifacts_json
+      session.updated_at = datetime.now(timezone.utc)
+      if active_art_id:
+        session.active_artifact_id = active_art_id
+      if user_id and not session.user_id:
+        session.user_id = user_id
+    else:
+      session = ChatSessionModel(
+        id=session_id,
+        user_id=user_id,
+        title=title,
+        feature_slug=feature_slug,
+        document_content=document_content,
+        artifacts_json=artifacts_json,
+        active_artifact_id=active_art_id,
+      )
+      self.session.add(session)
 
-      await db.commit()
-      await db.refresh(session)
-      return session.to_dict()
+    await self.session.flush()
+    if hasattr(self.session, "refresh"):
+      res = self.session.refresh(session)
+      import inspect
+      if inspect.isawaitable(res):
+        await res
+    return session.to_dict()
 
   async def get_user_sessions(
     self,
@@ -72,49 +78,46 @@ class ChatRepository:
     feature_slug: Optional[str] = None,
     limit: int = 50,
   ) -> List[dict[str, Any]]:
-    async with get_db() as db:
-      stmt = (
-        select(ChatSessionModel)
-        .order_by(
-          func.coalesce(ChatSessionModel.updated_at, ChatSessionModel.created_at).desc(),
-          ChatSessionModel.created_at.desc(),
-        )
+    stmt = (
+      select(ChatSessionModel)
+      .order_by(
+        func.coalesce(ChatSessionModel.updated_at, ChatSessionModel.created_at).desc(),
+        ChatSessionModel.created_at.desc(),
       )
-      if user_id:
-        stmt = stmt.where(ChatSessionModel.user_id == user_id)
-      if feature_slug:
-        stmt = stmt.where(ChatSessionModel.feature_slug == feature_slug)
-      if limit > 0:
-        stmt = stmt.limit(limit)
-      result = await db.execute(stmt)
-      sessions = result.scalars().all()
-      return [s.to_dict() for s in sessions]
+    )
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    if feature_slug:
+      stmt = stmt.where(ChatSessionModel.feature_slug == feature_slug)
+    if limit > 0:
+      stmt = stmt.limit(limit)
+    result = await self.session.execute(stmt)
+    sessions = result.scalars().all()
+    return [s.to_dict() for s in sessions]
 
   async def get_session(
     self, session_id: str, user_id: Optional[str] = None
   ) -> Optional[dict[str, Any]]:
-    async with get_db() as db:
-      stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
-      if user_id:
-        stmt = stmt.where(ChatSessionModel.user_id == user_id)
-      result = await db.execute(stmt)
-      session = result.scalar_one_or_none()
-      if not session:
-        return None
-      res = session.to_dict()
-      messages = await self.get_session_messages(session_id, user_id=user_id)
-      res["messages"] = messages
-      return res
+    stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    result = await self.session.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+      return None
+    res = session.to_dict()
+    messages = await self.get_session_messages(session_id, user_id=user_id)
+    res["messages"] = messages
+    return res
 
   async def delete_session(self, session_id: str, user_id: Optional[str] = None) -> bool:
-    async with get_db() as db:
-      stmt = delete(ChatSessionModel).where(ChatSessionModel.id == session_id)
-      if user_id:
-        stmt = stmt.where(ChatSessionModel.user_id == user_id)
-      await db.execute(stmt)
-      await db.execute(delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id))
-      await db.commit()
-      return True
+    stmt = delete(ChatSessionModel).where(ChatSessionModel.id == session_id)
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    await self.session.execute(stmt)
+    await self.session.execute(delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id))
+    await self.session.flush()
+    return True
 
   async def save_message(
     self,
@@ -140,60 +143,61 @@ class ChatRepository:
       attachments_json=attachments_json,
     )
 
-    async with get_db() as db:
-      db.add(msg)
-      # Also update session last updated timestamp if session exists
-      stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
-      res = await db.execute(stmt)
-      session = res.scalar_one_or_none()
-      if session:
-        session.updated_at = msg.created_at or datetime.now(timezone.utc)
-      await db.commit()
-      await db.refresh(msg)
-      return msg.to_dict()
+    self.session.add(msg)
+    stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
+    res = await self.session.execute(stmt)
+    session = res.scalar_one_or_none()
+    if session:
+      session.updated_at = msg.created_at or datetime.now(timezone.utc)
+    await self.session.flush()
+    if hasattr(self.session, "refresh"):
+      refresh_res = self.session.refresh(msg)
+      import inspect
+      if inspect.isawaitable(refresh_res):
+        await refresh_res
+    return msg.to_dict()
 
   async def get_session_messages(
     self, session_id: str, limit: int = 100, user_id: Optional[str] = None
   ) -> List[dict[str, Any]]:
-    async with get_db() as db:
-      stmt = (
-        select(ChatMessageModel)
-        .where(ChatMessageModel.session_id == session_id)
-        .order_by(ChatMessageModel.created_at.asc())
-      )
-      if user_id:
-        stmt = stmt.where(ChatMessageModel.user_id == user_id)
-      if limit > 0:
-        stmt = stmt.limit(limit)
-      result = await db.execute(stmt)
-      messages = result.scalars().all()
-      # Deduplicate consecutive identical messages or same id/content
-      seen_ids = set()
-      seen_hashes = set()
-      deduped = []
-      for m in messages:
-        if m.id and m.id in seen_ids:
-          continue
-        if m.id:
-          seen_ids.add(m.id)
-        # Check identical role + content hash to suppress duplicate spam rows
-        content_key = (m.role, (m.content or "").strip())
-        if content_key in seen_hashes and len(deduped) > 0 and (deduped[-1]["role"] == m.role and (deduped[-1]["content"] or "").strip() == (m.content or "").strip()):
-          continue
-        seen_hashes.add(content_key)
-        deduped.append(m.to_dict())
-      return deduped
+    stmt = (
+      select(ChatMessageModel)
+      .where(ChatMessageModel.session_id == session_id)
+      .order_by(ChatMessageModel.created_at.asc())
+    )
+    if user_id:
+      stmt = stmt.where(ChatMessageModel.user_id == user_id)
+    if limit > 0:
+      stmt = stmt.limit(limit)
+    result = await self.session.execute(stmt)
+    messages = result.scalars().all()
+    seen_ids = set()
+    seen_hashes = set()
+    deduped = []
+    for m in messages:
+      if m.id and m.id in seen_ids:
+        continue
+      if m.id:
+        seen_ids.add(m.id)
+      content_key = (m.role, (m.content or "").strip())
+      if content_key in seen_hashes and len(deduped) > 0 and (deduped[-1]["role"] == m.role and (deduped[-1]["content"] or "").strip() == (m.content or "").strip()):
+        continue
+      seen_hashes.add(content_key)
+      deduped.append(m.to_dict())
+    return deduped
 
   async def clear_session(self, session_id: str) -> bool:
-    async with get_db() as db:
-      stmt = delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id)
-      await db.execute(stmt)
-      await db.commit()
-      return True
+    stmt = delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id)
+    await self.session.execute(stmt)
+    await self.session.flush()
+    return True
 
 
 class StandupRepository:
   """PostgreSQL ORM repository for generated daily standups."""
+
+  def __init__(self, session: AsyncSession) -> None:
+    self.session = session
 
   async def create_standup(
     self,
@@ -213,28 +217,33 @@ class StandupRepository:
       sources_json=sources_json,
     )
 
-    async with get_db() as db:
-      db.add(standup)
-      await db.commit()
-      await db.refresh(standup)
-      return standup.to_dict()
+    self.session.add(standup)
+    await self.session.flush()
+    if hasattr(self.session, "refresh"):
+      res = self.session.refresh(standup)
+      import inspect
+      if inspect.isawaitable(res):
+        await res
+    return standup.to_dict()
 
   async def get_all_standups(
     self, limit: int = 20, user_id: Optional[str] = None
   ) -> List[dict[str, Any]]:
-    async with get_db() as db:
-      stmt = select(StandupModel).order_by(StandupModel.created_at.desc())
-      if user_id:
-        stmt = stmt.where(StandupModel.user_id == user_id)
-      if limit > 0:
-        stmt = stmt.limit(limit)
-      result = await db.execute(stmt)
-      items = result.scalars().all()
-      return [i.to_dict() for i in items]
+    stmt = select(StandupModel).order_by(StandupModel.created_at.desc())
+    if user_id:
+      stmt = stmt.where(StandupModel.user_id == user_id)
+    if limit > 0:
+      stmt = stmt.limit(limit)
+    result = await self.session.execute(stmt)
+    items = result.scalars().all()
+    return [i.to_dict() for i in items]
 
 
 class PRDRepository:
   """PostgreSQL ORM repository for PRD reviews."""
+
+  def __init__(self, session: AsyncSession) -> None:
+    self.session = session
 
   async def create_prd_review(
     self,
@@ -255,28 +264,33 @@ class PRDRepository:
       risk_level=risk_level,
     )
 
-    async with get_db() as db:
-      db.add(review)
-      await db.commit()
-      await db.refresh(review)
-      return review.to_dict()
+    self.session.add(review)
+    await self.session.flush()
+    if hasattr(self.session, "refresh"):
+      res = self.session.refresh(review)
+      import inspect
+      if inspect.isawaitable(res):
+        await res
+    return review.to_dict()
 
   async def get_all_prd_reviews(
     self, limit: int = 20, user_id: Optional[str] = None
   ) -> List[dict[str, Any]]:
-    async with get_db() as db:
-      stmt = select(PRDReviewModel).order_by(PRDReviewModel.created_at.desc())
-      if user_id:
-        stmt = stmt.where(PRDReviewModel.user_id == user_id)
-      if limit > 0:
-        stmt = stmt.limit(limit)
-      result = await db.execute(stmt)
-      items = result.scalars().all()
-      return [i.to_dict() for i in items]
+    stmt = select(PRDReviewModel).order_by(PRDReviewModel.created_at.desc())
+    if user_id:
+      stmt = stmt.where(PRDReviewModel.user_id == user_id)
+    if limit > 0:
+      stmt = stmt.limit(limit)
+    result = await self.session.execute(stmt)
+    items = result.scalars().all()
+    return [i.to_dict() for i in items]
 
 
 class TestPlanRepository:
   """PostgreSQL ORM repository for test plan drafts."""
+
+  def __init__(self, session: AsyncSession) -> None:
+    self.session = session
 
   async def create_test_plan(
     self,
@@ -295,21 +309,23 @@ class TestPlanRepository:
       content=content,
     )
 
-    async with get_db() as db:
-      db.add(plan)
-      await db.commit()
-      await db.refresh(plan)
-      return plan.to_dict()
+    self.session.add(plan)
+    await self.session.flush()
+    if hasattr(self.session, "refresh"):
+      res = self.session.refresh(plan)
+      import inspect
+      if inspect.isawaitable(res):
+        await res
+    return plan.to_dict()
 
   async def get_all_test_plans(
     self, limit: int = 20, user_id: Optional[str] = None
   ) -> List[dict[str, Any]]:
-    async with get_db() as db:
-      stmt = select(TestPlanModel).order_by(TestPlanModel.created_at.desc())
-      if user_id:
-        stmt = stmt.where(TestPlanModel.user_id == user_id)
-      if limit > 0:
-        stmt = stmt.limit(limit)
-      result = await db.execute(stmt)
-      items = result.scalars().all()
-      return [i.to_dict() for i in items]
+    stmt = select(TestPlanModel).order_by(TestPlanModel.created_at.desc())
+    if user_id:
+      stmt = stmt.where(TestPlanModel.user_id == user_id)
+    if limit > 0:
+      stmt = stmt.limit(limit)
+    result = await self.session.execute(stmt)
+    items = result.scalars().all()
+    return [i.to_dict() for i in items]
