@@ -17,7 +17,10 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.api.deps import get_current_user
+from app.api.deps import (
+  get_current_user,
+  get_mcp_server_repository,
+)
 from app.core.rls_context import set_rls_context
 from app.core.settings import get_settings
 from app.core.storage_credentials import (
@@ -33,8 +36,7 @@ from app.core.storage_user_integrations import (
   load_user_integration,
   save_user_integration,
 )
-from app.db.database import get_db
-from app.db.models import AuditEventModel, McpServerModel
+from app.db.interfaces.mcp_server_repository import IMcpServerRepository
 from app.integrations.executor import validate_mcp_endpoint_url
 from app.integrations.registry import registry
 
@@ -392,34 +394,19 @@ async def disconnect_my_jira(
 @router.get("/mcp-servers", response_model=List[McpServerInfo])
 async def list_my_mcp_servers(
   current_user: dict[str, Any] = Depends(get_current_user),
+  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> List[McpServerInfo]:
   """List MCP servers configured for the authenticated user."""
   user_id = current_user["id"]
-  async with get_db() as db:
-    stmt = select(McpServerModel).where(McpServerModel.user_id == user_id)
-    res = await db.execute(stmt)
-    servers = res.scalars().all()
-    return [
-      McpServerInfo(
-        id=s.id,
-        name=s.name,
-        description=s.description or "",
-        endpoint_url=s.endpoint_url,
-        transport_type=s.transport_type,
-        auth_type=s.auth_type,
-        status=s.status,
-        allowed_tools=json.loads(s.allowed_tools_json) if s.allowed_tools_json else [],
-        created_at=s.created_at.isoformat() if s.created_at else None,
-        updated_at=s.updated_at.isoformat() if s.updated_at else None,
-      )
-      for s in servers
-    ]
+  servers = await mcp_repo.list_by_user(user_id)
+  return [McpServerInfo(**s) for s in servers]
 
 
 @router.post("/mcp-servers", response_model=McpServerInfo)
 async def create_my_mcp_server(
   body: McpServerCreate,
   current_user: dict[str, Any] = Depends(get_current_user),
+  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> McpServerInfo:
   """Register an external MCP server for the authenticated user."""
   user_id = current_user["id"]
@@ -429,35 +416,16 @@ async def create_my_mcp_server(
       detail="URL de servidor MCP no permitida o insegura.",
     )
 
-  server_id = str(uuid.uuid4())
-  async with get_db() as db:
-    model = McpServerModel(
-      id=server_id,
-      user_id=user_id,
-      name=body.name.strip(),
-      description=body.description.strip() if body.description else None,
-      endpoint_url=body.endpoint_url.strip(),
-      transport_type=body.transport_type,
-      auth_type=body.auth_type,
-      status="configured",
-      allowed_tools_json=json.dumps(body.allowed_tools),
-    )
-    db.add(model)
-    await db.commit()
-    await db.refresh(model)
-
-    return McpServerInfo(
-      id=model.id,
-      name=model.name,
-      description=model.description or "",
-      endpoint_url=model.endpoint_url,
-      transport_type=model.transport_type,
-      auth_type=model.auth_type,
-      status=model.status,
-      allowed_tools=body.allowed_tools,
-      created_at=model.created_at.isoformat() if model.created_at else None,
-      updated_at=model.updated_at.isoformat() if model.updated_at else None,
-    )
+  created = await mcp_repo.create(
+    user_id=user_id,
+    name=body.name,
+    endpoint_url=body.endpoint_url,
+    description=body.description,
+    transport_type=body.transport_type,
+    auth_type=body.auth_type,
+    allowed_tools=body.allowed_tools,
+  )
+  return McpServerInfo(**created)
 
 
 @router.patch("/mcp-servers/{server_id}", response_model=McpServerInfo)
@@ -465,75 +433,37 @@ async def update_my_mcp_server(
   server_id: str,
   body: McpServerUpdate,
   current_user: dict[str, Any] = Depends(get_current_user),
+  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> McpServerInfo:
   """Update an existing MCP server configuration for the authenticated user."""
   user_id = current_user["id"]
-  async with get_db() as db:
-    stmt = select(McpServerModel).where(
-      McpServerModel.id == server_id,
-      McpServerModel.user_id == user_id,
-    )
-    res = await db.execute(stmt)
-    server = res.scalar_one_or_none()
-    if not server:
-      raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
+  updates = body.model_dump(exclude_unset=True)
 
-    if body.endpoint_url is not None:
-      if not validate_mcp_endpoint_url(body.endpoint_url, resolve_dns=False):
-        raise HTTPException(
-          status_code=status.HTTP_400_BAD_REQUEST,
-          detail="URL de servidor MCP no permitida o insegura.",
-        )
-      server.endpoint_url = body.endpoint_url.strip()
+  if "endpoint_url" in updates and updates["endpoint_url"] is not None:
+    if not validate_mcp_endpoint_url(updates["endpoint_url"], resolve_dns=False):
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="URL de servidor MCP no permitida o insegura.",
+      )
 
-    if body.name is not None:
-      server.name = body.name.strip()
-    if body.description is not None:
-      server.description = body.description.strip()
-    if body.transport_type is not None:
-      server.transport_type = body.transport_type
-    if body.auth_type is not None:
-      server.auth_type = body.auth_type
-    if body.status is not None:
-      server.status = body.status
-    if body.allowed_tools is not None:
-      server.allowed_tools_json = json.dumps(body.allowed_tools)
+  updated = await mcp_repo.update(server_id, user_id, updates)
+  if not updated:
+    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
 
-    await db.commit()
-    await db.refresh(server)
-
-    return McpServerInfo(
-      id=server.id,
-      name=server.name,
-      description=server.description or "",
-      endpoint_url=server.endpoint_url,
-      transport_type=server.transport_type,
-      auth_type=server.auth_type,
-      status=server.status,
-      allowed_tools=json.loads(server.allowed_tools_json) if server.allowed_tools_json else [],
-      created_at=server.created_at.isoformat() if server.created_at else None,
-      updated_at=server.updated_at.isoformat() if server.updated_at else None,
-    )
+  return McpServerInfo(**updated)
 
 
 @router.delete("/mcp-servers/{server_id}")
 async def delete_my_mcp_server(
   server_id: str,
   current_user: dict[str, Any] = Depends(get_current_user),
+  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> dict[str, Any]:
   """Remove an MCP server configuration for the authenticated user."""
   user_id = current_user["id"]
-  async with get_db() as db:
-    stmt = select(McpServerModel).where(
-      McpServerModel.id == server_id,
-      McpServerModel.user_id == user_id,
-    )
-    res = await db.execute(stmt)
-    server = res.scalar_one_or_none()
-    if not server:
-      raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-    await db.delete(server)
-    await db.commit()
+  deleted = await mcp_repo.delete(server_id, user_id)
+  if not deleted:
+    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
 
   return {"ok": True, "deleted_id": server_id}
 
@@ -542,27 +472,22 @@ async def delete_my_mcp_server(
 async def test_my_mcp_server(
   server_id: str,
   current_user: dict[str, Any] = Depends(get_current_user),
+  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> dict[str, Any]:
   """Test connection and validate reachability of user's MCP server."""
   user_id = current_user["id"]
-  async with get_db() as db:
-    stmt = select(McpServerModel).where(
-      McpServerModel.id == server_id,
-      McpServerModel.user_id == user_id,
-    )
-    res = await db.execute(stmt)
-    server = res.scalar_one_or_none()
-    if not server:
-      raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
+  server = await mcp_repo.get_by_id(server_id, user_id)
+  if not server:
+    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
 
-    is_valid = validate_mcp_endpoint_url(server.endpoint_url, resolve_dns=False)
-    server.status = "connected" if is_valid else "error"
-    await db.commit()
+  is_valid = validate_mcp_endpoint_url(server["endpoint_url"], resolve_dns=False)
+  new_status = "connected" if is_valid else "error"
+  await mcp_repo.update_status(server_id, user_id, new_status)
 
   return {
     "ok": is_valid,
-    "status": "connected" if is_valid else "error",
-    "endpoint_url": server.endpoint_url,
+    "status": new_status,
+    "endpoint_url": server["endpoint_url"],
   }
 
 

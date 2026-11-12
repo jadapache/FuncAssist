@@ -2,46 +2,145 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, AsyncGenerator, Generator
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
-from app.db.interfaces import IUserRepository
+from app.db.database import get_db, get_sync_db
+from app.db.interfaces import (
+  IAITemplateRepository,
+  ICorporateTemplateRepository,
+  IIntegrationRepository,
+  IMcpServerRepository,
+  IOrganizationRepository,
+  ISettingsRepository,
+  ITranscriptionRepository,
+  IUserRepository,
+  IUserSecretRepository,
+)
 from app.db.repositories import (
+  AITemplateRepository,
   ChatRepository,
+  CorporateTemplateRepository,
+  IntegrationRepository,
+  McpServerRepository,
+  OrganizationRepository,
   PRDRepository,
+  SettingsRepository,
   StandupRepository,
   TestPlanRepository,
+  TranscriptionRepository,
   UserRepository,
+  UserSecretRepository,
 )
 
 security = HTTPBearer(auto_error=False)
 
 
-def get_user_repository() -> IUserRepository:
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+  """Dependency provider for AsyncSession."""
+  async with get_db() as session:
+    yield session
+
+
+def get_sync_db_session() -> Generator[Session, None]:
+  """Dependency provider for sync Session."""
+  with get_sync_db() as session:
+    yield session
+
+
+def get_user_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> IUserRepository:
   """Dependency provider for User Repository."""
-  return UserRepository()
+  return UserRepository(session)
 
 
-def get_chat_repository() -> ChatRepository:
+def get_mcp_server_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> IMcpServerRepository:
+  """Dependency provider for McpServer Repository."""
+  return McpServerRepository(session)
+
+
+def get_organization_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> IOrganizationRepository:
+  """Dependency provider for Organization Repository."""
+  return OrganizationRepository(session)
+
+
+def get_integration_repository(
+  session: Session = Depends(get_sync_db_session),
+) -> IIntegrationRepository:
+  """Dependency provider for Integration Repository."""
+  return IntegrationRepository(session)
+
+
+def get_secret_repository(
+  session: Session = Depends(get_sync_db_session),
+) -> IUserSecretRepository:
+  """Dependency provider for UserSecret Repository."""
+  return UserSecretRepository(session)
+
+
+def get_settings_repository(
+  session: Session = Depends(get_sync_db_session),
+) -> ISettingsRepository:
+  """Dependency provider for Settings Repository."""
+  return SettingsRepository(session)
+
+
+def get_chat_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> ChatRepository:
   """Dependency provider for Chat Repository."""
-  return ChatRepository()
+  return ChatRepository(session)
 
 
-def get_standup_repository() -> StandupRepository:
+def get_standup_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> StandupRepository:
   """Dependency provider for Standup Repository."""
-  return StandupRepository()
+  return StandupRepository(session)
 
 
-def get_prd_repository() -> PRDRepository:
+def get_prd_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> PRDRepository:
   """Dependency provider for PRD Repository."""
-  return PRDRepository()
+  return PRDRepository(session)
 
 
-def get_test_plan_repository() -> TestPlanRepository:
+def get_test_plan_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> TestPlanRepository:
   """Dependency provider for Test Plan Repository."""
-  return TestPlanRepository()
+  return TestPlanRepository(session)
+
+
+def get_ai_template_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> IAITemplateRepository:
+  """Dependency provider for AITemplate Repository."""
+  return AITemplateRepository(session)
+
+
+def get_transcription_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> ITranscriptionRepository:
+  """Dependency provider for Transcription Repository."""
+  return TranscriptionRepository(session)
+
+
+def get_corporate_template_repository(
+  session: AsyncSession = Depends(get_db_session),
+) -> ICorporateTemplateRepository:
+  """Dependency provider for Corporate Template Repository."""
+  return CorporateTemplateRepository(session)
 
 
 def _extract_token_from_request(

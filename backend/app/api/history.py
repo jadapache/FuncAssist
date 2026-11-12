@@ -13,10 +13,10 @@ from app.api.deps import (
   get_prd_repository,
   get_standup_repository,
   get_test_plan_repository,
+  get_user_repository,
 )
 from app.core.storage import load_app_settings, save_app_settings
-from app.db.database import get_db
-from app.db.models import UserModel
+from app.db.interfaces import IUserRepository
 from app.db.repositories import (
   ChatRepository,
   PRDRepository,
@@ -59,24 +59,22 @@ class SettingSetRequest(BaseModel):
 @router.get("/users", tags=["user"])
 async def get_users(
   current_user: dict[str, Any] = Depends(get_current_user),
+  user_repo: IUserRepository = Depends(get_user_repository),
 ) -> dict[str, Any]:
   try:
-    async with get_db() as db:
-      stmt = select(UserModel).where(UserModel.status == "approved")
-      result = await db.execute(stmt)
-      users = result.scalars().all()
-      if users:
-        return {
-          "users": [
-            {
-              "id": u.id,
-              "username": u.username,
-              "display_name": u.full_name or u.username,
-              "role": u.role,
-            }
-            for u in users
-          ]
-        }
+    users = await user_repo.get_approved_users()
+    if users:
+      return {
+        "users": [
+          {
+            "id": u["id"],
+            "username": u["username"],
+            "display_name": u.get("full_name") or u["username"],
+            "role": u.get("role", "user"),
+          }
+          for u in users
+        ]
+      }
   except Exception:
     pass
 
