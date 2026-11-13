@@ -99,10 +99,10 @@ def save_user_integration(
     return
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      _persist(session)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      _persist(uow.session)
+      uow.commit()
   except Exception as exc:
     logger.error("Failed to persist user integration to DB: %s", exc)
     raise
@@ -126,10 +126,9 @@ def load_user_integration(
       repo = IntegrationRepository(session=db)
       item = repo.get_user_integration(user_id, provider)
     else:
-      from app.db.database import get_sync_db
-      with get_sync_db() as session:
-        repo = IntegrationRepository(session=session)
-        item = repo.get_user_integration(user_id, provider)
+      from app.db.unit_of_work import SyncUnitOfWork
+      with SyncUnitOfWork() as uow:
+        item = uow.integrations.get_user_integration(user_id, provider)
 
     if item and item.get("connection_metadata_json"):
       enc_str = item["connection_metadata_json"]
@@ -170,11 +169,10 @@ def delete_user_integration(
     return bool(deleted or existed)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      repo = IntegrationRepository(session=session)
-      deleted = repo.delete_user_integration(user_id, provider)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      deleted = uow.integrations.delete_user_integration(user_id, provider)
+      uow.commit()
       return bool(deleted or existed)
   except Exception as exc:
     logger.error("Failed deleting user integration %s/%s: %s", user_id, provider, exc)

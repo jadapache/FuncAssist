@@ -34,10 +34,9 @@ def get_user_preferences(user_id: str, db: Optional[Any] = None) -> dict[str, An
     return repo.get_user_preferences(user_id) or {}
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      repo = SettingsRepository(session=session)
-      return repo.get_user_preferences(user_id) or {}
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      return uow.settings.get_user_preferences(user_id) or {}
   except Exception as exc:
     logger.debug("Failed reading user_preferences for %s: %s", user_id, exc)
   return {}
@@ -57,11 +56,10 @@ def save_user_preferences(
     return repo.save_user_preferences(user_id, payload)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      repo = SettingsRepository(session=session)
-      res = repo.save_user_preferences(user_id, payload)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      res = uow.settings.save_user_preferences(user_id, payload)
+      uow.commit()
       return res
   except Exception as exc:
     logger.error("Failed saving user_preferences for %s: %s", user_id, exc)

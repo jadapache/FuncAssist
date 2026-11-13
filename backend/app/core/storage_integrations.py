@@ -52,11 +52,10 @@ def save_connection(integration_id: str, payload: dict[str, Any], org_id: str = 
   _CACHE_CONNECTIONS[cache_key] = encrypted
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
       enc_str = encrypted.decode("ascii")
-      repo = IntegrationRepository(session=db)
-      repo.save_organization_integration(
+      uow.integrations.save_organization_integration(
         organization_id=org_id,
         provider=integration_id,
         client_id=payload.get("client_id"),
@@ -64,7 +63,7 @@ def save_connection(integration_id: str, payload: dict[str, Any], org_id: str = 
         status="active",
         settings_payload=None,
       )
-      db.commit()
+      uow.commit()
   except Exception as exc:
     logger.error("Failed to persist organization integration to DB: %s", exc)
     raise
@@ -76,10 +75,9 @@ def load_connection(integration_id: str, org_id: str = "default") -> dict[str, A
   encrypted: bytes | None = _CACHE_CONNECTIONS.get(cache_key)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      repo = IntegrationRepository(session=db)
-      item = repo.get_organization_integration(org_id, integration_id)
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      item = uow.integrations.get_organization_integration(org_id, integration_id)
       if item and item.get("client_secret_ref"):
         encrypted = item["client_secret_ref"].encode("ascii")
         _CACHE_CONNECTIONS[cache_key] = encrypted
@@ -108,11 +106,10 @@ def delete_connection(integration_id: str, org_id: str = "default") -> bool:
   _CACHE_CONNECTIONS.pop(cache_key, None)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      repo = IntegrationRepository(session=db)
-      deleted = repo.delete_organization_integration(org_id, integration_id)
-      db.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      deleted = uow.integrations.delete_organization_integration(org_id, integration_id)
+      uow.commit()
       return bool(deleted or existed)
   except Exception as exc:
     logger.error("Could not delete connection from DB: %s", exc)
@@ -126,10 +123,9 @@ def connection_exists(integration_id: str, org_id: str = "default") -> bool:
     return True
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      repo = IntegrationRepository(session=db)
-      return repo.organization_integration_exists(org_id, integration_id)
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      return uow.integrations.organization_integration_exists(org_id, integration_id)
   except Exception:
     return False
 

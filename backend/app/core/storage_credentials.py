@@ -54,10 +54,10 @@ def save_user_credential(
     return _persist(db)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      res = _persist(session)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      res = _persist(uow.session)
+      uow.commit()
       return res
   except Exception as exc:
     logger.error("Failed saving credential for user %s, provider %s: %s", user_id, provider, exc)
@@ -97,9 +97,9 @@ def load_user_credential(user_id: str, provider: str, db: Optional[Any] = None) 
     return _read(db)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      return _read(session)
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      return _read(uow.session)
   except Exception as exc:
     logger.debug("Failed reading credential for user %s, provider %s: %s", user_id, provider, exc)
   return ""
@@ -129,10 +129,10 @@ def delete_user_credential(user_id: str, provider: str, db: Optional[Any] = None
     return _delete(db)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      res = _delete(session)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      res = _delete(uow.session)
+      uow.commit()
       return res
   except Exception as exc:
     logger.error("Failed deleting credential for %s/%s: %s", user_id, provider, exc)
@@ -149,10 +149,9 @@ def list_user_credentials_info(user_id: str, db: Optional[Any] = None) -> List[d
     return repo.list_user_credentials(user_id)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      repo = IntegrationRepository(session=session)
-      return repo.list_user_credentials(user_id)
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      return uow.integrations.list_user_credentials(user_id)
   except Exception as exc:
     logger.debug("Failed listing credentials for %s: %s", user_id, exc)
     return []
@@ -172,11 +171,10 @@ def update_credential_validation(
     return
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      repo = IntegrationRepository(session=session)
-      repo.update_credential_validation(user_id, provider, status, error_msg)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      uow.integrations.update_credential_validation(user_id, provider, status, error_msg)
+      uow.commit()
   except Exception as exc:
     logger.debug("Failed updating credential validation: %s", exc)
 

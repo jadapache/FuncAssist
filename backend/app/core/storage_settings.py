@@ -60,10 +60,9 @@ def get_setting(
       return deserialize_setting_val(key, val_json)
   else:
     try:
-      from app.db.database import get_sync_db
-      with get_sync_db() as session:
-        repo = SettingsRepository(session=session)
-        val_json = repo.get_setting(key)
+      from app.db.unit_of_work import SyncUnitOfWork
+      with SyncUnitOfWork() as uow:
+        val_json = uow.settings.get_setting(key)
         if val_json is not None:
           return deserialize_setting_val(key, val_json)
     except Exception as exc:
@@ -88,11 +87,10 @@ def set_setting(
     return
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      repo = SettingsRepository(session=session)
-      repo.set_setting(key, serialized)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      uow.settings.set_setting(key, serialized)
+      uow.commit()
   except Exception as exc:
     logger.error("Failed writing setting %s to DB: %s", key, exc)
     raise
@@ -103,17 +101,16 @@ def load_app_settings(user_id: Optional[str] = None) -> dict[str, Any]:
   res = dict(DEFAULT_APP_SETTINGS)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      repo = SettingsRepository(session=db)
-      all_settings = repo.get_all_settings()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      all_settings = uow.settings.get_all_settings()
       for k, val_json in all_settings.items():
         if k.startswith("conn:") or k.startswith("user_ai:"):
           continue
         res[k] = deserialize_setting_val(k, val_json)
 
       if user_id:
-        prefs = repo.get_user_preferences(user_id)
+        prefs = uow.settings.get_user_preferences(user_id)
         if prefs:
           res.update(prefs)
   except Exception as exc:
