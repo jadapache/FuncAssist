@@ -16,7 +16,8 @@ import logging
 import os
 import secrets
 import uuid
-from typing import Any, Optional
+from contextlib import contextmanager
+from typing import Any, Generator, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import delete, select
@@ -70,15 +71,23 @@ class SecretStore:
   def __init__(self, repo_factory: Optional[Any] = None) -> None:
     self.repo_factory = repo_factory
 
-  def _get_repo(self, db: Optional[Any] = None, session_manager: Optional[Any] = None) -> tuple[IUserSecretRepository, Optional[Any]]:
+  @contextmanager
+  def _uow_scope(
+    self, db: Optional[Any] = None
+  ) -> Generator[tuple[IUserSecretRepository, Optional[Any]], None, None]:
+    """Provide repository and UoW context with guaranteed rollback on exceptions and cleanup."""
     if db is not None:
-      return UserSecretRepository(session=db), None
+      yield UserSecretRepository(session=db), None
+      return
+
     if self.repo_factory:
-      return self.repo_factory(), None
-    from app.db.database import get_sync_db
-    cm = get_sync_db()
-    session = cm.__enter__()
-    return UserSecretRepository(session=session), (cm, session)
+      yield self.repo_factory(), None
+      return
+
+    from app.db.unit_of_work import SyncUnitOfWork
+
+    with SyncUnitOfWork() as uow:
+      yield uow.secrets, uow
 
   def create_secret(
     self,
@@ -100,8 +109,7 @@ class SecretStore:
     b64_cipher = base64.b64encode(ciphertext).decode("utf-8")
     b64_nonce = base64.b64encode(nonce).decode("utf-8")
 
-    repo, cm_tuple = self._get_repo(db)
-    try:
+    with self._uow_scope(db) as (repo, uow):
       repo.create(
         secret_id=secret_id,
         user_id=user_id,
@@ -110,13 +118,8 @@ class SecretStore:
         nonce=b64_nonce,
         key_version=CURRENT_KEY_VERSION,
       )
-      if cm_tuple:
-        cm, session = cm_tuple
-        session.commit()
-    finally:
-      if cm_tuple:
-        cm, session = cm_tuple
-        cm.__exit__(None, None, None)
+      if uow:
+        uow.commit()
 
     return secret_id
 
@@ -135,8 +138,7 @@ class SecretStore:
       return decrypt_secret(secret_id_or_ref)
 
     secret_id = _extract_secret_id(secret_id_or_ref)
-    repo, cm_tuple = self._get_repo(db)
-    try:
+    with self._uow_scope(db) as (repo, uow):
       record = repo.get_by_id(secret_id)
       if not record:
         return ""
@@ -148,19 +150,14 @@ class SecretStore:
           resource_type="secret",
           resource_id=secret_id,
         )
-        if cm_tuple:
-          cm, session = cm_tuple
-          session.commit()
+        if uow:
+          uow.commit()
         raise PermissionError("Unauthorized access to requested secret")
 
       if purpose and record.get("purpose") != purpose:
         raise ValueError("Secret purpose mismatch")
 
       return self._decrypt_record(record, user_id)
-    finally:
-      if cm_tuple:
-        cm, session = cm_tuple
-        cm.__exit__(None, None, None)
 
   def _decrypt_record(self, record: dict[str, Any], user_id: str) -> str:
     """Decrypt a secret record with AES-256-GCM verification."""
@@ -187,8 +184,7 @@ class SecretStore:
       raise ValueError("Invalid parameters for rotate_secret")
 
     secret_id = _extract_secret_id(secret_id_or_ref)
-    repo, cm_tuple = self._get_repo(db)
-    try:
+    with self._uow_scope(db) as (repo, uow):
       record = repo.get_by_id(secret_id)
       if not record or record.get("user_id") != user_id:
         raise PermissionError("Secret not found or access denied")
@@ -205,14 +201,9 @@ class SecretStore:
         nonce=base64.b64encode(nonce).decode("utf-8"),
         key_version=CURRENT_KEY_VERSION,
       )
-      if cm_tuple:
-        cm, session = cm_tuple
-        session.commit()
+      if uow:
+        uow.commit()
       return secret_id
-    finally:
-      if cm_tuple:
-        cm, session = cm_tuple
-        cm.__exit__(None, None, None)
 
   def delete_secret(
     self,
@@ -225,8 +216,7 @@ class SecretStore:
       return False
 
     secret_id = _extract_secret_id(secret_id_or_ref)
-    repo, cm_tuple = self._get_repo(db)
-    try:
+    with self._uow_scope(db) as (repo, uow):
       record = repo.get_by_id(secret_id)
       if not record:
         return False
@@ -234,14 +224,9 @@ class SecretStore:
         raise PermissionError("Cannot delete secret owned by another user")
 
       deleted = repo.delete(secret_id, user_id)
-      if cm_tuple:
-        cm, session = cm_tuple
-        session.commit()
+      if uow:
+        uow.commit()
       return deleted
-    finally:
-      if cm_tuple:
-        cm, session = cm_tuple
-        cm.__exit__(None, None, None)
 
   def validate_secret_access(
     self,
@@ -254,18 +239,13 @@ class SecretStore:
     if not user_id or not secret_id_or_ref:
       return False
     secret_id = _extract_secret_id(secret_id_or_ref)
-    repo, cm_tuple = self._get_repo(db)
-    try:
+    with self._uow_scope(db) as (repo, _):
       record = repo.get_by_id(secret_id)
       if not record or record.get("user_id") != user_id:
         return False
       if expected_purpose and record.get("purpose") != expected_purpose:
         return False
       return True
-    finally:
-      if cm_tuple:
-        cm, session = cm_tuple
-        cm.__exit__(None, None, None)
 
   def _record_audit_event(
     self,
@@ -274,21 +254,15 @@ class SecretStore:
     resource_id: str,
     db: Optional[Any] = None,
   ) -> None:
-    repo, cm_tuple = self._get_repo(db)
-    try:
+    with self._uow_scope(db) as (repo, uow):
       repo.record_audit_event(
         user_id=user_id,
         action=action,
         resource_type="secret",
         resource_id=resource_id,
       )
-      if cm_tuple:
-        cm, session = cm_tuple
-        session.commit()
-    finally:
-      if cm_tuple:
-        cm, session = cm_tuple
-        cm.__exit__(None, None, None)
+      if uow:
+        uow.commit()
 
 
 # Singleton accessor
