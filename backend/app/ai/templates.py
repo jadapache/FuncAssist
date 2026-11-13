@@ -24,13 +24,12 @@ def ensure_ai_templates_seeded() -> None:
 
   try:
     import asyncio
-    from app.db.database import get_db
+    from app.db.unit_of_work import AsyncUnitOfWork
 
     async def _seed():
-      async with get_db() as db:
-        repo = AITemplateRepository(db)
-        await repo.seed_defaults(DEFAULT_PROMPTS, DEFAULT_RUBRICS)
-        await db.commit()
+      async with AsyncUnitOfWork() as uow:
+        await uow.ai_templates.seed_defaults(DEFAULT_PROMPTS, DEFAULT_RUBRICS)
+        await uow.commit()
 
     try:
       loop = asyncio.get_running_loop()
@@ -52,10 +51,9 @@ def ensure_ai_files() -> None:
 async def list_prompts(tag: str | None = None) -> list[dict[str, Any]]:
   ensure_ai_templates_seeded()
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      items = await repo.list_templates("prompt", tag=tag)
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      items = await uow.ai_templates.list_templates("prompt", tag=tag)
       if items:
         return items
   except Exception:
@@ -65,16 +63,14 @@ async def list_prompts(tag: str | None = None) -> list[dict[str, Any]]:
   if tag:
     return [p for p in prompts if p.get("tag") == tag]
   return prompts
-  return prompts
 
 
 async def list_rubrics(tag: str | None = None) -> list[dict[str, Any]]:
   ensure_ai_templates_seeded()
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      items = await repo.list_templates("rubric", tag=tag)
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      items = await uow.ai_templates.list_templates("rubric", tag=tag)
       if items:
         return items
   except Exception:
@@ -94,10 +90,9 @@ async def get_prompt(feature: str) -> dict[str, Any]:
     else feature
   )
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      item = await repo.get_template("prompt", resolved_feature)
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      item = await uow.ai_templates.get_template("prompt", resolved_feature)
       if item:
         return item
   except Exception:
@@ -117,10 +112,9 @@ async def get_rubric(feature: str) -> dict[str, Any]:
     else feature
   )
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      item = await repo.get_template("rubric", resolved_feature)
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      item = await uow.ai_templates.get_template("rubric", resolved_feature)
       if item:
         return item
   except Exception:
@@ -144,10 +138,9 @@ def rubric_to_text(rubric: dict[str, Any]) -> str:
 async def get_template_history(template_type: str, feature: str, limit: int = 50) -> list[dict[str, Any]]:
 
   """Return chronological version audit history for a prompt or rubric."""
-  from app.db.database import get_db
-  async with get_db() as db:
-    repo = AITemplateRepository(db)
-    return await repo.get_version_history(template_type, feature, limit=limit)
+  from app.db.unit_of_work import AsyncUnitOfWork
+  async with AsyncUnitOfWork() as uow:
+    return await uow.ai_templates.get_version_history(template_type, feature, limit=limit)
 
 
 
@@ -174,17 +167,16 @@ async def save_prompt(
     }
 
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      res = await repo.save_template_update(
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      res = await uow.ai_templates.save_template_update(
         template_type="prompt",
         feature=feature,
         new_data=merged,
         updated_by=updated_by,
         change_summary=change_summary or f"Updated prompt for {feature}",
       )
-      await db.commit()
+      await uow.commit()
       return res
   except Exception:
     return merged
@@ -203,17 +195,16 @@ async def save_rubric(
   merged = {**current, **payload, "feature": feature, "version": next_version}
 
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      res = await repo.save_template_update(
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      res = await uow.ai_templates.save_template_update(
         template_type="rubric",
         feature=feature,
         new_data=merged,
         updated_by=updated_by,
         change_summary=change_summary or f"Updated rubric for {feature}",
       )
-      await db.commit()
+      await uow.commit()
       return res
   except Exception:
     return merged
@@ -233,17 +224,16 @@ async def reset_prompt(
   default_payload["version"] = next_version
 
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      res = await repo.save_template_update(
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      res = await uow.ai_templates.save_template_update(
         template_type="prompt",
         feature=feature,
         new_data=default_payload,
         updated_by=updated_by,
         change_summary="Reset prompt to factory default",
       )
-      await db.commit()
+      await uow.commit()
       return res
   except Exception:
     return default_payload
@@ -263,17 +253,16 @@ async def reset_rubric(
   default_payload["version"] = next_version
 
   try:
-    from app.db.database import get_db
-    async with get_db() as db:
-      repo = AITemplateRepository(db)
-      res = await repo.save_template_update(
+    from app.db.unit_of_work import AsyncUnitOfWork
+    async with AsyncUnitOfWork() as uow:
+      res = await uow.ai_templates.save_template_update(
         template_type="rubric",
         feature=feature,
         new_data=default_payload,
         updated_by=updated_by,
         change_summary="Reset rubric to factory default",
       )
-      await db.commit()
+      await uow.commit()
       return res
   except Exception:
     return default_payload
