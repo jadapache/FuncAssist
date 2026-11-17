@@ -7,7 +7,6 @@ import {
   LogOut,
   MessageSquare,
   Mic,
-  PanelLeftClose,
   Plus,
   Search,
   Settings,
@@ -143,8 +142,9 @@ export const AppSidebar = ({ displayName, version }: AppSidebarProps) => {
 
       {/* Top Header / Logo + Version */}
       <div
-        className={`flex items-center border-b border-slate-100 shrink-0 py-3 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-3.5'
-          }`}
+        className={`flex h-[54px] items-center border-b border-slate-200/80 shrink-0 ${
+          isCollapsed ? 'justify-center px-2' : 'px-4'
+        }`}
       >
         <NavLink
           to="/"
@@ -171,19 +171,6 @@ export const AppSidebar = ({ displayName, version }: AppSidebarProps) => {
             </div>
           )}
         </NavLink>
-
-        {/* Botón de alternar colapso en el header (solo visible cuando está expandido) */}
-        {!isCollapsed && (
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer shrink-0"
-            title="Colapsar barra lateral"
-            aria-label="Colapsar barra lateral"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
-        )}
       </div>
 
       {/* Main Navigation */}

@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { api } from '../api/client'
 import { DEFAULT_DISPLAY_NAME } from '../constants/app'
+import { PageHeader } from '../components/common/PageHeader'
 import { IntegrationTile } from '../components/ui/IntegrationTile'
 import { QuickActionCard } from '../components/ui/QuickActionCard'
 import { useUser } from '../context/UserContext'
@@ -69,8 +70,13 @@ export const DashboardPage = () => {
   const loggedInName = user?.display_name || displayName
 
   return (
-    <div className={`space-y-8 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
-      {/* Hero */}
+    <div className={`flex flex-col min-h-full transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
+      <PageHeader
+        title="Inicio"
+      />
+
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-8 pb-12">
+        {/* Hero */}
       <section className="relative overflow-hidden rounded-3xl border border-blue-900/30 bg-gradient-to-br from-[#002777] via-[#003685] to-[#004497] p-6 text-white shadow-xl shadow-[#002777]/30 md:p-8">
         <div className="pointer-events-none absolute -left-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl animate-float" aria-hidden />
         <div className="pointer-events-none absolute -bottom-16 -right-10 h-48 w-48 rounded-full bg-cyan-400/20 blur-3xl animate-float-delayed" aria-hidden />
@@ -341,6 +347,7 @@ export const DashboardPage = () => {
             </div>
           </div>
         </section>
+      </div>
       </div>
     </div>
   )

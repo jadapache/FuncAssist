@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet } from 'react-router-dom'
 import { api } from '../api/client'
 import { DEFAULT_DISPLAY_NAME } from '../constants/app'
 import { AppSidebar } from './ui/AppSidebar'
@@ -7,8 +7,6 @@ import { AppSidebar } from './ui/AppSidebar'
 export const AppLayout = () => {
   const [displayName, setDisplayName] = useState(DEFAULT_DISPLAY_NAME)
   const [appVersion, setAppVersion] = useState<string | null>(null)
-  const location = useLocation()
-  const isChatRoute = location.pathname.startsWith('/chat')
 
   useEffect(() => {
     const load = async () => {
@@ -48,13 +46,7 @@ export const AppLayout = () => {
 
       {/* Main Application Area */}
       <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-        <div
-          className={`flex-1 h-full min-w-0 ${
-            isChatRoute
-              ? 'p-0 overflow-hidden'
-              : 'overflow-y-auto px-4 pt-4 pb-8 md:px-8 max-w-7xl mx-auto w-full'
-          }`}
-        >
+        <div className="flex-1 h-full min-w-0 overflow-y-auto">
           <Outlet context={{ displayName, setDisplayName }} />
         </div>
       </main>

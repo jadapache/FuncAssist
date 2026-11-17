@@ -182,189 +182,189 @@ export const FeatureWorkspace = ({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col min-h-full">
       <PageHeader
         eyebrow={eyebrow}
         title={title}
         subtitle={description}
       />
 
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-6">
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Files panel */}
+          <section className="card space-y-4">
+            <div className="flex items-center gap-2">
+              <Paperclip className="h-4 w-4 text-[#002777]" aria-hidden />
+              <h2 className="text-lg font-semibold">Cargar archivos</h2>
+            </div>
+            <p className="text-sm text-[var(--color-ink-muted)]">
+              Selecciona múltiples PRDs, especificaciones o documentos de cambios. Soportados: PDF, DOCX, MD, TXT.
+            </p>
 
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Files panel */}
-        <section className="card space-y-4">
-          <div className="flex items-center gap-2">
-            <Paperclip className="h-4 w-4 text-[#002777]" aria-hidden />
-            <h2 className="text-lg font-semibold">Cargar archivos</h2>
-          </div>
-          <p className="text-sm text-[var(--color-ink-muted)]">
-            Selecciona múltiples PRDs, especificaciones o documentos de cambios. Soportados: PDF, DOCX, MD, TXT.
-          </p>
-
-          <label
-            className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/40 px-4 py-8 transition-colors hover:border-[#004497] hover:bg-blue-50/70"
-            tabIndex={0}
-            aria-label="Elegir archivos para cargar"
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') fileInputRef.current?.click()
-            }}
-          >
-            <Upload className="mb-2 h-8 w-8 text-[#004497]" aria-hidden />
-            <span className="text-sm font-medium text-[#002777]">Arrastra archivos o haz clic para explorar</span>
-            <span className="mt-1 text-xs text-[var(--color-ink-muted)]">Se permiten múltiples archivos</span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ACCEPT}
-              className="sr-only"
-              onChange={(event) => handlePickFiles(event.target.files)}
-            />
-          </label>
-
-          {files.length ? (
-            <ul className="space-y-2">
-              {files.map((file) => (
-                <li
-                  key={file.name}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-white px-3 py-2 text-sm"
-                >
-                  <span className="flex items-center gap-2 truncate">
-                    <FileText className="h-4 w-4 shrink-0 text-[#004497]" aria-hidden />
-                    {file.name}
-                  </span>
-                  <button
-                    type="button"
-                    className="text-[var(--color-ink-muted)] hover:text-[var(--color-bad)]"
-                    aria-label={`Quitar ${file.name}`}
-                    onClick={() => handleRemovePending(file.name)}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {files.length ? (
-            <button
-              type="button"
-              onClick={() => void handleUpload()}
-              disabled={uploading}
-              className="btn-primary w-full disabled:opacity-50"
+            <label
+              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/40 px-4 py-8 transition-colors hover:border-[#004497] hover:bg-blue-50/70"
+              tabIndex={0}
+              aria-label="Elegir archivos para cargar"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') fileInputRef.current?.click()
+              }}
             >
-              {uploading ? 'Cargando…' : `Cargar ${files.length} archivo${files.length > 1 ? 's' : ''}`}
-            </button>
-          ) : null}
+              <Upload className="mb-2 h-8 w-8 text-[#004497]" aria-hidden />
+              <span className="text-sm font-medium text-[#002777]">Arrastra archivos o haz clic para explorar</span>
+              <span className="mt-1 text-xs text-[var(--color-ink-muted)]">Se permiten múltiples archivos</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPT}
+                className="sr-only"
+                onChange={(event) => handlePickFiles(event.target.files)}
+              />
+            </label>
 
-          {uploaded.length ? (
-            <div className="space-y-2 border-t border-[var(--color-border)] pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
-                Listos ({uploaded.length})
-              </p>
+            {files.length ? (
               <ul className="space-y-2">
-                {uploaded.map((doc) => (
+                {files.map((file) => (
                   <li
-                    key={doc.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2 text-sm"
+                    key={file.name}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-white px-3 py-2 text-sm"
                   >
-                    <span className="truncate font-medium">{doc.filename}</span>
+                    <span className="flex items-center gap-2 truncate">
+                      <FileText className="h-4 w-4 shrink-0 text-[#004497]" aria-hidden />
+                      {file.name}
+                    </span>
                     <button
                       type="button"
                       className="text-[var(--color-ink-muted)] hover:text-[var(--color-bad)]"
-                      aria-label={`Eliminar ${doc.filename}`}
-                      onClick={() => void handleRemoveUploaded(doc.id)}
+                      aria-label={`Quitar ${file.name}`}
+                      onClick={() => handleRemovePending(file.name)}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <X className="h-4 w-4" />
                     </button>
                   </li>
                 ))}
               </ul>
+            ) : null}
+
+            {files.length ? (
+              <button
+                type="button"
+                onClick={() => void handleUpload()}
+                disabled={uploading}
+                className="btn-primary w-full disabled:opacity-50"
+              >
+                {uploading ? 'Cargando…' : `Cargar ${files.length} archivo${files.length > 1 ? 's' : ''}`}
+              </button>
+            ) : null}
+
+            {uploaded.length ? (
+              <div className="space-y-2 border-t border-[var(--color-border)] pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+                  Listos ({uploaded.length})
+                </p>
+                <ul className="space-y-2">
+                  {uploaded.map((doc) => (
+                    <li
+                      key={doc.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2 text-sm"
+                    >
+                      <span className="truncate font-medium">{doc.filename}</span>
+                      <button
+                        type="button"
+                        className="text-[var(--color-ink-muted)] hover:text-[var(--color-bad)]"
+                        aria-label={`Eliminar ${doc.filename}`}
+                        onClick={() => void handleRemoveUploaded(doc.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+
+          {/* Chat panel */}
+          <section className="card flex min-h-[420px] flex-col">
+            <div className="flex items-center gap-2">
+              <Send className="h-4 w-4 text-[#002777]" aria-hidden />
+              <h2 className="text-lg font-semibold">Chat de contexto</h2>
             </div>
-          ) : null}
-        </section>
+            <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
+              Agrega instrucciones, restricciones o preguntas. Presiona Enter para enviar, Shift+Enter para nueva línea.
+            </p>
 
-        {/* Chat panel */}
-        <section className="card flex min-h-[420px] flex-col">
-          <div className="flex items-center gap-2">
-            <Send className="h-4 w-4 text-[#002777]" aria-hidden />
-            <h2 className="text-lg font-semibold">Chat de contexto</h2>
-          </div>
-          <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
-            Agrega instrucciones, restricciones o preguntas. Presiona Enter para enviar, Shift+Enter para nueva línea.
-          </p>
+            {showSourceToggles && sourceOptions.length ? (
+              <fieldset className="mt-4 flex flex-wrap gap-3 text-sm">
+                <legend className="mb-1 w-full text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+                  Fuentes en vivo
+                </legend>
+                {sourceOptions.map((option) => (
+                  <label key={option.id} className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-1.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedSources.includes(option.id)}
+                      onChange={(event) => {
+                        setSelectedSources((prev) =>
+                          event.target.checked
+                            ? [...prev, option.id]
+                            : prev.filter((item) => item !== option.id),
+                        )
+                      }}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </fieldset>
+            ) : null}
 
-          {showSourceToggles && sourceOptions.length ? (
-            <fieldset className="mt-4 flex flex-wrap gap-3 text-sm">
-              <legend className="mb-1 w-full text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
-                Fuentes en vivo
-              </legend>
-              {sourceOptions.map((option) => (
-                <label key={option.id} className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-1.5">
-                  <input
-                    type="checkbox"
-                    checked={selectedSources.includes(option.id)}
-                    onChange={(event) => {
-                      setSelectedSources((prev) =>
-                        event.target.checked
-                          ? [...prev, option.id]
-                          : prev.filter((item) => item !== option.id),
-                      )
-                    }}
-                  />
-                  {option.label}
-                </label>
-              ))}
-            </fieldset>
-          ) : null}
+            <div className="mt-4 flex-1 space-y-3 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+              {messages.length === 0 ? (
+                <p className="text-sm text-[var(--color-ink-muted)]">
+                  Ejemplo: &ldquo;{placeholder}&rdquo;
+                </p>
+              ) : (
+                messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={[
+                      'max-w-[95%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap',
+                      msg.role === 'user'
+                        ? 'ml-auto bg-[#002777] text-white'
+                        : 'mr-auto border border-[var(--color-border)] bg-white text-[var(--color-ink)]',
+                    ].join(' ')}
+                  >
+                    {msg.content}
+                  </div>
+                ))
+              )}
+            </div>
 
-          <div className="mt-4 flex-1 space-y-3 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
-            {messages.length === 0 ? (
-              <p className="text-sm text-[var(--color-ink-muted)]">
-                Ejemplo: &ldquo;{placeholder}&rdquo;
-              </p>
-            ) : (
-              messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={[
-                    'max-w-[95%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap',
-                    msg.role === 'user'
-                      ? 'ml-auto bg-[#002777] text-white'
-                      : 'mr-auto border border-[var(--color-border)] bg-white text-[var(--color-ink)]',
-                  ].join(' ')}
-                >
-                  {msg.content}
-                </div>
-              ))
-            )}
-          </div>
+            <form onSubmit={(event) => void handleSubmit(event)} className="mt-4 flex gap-2">
+              <textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+                placeholder={placeholder}
+                className="input-field min-h-[44px] flex-1 resize-none rounded-xl border border-[var(--color-border)] bg-white px-3 py-2"
+                aria-label="Mensaje de chat"
+              />
+              <button
+                type="submit"
+                disabled={busy}
+                className="btn-primary flex shrink-0 items-center gap-2 self-end px-4 disabled:opacity-50"
+                aria-label="Enviar mensaje"
+              >
+                <Send className="h-4 w-4" aria-hidden />
+                {busy ? '…' : 'Enviar'}
+              </button>
+            </form>
+          </section>
+        </div>
 
-          <form onSubmit={(event) => void handleSubmit(event)} className="mt-4 flex gap-2">
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={2}
-              placeholder={placeholder}
-              className="input-field min-h-[44px] flex-1 resize-none rounded-xl border border-[var(--color-border)] bg-white px-3 py-2"
-              aria-label="Mensaje de chat"
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="btn-primary flex shrink-0 items-center gap-2 self-end px-4 disabled:opacity-50"
-              aria-label="Enviar mensaje"
-            >
-              <Send className="h-4 w-4" aria-hidden />
-              {busy ? '…' : 'Enviar'}
-            </button>
-          </form>
-        </section>
+        {result ? <GroundedResultView result={result} /> : null}
       </div>
-
-      {result ? <GroundedResultView result={result} /> : null}
     </div>
   )
 }

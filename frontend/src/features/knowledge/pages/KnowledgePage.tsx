@@ -266,7 +266,7 @@ export const KnowledgePage = () => {
   }, [searchQuery, selectedTagFilter, viewMode])
 
   return (
-    <div className="space-y-8 pb-12 font-sans">
+    <div className="flex flex-col min-h-full font-sans">
       <PageHeader
         eyebrow="SISTEMA RAG & INDEXACIÓN"
         title="Biblioteca de Conocimiento"
@@ -282,7 +282,8 @@ export const KnowledgePage = () => {
         }
       />
 
-      {/* 2. Drag & Drop File Upload Section */}
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-8 pb-12">
+        {/* 2. Drag & Drop File Upload Section */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -912,19 +913,20 @@ export const KnowledgePage = () => {
         )}
       </div>
 
-      {/* Confirmation Modal for Document Deletion */}
-      <ConfirmationModal
-        isOpen={Boolean(docToDelete)}
-        title="Eliminar Documento de la Biblioteca"
-        message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" y todos sus fragmentos indexados de la base de conocimiento PostgreSQL?`}
-        confirmLabel="Eliminar Definitivamente"
-        cancelLabel="Cancelar"
-        variant="danger"
-        isDestructive
-        isLoading={isDeleting}
-        onConfirm={confirmDeleteDoc}
-        onClose={() => setDocToDelete(null)}
-      />
+        {/* Confirmation Modal for Document Deletion */}
+        <ConfirmationModal
+          isOpen={Boolean(docToDelete)}
+          title="Eliminar Documento de la Biblioteca"
+          message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" y todos sus fragmentos indexados de la base de conocimiento PostgreSQL?`}
+          confirmLabel="Eliminar Definitivamente"
+          cancelLabel="Cancelar"
+          variant="danger"
+          isDestructive
+          isLoading={isDeleting}
+          onConfirm={confirmDeleteDoc}
+          onClose={() => setDocToDelete(null)}
+        />
+      </div>
     </div>
   )
 }

@@ -43,7 +43,7 @@ export const PageHeader = ({
 
   return (
     <header
-      className={`flex items-center justify-between border-b border-slate-200/80 bg-white/60 px-4 py-3 backdrop-blur-md shrink-0 rounded-2xl mb-6 shadow-2xs ${className}`}
+      className={`flex h-14 items-center justify-between border-b border-slate-200/80 bg-white px-6 shrink-0 z-10 ${className}`}
     >
       <div className="flex items-center gap-3 min-w-0">
         {!hideSidebarToggle && (

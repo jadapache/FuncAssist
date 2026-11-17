@@ -389,7 +389,7 @@ export const ChatWorkspace = ({
       />
 
       {/* Top Header Row with Chat Title, Sidebar Toggle, and Model Selector */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-slate-200/80 bg-white shrink-0 z-10">
+      <header className="flex h-14 items-center justify-between px-6 border-b border-slate-200/80 bg-white shrink-0 z-10">
         <div className="flex items-center gap-3">
           <button
             type="button"
