@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api, type KnowledgeDocument } from '../../../api/client'
 import { ConfirmationModal, PageHeader } from '../../../components/common'
+import { KnowledgeDocsSkeleton } from '../../../components/common/Skeleton'
 import { useToast } from '../../../context/ToastContext'
 
 const ACCEPTED_TYPES = '.pdf,.docx,.doc,.md,.txt,.json,.html,.htm'
@@ -582,10 +583,7 @@ export const KnowledgePage = () => {
 
         {/* Documents Grid / List */}
         {loadingDocs ? (
-          <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
-            <RefreshCw className="h-8 w-8 animate-spin text-[#002777] mx-auto opacity-70" />
-            <p className="text-xs font-semibold text-slate-700">Cargando catálogo documental...</p>
-          </div>
+          <KnowledgeDocsSkeleton />
         ) : filteredDocuments.length === 0 ? (
           <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
             <div className="h-12 w-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">

@@ -19,6 +19,7 @@ import { Link, useOutletContext } from 'react-router-dom'
 import { api } from '../api/client'
 import { DEFAULT_DISPLAY_NAME } from '../constants/app'
 import { PageHeader } from '../components/common/PageHeader'
+import { DashboardSkeleton } from '../components/common/Skeleton'
 import { IntegrationTile } from '../components/ui/IntegrationTile'
 import { QuickActionCard } from '../components/ui/QuickActionCard'
 import { useUser } from '../context/UserContext'
@@ -41,11 +42,13 @@ export const DashboardPage = () => {
   const { user } = useUser()
   const [integrations, setIntegrations] = useState<IntegrationInfo[]>([])
   const [backendOk, setBackendOk] = useState<boolean | null>(null)
+  const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
     const load = async () => {
+      setLoading(true)
       try {
         await api.health()
         setBackendOk(true)
@@ -57,6 +60,8 @@ export const DashboardPage = () => {
         setIntegrations(items)
       } catch {
         setIntegrations([])
+      } finally {
+        setLoading(false)
       }
     }
     void load()
@@ -76,7 +81,11 @@ export const DashboardPage = () => {
       />
 
       <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-8 pb-12">
-        {/* Hero */}
+        {loading ? (
+          <DashboardSkeleton />
+        ) : (
+          <>
+            {/* Hero */}
       <section className="relative overflow-hidden rounded-3xl border border-blue-900/30 bg-gradient-to-br from-[#002777] via-[#003685] to-[#004497] p-6 text-white shadow-xl shadow-[#002777]/30 md:p-8">
         <div className="pointer-events-none absolute -left-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl animate-float" aria-hidden />
         <div className="pointer-events-none absolute -bottom-16 -right-10 h-48 w-48 rounded-full bg-cyan-400/20 blur-3xl animate-float-delayed" aria-hidden />
@@ -348,6 +357,8 @@ export const DashboardPage = () => {
           </div>
         </section>
       </div>
+          </>
+        )}
       </div>
     </div>
   )

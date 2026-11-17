@@ -16,6 +16,7 @@ import { generateTranscriptionSlug } from '../utils/transcriptionStorage'
 import { useTranscription } from '../hooks/useTranscription'
 import type { TranscriptionResult } from '../api/transcriptionApi'
 import { ConfirmationModal, PageHeader } from '../../../components/common'
+import { TranscriptionsSkeleton } from '../../../components/common/Skeleton'
 import {
   RecentTranscriptionItem,
   GenerateModal,
@@ -169,7 +170,7 @@ export const TranscripcionesPage = () => {
     <div className="flex flex-col min-h-full">
       <PageHeader
         eyebrow="MÓDULO FUNCIONAL"
-        title="Transcripción y Análisis de Reuniones"
+        title="Transcripciones"
         subtitle="Carga grabaciones de reuniones para transcribir con Whisper, identificar interlocutores, extraer minutas y generar entregables funcionales."
         actions={
           <button
@@ -213,14 +214,6 @@ export const TranscripcionesPage = () => {
         {/* Transcriptions Section */}
         <section className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                Transcripciones
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Consulta tus grabaciones procesadas, visualiza sus minutas y genera entregables.
-              </p>
-            </div>
 
             <div className="flex items-center gap-2.5 self-start sm:self-auto w-full sm:w-auto">
               {recentTranscriptions.length > 0 && (
@@ -275,7 +268,9 @@ export const TranscripcionesPage = () => {
             </div>
           </div>
 
-          {recentTranscriptions.length === 0 && activeJobs.length === 0 ? (
+          {isLoadingList ? (
+            <TranscriptionsSkeleton />
+          ) : recentTranscriptions.length === 0 && activeJobs.length === 0 ? (
             <div className="card p-12 bg-white border border-slate-200 rounded-2xl text-center space-y-3 shadow-xs">
               <div className="flex h-12 w-12 mx-auto items-center justify-center rounded-2xl bg-blue-50 text-[#002777]">
                 <FileText className="h-6 w-6" />

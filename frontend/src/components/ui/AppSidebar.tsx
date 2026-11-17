@@ -134,12 +134,6 @@ export const AppSidebar = ({ displayName, version }: AppSidebarProps) => {
       className={`relative flex flex-col shrink-0 border-r border-slate-200 bg-white/95 backdrop-blur-xl transition-all duration-300 z-30 select-none ${isCollapsed ? 'w-16' : 'w-64'
         }`}
     >
-      {/* Decorative Brand Gradient Accent Line on Top */}
-      <div
-        className="h-0.5 w-full bg-gradient-to-r from-[#002777] via-[#004497] to-cyan-400"
-        aria-hidden
-      />
-
       {/* Top Header / Logo + Version */}
       <div
         className={`flex h-[54px] items-center border-b border-slate-200/80 shrink-0 ${
