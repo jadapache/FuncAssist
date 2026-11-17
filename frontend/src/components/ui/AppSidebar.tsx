@@ -8,7 +8,6 @@ import {
   MessageSquare,
   Mic,
   PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Search,
   Settings,
@@ -23,10 +22,12 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useUser, type UserRole } from '../../context/UserContext'
 import { useAuth } from '../../context/AuthContext'
 import { useChat } from '../../context/ChatContext'
+import { useSidebar } from '../../context/SidebarContext'
 import type { ChatConversation } from '../../features/chat/hooks/useChatPersistence'
 
 interface AppSidebarProps {
   displayName: string
+  version?: string | null
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -43,8 +44,8 @@ function getInitials(nameStr: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-export const AppSidebar = ({ displayName }: AppSidebarProps) => {
-  const [isCollapsed, setIsCollapsed] = useState(false)
+export const AppSidebar = ({ displayName, version }: AppSidebarProps) => {
+  const { isCollapsed, toggleSidebar } = useSidebar()
   const [chatExpanded, setChatExpanded] = useState(true)
   const [knowledgeExpanded, setKnowledgeExpanded] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
@@ -124,17 +125,15 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
   }
 
   const navItemClass = (isActive: boolean) =>
-    `flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 ${
-      isActive
-        ? 'bg-blue-50 text-[#002777] shadow-xs ring-1 ring-blue-200 font-semibold'
-        : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+    `flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 ${isActive
+      ? 'bg-blue-50 text-[#002777] shadow-xs ring-1 ring-blue-200 font-semibold'
+      : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
     } ${isCollapsed ? 'justify-center px-0' : ''}`
 
   return (
     <aside
-      className={`relative flex flex-col shrink-0 border-r border-slate-200 bg-white/95 backdrop-blur-xl transition-all duration-300 z-30 select-none ${
-        isCollapsed ? 'w-16' : 'w-64'
-      }`}
+      className={`relative flex flex-col shrink-0 border-r border-slate-200 bg-white/95 backdrop-blur-xl transition-all duration-300 z-30 select-none ${isCollapsed ? 'w-16' : 'w-64'
+        }`}
     >
       {/* Decorative Brand Gradient Accent Line on Top */}
       <div
@@ -142,34 +141,43 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
         aria-hidden
       />
 
-      {/* Top Header / Logo */}
-      <div className="flex items-center justify-between px-3.5 py-3 border-b border-slate-100 shrink-0">
+      {/* Top Header / Logo + Version */}
+      <div
+        className={`flex items-center border-b border-slate-100 shrink-0 py-3 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-3.5'
+          }`}
+      >
         <NavLink
           to="/"
-          className={`flex items-center gap-2.5 overflow-hidden transition-all ${
-            isCollapsed ? 'justify-center w-full' : ''
-          }`}
+          className="flex items-center gap-2.5 overflow-visible transition-all"
           title="FuncAssist"
         >
-          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#002777] to-[#004497] text-white shadow-md shadow-[#002777]/30 ring-1 ring-blue-100">
+          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#002777] to-[#004497] text-white shadow-md shadow-[#002777]/30 ring-1 ring-blue-100 overflow-visible">
             <Sparkles className="h-4 w-4" aria-hidden />
             <span
-              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-cyan-400 ring-2 ring-white animate-pulse-soft"
+              className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-cyan-400 ring-2 ring-white animate-pulse-soft z-10"
               aria-hidden
             />
           </div>
           {!isCollapsed && (
-            <span className="text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap">
-              Func<span className="font-normal text-blue-700">Assist</span>
-            </span>
+            <div className="flex items-baseline gap-1.5 overflow-hidden">
+              <span className="text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap">
+                Func<span className="font-normal text-blue-700">Assist</span>
+              </span>
+              {version && (
+                <span className="text-xs text-slate-500 font-normal font-mono whitespace-nowrap">
+                  v.{version}
+                </span>
+              )}
+            </div>
           )}
         </NavLink>
 
+        {/* Botón de alternar colapso en el header (solo visible cuando está expandido) */}
         {!isCollapsed && (
           <button
             type="button"
-            onClick={() => setIsCollapsed(true)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            onClick={toggleSidebar}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer shrink-0"
             title="Colapsar barra lateral"
             aria-label="Colapsar barra lateral"
           >
@@ -177,20 +185,6 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
           </button>
         )}
       </div>
-
-      {isCollapsed && (
-        <div className="flex justify-center py-2 shrink-0 border-b border-slate-100">
-          <button
-            type="button"
-            onClick={() => setIsCollapsed(false)}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
-            title="Expandir barra lateral"
-            aria-label="Expandir barra lateral"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        </div>
-      )}
 
       {/* Main Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1 scrollbar-thin">
@@ -203,14 +197,13 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
         {/* Chat Section */}
         <div>
           <div
-            className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 cursor-pointer ${
-              isChatActive
+            className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 cursor-pointer ${isChatActive
                 ? 'bg-blue-50 text-[#002777] shadow-xs ring-1 ring-blue-200 font-semibold'
                 : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
-            } ${isCollapsed ? 'justify-center px-0' : ''}`}
+              } ${isCollapsed ? 'justify-center px-0' : ''}`}
             onClick={() => {
               if (isCollapsed) {
-                setIsCollapsed(false)
+                toggleSidebar()
                 setChatExpanded(true)
                 navigate('/chat')
               } else {
@@ -242,9 +235,8 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
                   title={chatExpanded ? 'Plegar chats' : 'Desplegar chats'}
                 >
                   <ChevronDown
-                    className={`h-3.5 w-3.5 transition-transform duration-200 ${
-                      chatExpanded ? 'rotate-180' : ''
-                    }`}
+                    className={`h-3.5 w-3.5 transition-transform duration-200 ${chatExpanded ? 'rotate-180' : ''
+                      }`}
                   />
                 </button>
               </div>
@@ -287,11 +279,10 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
                     return (
                       <div
                         key={conv.id}
-                        className={`group relative flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
-                          isSelected
+                        className={`group relative flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${isSelected
                             ? 'bg-blue-100/70 text-[#002777] font-semibold'
                             : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
-                        }`}
+                          }`}
                         onClick={() => !isEditing && handleSelectChat(conv.id)}
                       >
                         {isEditing ? (
@@ -384,17 +375,16 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
             type="button"
             onClick={() => {
               if (isCollapsed) {
-                setIsCollapsed(false)
+                toggleSidebar()
                 setKnowledgeExpanded(true)
               } else {
                 setKnowledgeExpanded(!knowledgeExpanded)
               }
             }}
-            className={`w-full flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 cursor-pointer ${
-              isKnowledgeActive
+            className={`w-full flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 cursor-pointer ${isKnowledgeActive
                 ? 'bg-blue-50 text-[#002777] shadow-xs ring-1 ring-blue-200 font-semibold'
                 : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
-            } ${isCollapsed ? 'justify-center px-0' : ''}`}
+              } ${isCollapsed ? 'justify-center px-0' : ''}`}
             title="Conocimiento"
           >
             <div className="flex items-center gap-3">
@@ -403,9 +393,8 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
             </div>
             {!isCollapsed && (
               <ChevronDown
-                className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${
-                  knowledgeExpanded ? 'rotate-180' : ''
-                }`}
+                className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${knowledgeExpanded ? 'rotate-180' : ''
+                  }`}
               />
             )}
           </button>
@@ -416,10 +405,9 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
                 to="/knowledge"
                 end
                 className={({ isActive }) =>
-                  `flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-[#002777] font-semibold'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  `flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${isActive
+                    ? 'bg-blue-50 text-[#002777] font-semibold'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                   }`
                 }
               >
@@ -429,10 +417,9 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
               <NavLink
                 to="/knowledge/ask"
                 className={({ isActive }) =>
-                  `flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-[#002777] font-semibold'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  `flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${isActive
+                    ? 'bg-blue-50 text-[#002777] font-semibold'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                   }`
                 }
               >
@@ -503,9 +490,8 @@ export const AppSidebar = ({ displayName }: AppSidebarProps) => {
         {/* Profile Card Trigger */}
         <div
           onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-          className={`flex items-center justify-between gap-2.5 p-2 rounded-xl hover:bg-slate-100/80 transition cursor-pointer ${
-            isCollapsed ? 'justify-center px-0' : ''
-          }`}
+          className={`flex items-center justify-between gap-2.5 p-2 rounded-xl hover:bg-slate-100/80 transition cursor-pointer ${isCollapsed ? 'justify-center px-0' : ''
+            }`}
           title={`${activeName} (${roleLabel})`}
         >
           <div className="flex items-center gap-2.5 min-w-0">

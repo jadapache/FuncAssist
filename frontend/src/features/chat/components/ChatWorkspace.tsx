@@ -1,18 +1,20 @@
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Sparkles, ChevronDown } from 'lucide-react'
+import { Sparkles, ChevronDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { UniverAdapter } from '../../document/agent/adapters/UniverAdapter'
 import { DocumentAgent } from '../../document/agent/core/DocumentAgent'
 import type { AgenticGenerationConfig } from '../hooks/useAgenticGeneration'
 import { useDocumentHistory } from '../../document/hooks/useDocumentHistory'
 import { useCorporateTemplate } from '../../../features/settings'
 import { useChat } from '../../../context/ChatContext'
+import { useSidebar } from '../../../context/SidebarContext'
 import { useAuth } from '../../../context/AuthContext'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { useAgenticGeneration } from '../hooks/useAgenticGeneration'
 import { useToast } from '../../../context/ToastContext'
 import { featuresApi } from '../../../api/modules/features'
+import { aiSettingsApi } from '../../../features/settings/api/aiSettingsApi'
 import { type AIPromptTemplate, type AIRubric } from '../../../api/client'
 import { userApi } from '../../../api/modules/user'
 import { FEATURE_METAS } from '../../settings/components/prompts_rubrics/types'
@@ -75,6 +77,7 @@ interface ChatWorkspaceProps {
 export const ChatWorkspace = ({
   config = DEFAULT_CHAT_CONFIG,
 }: ChatWorkspaceProps) => {
+  const { isCollapsed, toggleSidebar } = useSidebar()
   const effectiveConfig = useMemo(
     () => ({
       ...DEFAULT_CHAT_CONFIG,
@@ -145,6 +148,7 @@ export const ChatWorkspace = ({
 
   const [availablePrompts, setAvailablePrompts] = useState<AIPromptTemplate[]>([])
   const [availableRubrics, setAvailableRubrics] = useState<AIRubric[]>([])
+  const [activeModelName, setActiveModelName] = useState<string>('FuncAssist (LLM)')
   const [rubricMenuOpen, setRubricMenuOpen] = useState(false)
   const [activeRole, setActiveRole] = useState('funcional')
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
@@ -178,19 +182,26 @@ export const ChatWorkspace = ({
       })
       .catch(() => undefined)
 
-    void Promise.allSettled([featuresApi.getAiPrompts(), featuresApi.getAiRubrics()]).then(
-      ([promptsResult, rubricsResult]) => {
-        if (!isMounted) return
-        const promptsRes = promptsResult.status === 'fulfilled' ? promptsResult.value : null
-        const rubricsRes = rubricsResult.status === 'fulfilled' ? rubricsResult.value : null
-        if (promptsRes) {
-          setAvailablePrompts(promptsRes.prompts || [])
-        }
-        if (rubricsRes) {
-          setAvailableRubrics(rubricsRes.rubrics || [])
-        }
-      },
-    )
+    void Promise.allSettled([
+      featuresApi.getAiPrompts(),
+      featuresApi.getAiRubrics(),
+      aiSettingsApi.getAiSettings(),
+    ]).then(([promptsResult, rubricsResult, aiSettingsResult]) => {
+      if (!isMounted) return
+      const promptsRes = promptsResult.status === 'fulfilled' ? promptsResult.value : null
+      const rubricsRes = rubricsResult.status === 'fulfilled' ? rubricsResult.value : null
+      const aiSettingsRes = aiSettingsResult.status === 'fulfilled' ? aiSettingsResult.value : null
+
+      if (promptsRes) {
+        setAvailablePrompts(promptsRes.prompts || [])
+      }
+      if (rubricsRes) {
+        setAvailableRubrics(rubricsRes.rubrics || [])
+      }
+      if (aiSettingsRes?.model) {
+        setActiveModelName(aiSettingsRes.model)
+      }
+    })
     return () => {
       isMounted = false
     }
@@ -377,15 +388,35 @@ export const ChatWorkspace = ({
         onChange={(e) => handlePickFiles(e.target.files)}
       />
 
-      {/* Top Header Row with Chat Title and Model Selector */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-white shrink-0 z-10">
-        <h1 className="text-xl font-bold text-slate-900 tracking-tight">Chat</h1>
+      {/* Top Header Row with Chat Title, Sidebar Toggle, and Model Selector */}
+      <header className="flex items-center justify-between px-6 py-3 border-b border-slate-200/80 bg-white shrink-0 z-10">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition shadow-2xs cursor-pointer shrink-0"
+            title={isCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
+            aria-label={isCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral'}
+          >
+            {isCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
+          <span className="text-slate-300 font-light text-sm" aria-hidden>
+            |
+          </span>
+          <h1 className="text-sm md:text-base font-bold text-slate-800 tracking-tight">Chat</h1>
+        </div>
 
         {/* Model Selector Dropdown Pill */}
         <div className="relative">
           <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-800 shadow-2xs hover:bg-slate-50 transition cursor-pointer">
             <Sparkles className="h-4 w-4 text-[#002777]" />
-            <span>FuncAssist (LLM)</span>
+            <span className="max-w-[200px] truncate" title={activeModelName}>
+              {activeModelName}
+            </span>
             <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
           </div>
         </div>
