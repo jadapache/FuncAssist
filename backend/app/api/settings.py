@@ -47,8 +47,10 @@ class GitLabOAuthUpdate(BaseModel):
 
 
 @router.get("")
-async def get_settings() -> dict[str, Any]:
-  return load_app_settings()
+async def get_settings(request: Request) -> dict[str, Any]:
+  settings = load_app_settings()
+  settings["version"] = getattr(request.app, "version", "0.7.0")
+  return settings
 
 
 @router.put("")
