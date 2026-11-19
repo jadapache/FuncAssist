@@ -12,8 +12,7 @@ import logging
 import uuid
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user
-from app.db.repositories import ChatRepository
+from app.api.deps import get_current_user, get_chat_repository
 from app.context.knowledge import extract_text
 from app.services.event_serializer import AgentRunEmitter, run_registry
 
@@ -325,7 +324,7 @@ def validate_operation(payload: Dict[str, Any]):
 async def handle_agentic_prompt(
     req: AgenticPromptRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    chat_repo: ChatRepository = Depends(ChatRepository),
+    chat_repo: ChatRepository = Depends(get_chat_repository),
 ):
     """
     Agentic RAG orchestrator for document requests.
@@ -587,7 +586,7 @@ async def handle_agentic_prompt(
 async def handle_agentic_prompt_stream(
     req: AgenticPromptRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    chat_repo: ChatRepository = Depends(ChatRepository),
+    chat_repo: ChatRepository = Depends(get_chat_repository),
 ):
     """
     Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.

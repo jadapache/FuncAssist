@@ -31,6 +31,10 @@ class IUserRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_approved_users(self) -> List[Dict[str, Any]]:
+        pass
+
+    @abstractmethod
     async def update_user_status(self, user_id: str, status: str) -> Optional[Dict[str, Any]]:
         pass
 

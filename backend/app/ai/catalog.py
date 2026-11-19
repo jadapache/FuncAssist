@@ -14,7 +14,7 @@ from typing import Any
 
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from app.models import AIModelInfo, ModelCatalogResponse
-from app.db.repositories.catalog_and_corporate_repository import AIModelCatalogRepository
+from app.db.repositories.catalog_repository import AIModelCatalogRepository
 
 logger = logging.getLogger(__name__)
 
@@ -159,18 +159,21 @@ KNOWN_BROWSER_MODELS: list[dict[str, Any]] = [
 def _ensure_catalog_seeded() -> None:
     try:
         from app.ai.frontier_sync import KNOWN_FRONTIER_MODELS
-        repo = AIModelCatalogRepository()
-        repo.bulk_upsert_sync(KNOWN_BROWSER_MODELS)
-        repo.bulk_upsert_sync(KNOWN_FRONTIER_MODELS)
+        from app.db.unit_of_work import SyncUnitOfWork
+        with SyncUnitOfWork() as uow:
+            uow.model_catalog.bulk_upsert(KNOWN_BROWSER_MODELS)
+            uow.model_catalog.bulk_upsert(KNOWN_FRONTIER_MODELS)
+            uow.commit()
     except Exception as exc:
         logger.debug("Failed ensuring catalog seeded in DB: %s", exc)
 
 
 def _load_frontier_from_db() -> list[dict[str, Any]]:
     try:
-        repo = AIModelCatalogRepository()
-        items = repo.list_sync()
-        return items if isinstance(items, list) else []
+        from app.db.unit_of_work import SyncUnitOfWork
+        with SyncUnitOfWork() as uow:
+            items = uow.model_catalog.list()
+            return items if isinstance(items, list) else []
     except Exception as exc:
         logger.debug("DB load frontier models fallback: %s", exc)
         return []

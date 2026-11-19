@@ -56,22 +56,24 @@ backend/app/
 ├── db/                          # Capa de datos
 │   ├── __init__.py
 │   ├── database.py            # Conexión, init_db()
-│   ├── base.py                # BaseRepository
+│   ├── models.py              # Modelos ORM SQLAlchemy
+│   ├── unit_of_work.py        # Unit of Work sync/async
 │   ├── interfaces/            # Interfaces abstractas (I*)
 │   │   ├── __init__.py
 │   │   ├── user_repository.py
-│   │   ├── chat_repository.py
-│   │   ├── standup_repository.py
-│   │   ├── prd_repository.py
-│   │   └── test_plan_repository.py
+│   │   ├── organization_repository.py
+│   │   ├── integration_repository.py
+│   │   ├── settings_repository.py
+│   │   └── secret_repository.py
 │   └── repositories/          # Implementaciones concretas
 │       ├── __init__.py
 │       ├── base_repository.py
 │       ├── user_repository.py
-│       ├── chat_repository.py
-│       ├── standup_repository.py
-│       ├── prd_repository.py
-│       └── test_plan_repository.py
+│       ├── mcp_server_repository.py
+│       ├── history_repository.py
+│       ├── template_repository.py
+│       ├── transcription_repository.py
+│       └── catalog_repository.py
 │
 ├── features/                    # Servicios de feature
 │   ├── __init__.py
@@ -624,6 +626,22 @@ def resolve_provider() -> AIProvider:
 ## 💾 Capa de Datos — `app/db/`
 
 ### Repository Pattern
+
+> **Implementación actual:** La capa de datos utiliza SQLAlchemy sobre PostgreSQL. Los ejemplos SQLite que aparecen más abajo son históricos y no representan la implementación vigente.
+
+Los repositorios reciben una sesión obligatoria por inyección y no crean sesiones ni ejecutan `commit()` internamente. Las APIs y servicios deben utilizar interfaces y dependencias de FastAPI. Las operaciones multi-entidad deben coordinarse mediante `AsyncUnitOfWork` o `SyncUnitOfWork` en `app/db/unit_of_work.py`.
+
+```python
+async with AsyncUnitOfWork() as uow:
+    user = await uow.users.get_by_id(user_id)
+    await uow.commit()  # commit explícito
+```
+
+El `UnitOfWork` comparte una única sesión entre repositorios, ejecuta rollback ante excepciones y cierra la sesión al salir del contexto. El commit es explícito; no se realiza automáticamente.
+
+Los repositorios cubren usuarios, organizaciones, integraciones, secretos, configuraciones, historial, transcripciones, plantillas, catálogo de modelos y servidores MCP.
+
+`app/core/integration_migration.py` es una excepción administrativa controlada para DDL, índices y advisory locks de PostgreSQL. No debe utilizarse como patrón para operaciones CRUD normales.
 
 **Interfaz:**
 

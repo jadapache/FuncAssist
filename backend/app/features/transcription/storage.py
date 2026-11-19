@@ -455,8 +455,25 @@ def save_transcription_record(record: dict[str, Any]) -> dict[str, Any]:
   transcription_id = record.get("id") or str(uuid.uuid4())
   record["id"] = transcription_id
 
+  import asyncio
+  from app.db.database import get_db
   from app.db.repositories.transcription_repository import TranscriptionRepository
-  db_saved = TranscriptionRepository().upsert_sync(record)
+
+  async def _save():
+    async with get_db() as db:
+      repo = TranscriptionRepository(db)
+      res = await repo.upsert(record)
+      await db.commit()
+      return res
+
+  try:
+    loop = asyncio.get_running_loop()
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+      db_saved = pool.submit(asyncio.run, _save()).result()
+  except RuntimeError:
+    db_saved = asyncio.run(_save())
+
   return _enrich_record_metadata(db_saved)
 
 
@@ -482,16 +499,46 @@ def _enrich_record_metadata(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_transcription_record(transcription_id: str) -> Optional[dict[str, Any]]:
+  import asyncio
+  from app.db.database import get_db
   from app.db.repositories.transcription_repository import TranscriptionRepository
-  db_record = TranscriptionRepository().get_sync(transcription_id)
+
+  async def _get():
+    async with get_db() as db:
+      repo = TranscriptionRepository(db)
+      return await repo.get(transcription_id)
+
+  try:
+    loop = asyncio.get_running_loop()
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+      db_record = pool.submit(asyncio.run, _get()).result()
+  except RuntimeError:
+    db_record = asyncio.run(_get())
+
   if db_record:
     return _enrich_record_metadata(db_record)
   return None
 
 
 def list_transcriptions() -> list[dict[str, Any]]:
+  import asyncio
+  from app.db.database import get_db
   from app.db.repositories.transcription_repository import TranscriptionRepository
-  db_items = TranscriptionRepository().list_sync()
+
+  async def _list():
+    async with get_db() as db:
+      repo = TranscriptionRepository(db)
+      return await repo.list()
+
+  try:
+    loop = asyncio.get_running_loop()
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+      db_items = pool.submit(asyncio.run, _list()).result()
+  except RuntimeError:
+    db_items = asyncio.run(_list())
+
   return [_enrich_record_metadata(item) for item in db_items]
 
 
@@ -538,8 +585,24 @@ def delete_transcription_record(transcription_id: str) -> bool:
   if folder.exists() and folder.is_dir():
     shutil.rmtree(folder, ignore_errors=True)
 
+  import asyncio
+  from app.db.database import get_db
   from app.db.repositories.transcription_repository import TranscriptionRepository
-  return TranscriptionRepository().delete_sync(transcription_id)
+
+  async def _delete():
+    async with get_db() as db:
+      repo = TranscriptionRepository(db)
+      res = await repo.delete(transcription_id)
+      await db.commit()
+      return res
+
+  try:
+    loop = asyncio.get_running_loop()
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+      return pool.submit(asyncio.run, _delete()).result()
+  except RuntimeError:
+    return asyncio.run(_delete())
 
 
 def cleanup_old_files(ttl_hours: int = 24) -> int:

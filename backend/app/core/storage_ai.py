@@ -114,10 +114,10 @@ def save_user_ai_settings(
     return
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as session:
-      _execute_save_ai_atomic(session, user_id, ai_data)
-      session.commit()
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      _execute_save_ai_atomic(uow.session, user_id, ai_data)
+      uow.commit()
   except Exception as exc:
     logger.error("Failed saving user AI settings for %s: %s", user_id, exc)
     raise

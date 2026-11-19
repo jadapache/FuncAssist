@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.core.settings import get_settings
 from app.core.storage_cache import _CACHE_CONNECTIONS, make_conn_cache_key
-from app.db.models import OrganizationIntegrationModel
+from app.db.repositories.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -52,30 +52,18 @@ def save_connection(integration_id: str, payload: dict[str, Any], org_id: str = 
   _CACHE_CONNECTIONS[cache_key] = encrypted
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
       enc_str = encrypted.decode("ascii")
-      if item:
-        item.client_secret_ref = enc_str
-        item.client_id = payload.get("client_id")
-        item.status = "active"
-      else:
-        new_item = OrganizationIntegrationModel(
-          id=str(uuid.uuid4()),
-          organization_id=org_id,
-          provider=integration_id,
-          client_id=payload.get("client_id"),
-          client_secret_ref=enc_str,
-          status="active",
-        )
-        db.add(new_item)
-      db.commit()
+      uow.integrations.save_organization_integration(
+        organization_id=org_id,
+        provider=integration_id,
+        client_id=payload.get("client_id"),
+        client_secret_ref=enc_str,
+        status="active",
+        settings_payload=None,
+      )
+      uow.commit()
   except Exception as exc:
     logger.error("Failed to persist organization integration to DB: %s", exc)
     raise
@@ -87,16 +75,11 @@ def load_connection(integration_id: str, org_id: str = "default") -> dict[str, A
   encrypted: bytes | None = _CACHE_CONNECTIONS.get(cache_key)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
-      if item and item.client_secret_ref:
-        encrypted = item.client_secret_ref.encode("ascii")
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      item = uow.integrations.get_organization_integration(org_id, integration_id)
+      if item and item.get("client_secret_ref"):
+        encrypted = item["client_secret_ref"].encode("ascii")
         _CACHE_CONNECTIONS[cache_key] = encrypted
       elif item is None:
         # If DB explicitly has no record, invalidate cache
@@ -123,19 +106,11 @@ def delete_connection(integration_id: str, org_id: str = "default") -> bool:
   _CACHE_CONNECTIONS.pop(cache_key, None)
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
-      if item:
-        db.delete(item)
-        db.commit()
-        return True
-      return existed
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      deleted = uow.integrations.delete_organization_integration(org_id, integration_id)
+      uow.commit()
+      return bool(deleted or existed)
   except Exception as exc:
     logger.error("Could not delete connection from DB: %s", exc)
     raise
@@ -148,15 +123,9 @@ def connection_exists(integration_id: str, org_id: str = "default") -> bool:
     return True
 
   try:
-    from app.db.database import get_sync_db
-    with get_sync_db() as db:
-      item = db.scalar(
-        select(OrganizationIntegrationModel.id).where(
-          OrganizationIntegrationModel.organization_id == org_id,
-          OrganizationIntegrationModel.provider == integration_id,
-        )
-      )
-      return item is not None
+    from app.db.unit_of_work import SyncUnitOfWork
+    with SyncUnitOfWork() as uow:
+      return uow.integrations.organization_integration_exists(org_id, integration_id)
   except Exception:
     return False
 
