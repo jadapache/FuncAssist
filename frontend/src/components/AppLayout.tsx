@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { api } from '../api/client'
 import { DEFAULT_DISPLAY_NAME } from '../constants/app'
-import { TopNav } from './ui/TopNav'
+import { AppSidebar } from './ui/AppSidebar'
 
 export const AppLayout = () => {
   const [displayName, setDisplayName] = useState(DEFAULT_DISPLAY_NAME)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -13,6 +14,9 @@ export const AppLayout = () => {
         const settings = await api.getSettings()
         if (settings.display_name) {
           setDisplayName(settings.display_name)
+        }
+        if (settings.version) {
+          setAppVersion(settings.version)
         }
       } catch {
         // optional on first boot
@@ -22,7 +26,7 @@ export const AppLayout = () => {
   }, [])
 
   return (
-    <div className="relative flex min-h-screen flex-col">
+    <div className="relative flex h-screen w-screen overflow-hidden bg-white text-slate-900">
       {/* Ambient background */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-white" aria-hidden>
         <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-blue-100/60 blur-3xl animate-float" />
@@ -37,9 +41,12 @@ export const AppLayout = () => {
         />
       </div>
 
-      <TopNav displayName={displayName} />
-      <main className="flex-1 overflow-visible">
-        <div className="mx-auto max-w-7xl px-4 py-8 md:px-6">
+      {/* Main Collapsible App Sidebar */}
+      <AppSidebar displayName={displayName} version={appVersion} />
+
+      {/* Main Application Area */}
+      <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+        <div className="flex-1 h-full min-w-0 overflow-y-auto">
           <Outlet context={{ displayName, setDisplayName }} />
         </div>
       </main>

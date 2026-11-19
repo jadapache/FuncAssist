@@ -389,7 +389,7 @@ export const ProfilePage = () => {
   ]
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="flex flex-col min-h-full">
       <PageHeader
         eyebrow="CUENTA & PREFERENCIAS"
         title="Perfil de Usuario"
@@ -408,7 +408,8 @@ export const ProfilePage = () => {
         }
       />
 
-      {/* Global Alerts */}
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-8 pb-12">
+        {/* Global Alerts */}
       {message ? (
         <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800">
           <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
@@ -692,13 +693,14 @@ export const ProfilePage = () => {
         </div>
       )}
 
-      {/* Change Password Modal */}
-      <ChangePasswordModal
-        isOpen={isPasswordModalOpen}
-        onClose={() => setIsPasswordModalOpen(false)}
-        onSuccess={() => setIsPasswordModalOpen(false)}
-        onSubmitPassword={handlePasswordSubmit}
-      />
+        {/* Change Password Modal */}
+        <ChangePasswordModal
+          isOpen={isPasswordModalOpen}
+          onClose={() => setIsPasswordModalOpen(false)}
+          onSuccess={() => setIsPasswordModalOpen(false)}
+          onSubmitPassword={handlePasswordSubmit}
+        />
+      </div>
     </div>
   )
 }

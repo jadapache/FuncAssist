@@ -190,3 +190,87 @@ export const DashboardSkeleton: React.FC = () => {
     </div>
   )
 }
+
+/** Skeleton for Chat view */
+export const ChatSkeleton: React.FC = () => {
+  return (
+    <div className="flex flex-col h-full w-full p-4 md:p-6 space-y-6">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="space-y-2">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-3.5 w-72" />
+        </div>
+        <Skeleton className="h-9 w-28 rounded-xl" />
+      </div>
+
+      <div className="flex-1 space-y-4 py-4">
+        <div className="flex items-start gap-3 max-w-xl">
+          <Skeleton className="h-8 w-8 rounded-full shrink-0" />
+          <Skeleton className="h-16 w-full rounded-2xl" />
+        </div>
+        <div className="flex items-start justify-end gap-3 max-w-xl ml-auto">
+          <Skeleton className="h-14 w-full rounded-2xl" />
+          <Skeleton className="h-8 w-8 rounded-full shrink-0" />
+        </div>
+        <div className="flex items-start gap-3 max-w-2xl">
+          <Skeleton className="h-8 w-8 rounded-full shrink-0" />
+          <Skeleton className="h-28 w-full rounded-2xl" />
+        </div>
+      </div>
+
+      <div className="pt-2">
+        <Skeleton className="h-14 w-full rounded-2xl" />
+      </div>
+    </div>
+  )
+}
+
+/** Skeleton for Knowledge Page document catalog */
+export const KnowledgeDocsSkeleton: React.FC = () => {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <div key={i} className="card p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-10 w-10 rounded-xl" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-20" />
+              </div>
+            </div>
+            <Skeleton className="h-6 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-full" />
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-7 w-16 rounded-lg" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Skeleton for Transcripciones list */
+export const TranscriptionsSkeleton: React.FC = () => {
+  return (
+    <div className="space-y-3">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className="card p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 min-w-0 flex-1">
+            <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
+            <div className="space-y-1.5 min-w-0 flex-1">
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-3 w-64" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Skeleton className="h-8 w-24 rounded-lg" />
+            <Skeleton className="h-8 w-8 rounded-lg" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}

@@ -113,14 +113,15 @@ export const SettingsPage = () => {
   ]
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="flex flex-col min-h-full">
       <PageHeader
         eyebrow="SISTEMA & PREFERENCIAS"
         title="Configuración del Sistema"
         subtitle="Administra la base de conocimiento, plantillas, integraciones de código fuente y accesos de usuario."
       />
 
-      {/* Nav Tabs Bar */}
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-8 pb-12">
+        {/* Nav Tabs Bar */}
       <nav className="flex flex-wrap gap-2 rounded-2xl border border-[var(--color-border)] bg-slate-100/70 p-1.5 shadow-sm">
         {TABS.map((t) => {
           const Icon = t.icon
@@ -189,6 +190,7 @@ export const SettingsPage = () => {
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }

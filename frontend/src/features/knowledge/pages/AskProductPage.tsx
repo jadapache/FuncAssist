@@ -123,16 +123,15 @@ export const AskProductPage = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col min-h-full">
       <PageHeader
         eyebrow="CONOCIMIENTO"
         title="Consultar Producto"
         subtitle="Sube documentos, selecciona fuentes en vivo y realiza preguntas. Las respuestas citan evidencias o indican claramente si falta información."
       />
 
-
-
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-6">
+        <div className="grid gap-6 lg:grid-cols-2">
         <section className="card space-y-4">
           <div className="flex items-center gap-2">
             <Paperclip className="h-4 w-4 text-[#002777]" aria-hidden />
@@ -231,7 +230,8 @@ export const AskProductPage = () => {
         </form>
       </div>
 
-      {result ? <GroundedResultView result={result} /> : null}
+        {result ? <GroundedResultView result={result} /> : null}
+      </div>
     </div>
   )
 }

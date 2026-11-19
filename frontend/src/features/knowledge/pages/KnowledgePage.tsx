@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api, type KnowledgeDocument } from '../../../api/client'
 import { ConfirmationModal, PageHeader } from '../../../components/common'
+import { KnowledgeDocsSkeleton } from '../../../components/common/Skeleton'
 import { useToast } from '../../../context/ToastContext'
 
 const ACCEPTED_TYPES = '.pdf,.docx,.doc,.md,.txt,.json,.html,.htm'
@@ -266,7 +267,7 @@ export const KnowledgePage = () => {
   }, [searchQuery, selectedTagFilter, viewMode])
 
   return (
-    <div className="space-y-8 pb-12 font-sans">
+    <div className="flex flex-col min-h-full font-sans">
       <PageHeader
         eyebrow="SISTEMA RAG & INDEXACIÓN"
         title="Biblioteca de Conocimiento"
@@ -282,7 +283,8 @@ export const KnowledgePage = () => {
         }
       />
 
-      {/* 2. Drag & Drop File Upload Section */}
+      <div className="flex-1 px-4 py-6 md:px-8 max-w-7xl mx-auto w-full space-y-8 pb-12">
+        {/* 2. Drag & Drop File Upload Section */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -581,10 +583,7 @@ export const KnowledgePage = () => {
 
         {/* Documents Grid / List */}
         {loadingDocs ? (
-          <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
-            <RefreshCw className="h-8 w-8 animate-spin text-[#002777] mx-auto opacity-70" />
-            <p className="text-xs font-semibold text-slate-700">Cargando catálogo documental...</p>
-          </div>
+          <KnowledgeDocsSkeleton />
         ) : filteredDocuments.length === 0 ? (
           <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
             <div className="h-12 w-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
@@ -912,19 +911,20 @@ export const KnowledgePage = () => {
         )}
       </div>
 
-      {/* Confirmation Modal for Document Deletion */}
-      <ConfirmationModal
-        isOpen={Boolean(docToDelete)}
-        title="Eliminar Documento de la Biblioteca"
-        message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" y todos sus fragmentos indexados de la base de conocimiento PostgreSQL?`}
-        confirmLabel="Eliminar Definitivamente"
-        cancelLabel="Cancelar"
-        variant="danger"
-        isDestructive
-        isLoading={isDeleting}
-        onConfirm={confirmDeleteDoc}
-        onClose={() => setDocToDelete(null)}
-      />
+        {/* Confirmation Modal for Document Deletion */}
+        <ConfirmationModal
+          isOpen={Boolean(docToDelete)}
+          title="Eliminar Documento de la Biblioteca"
+          message={`¿Estás seguro de que deseas eliminar "${docToDelete?.filename}" y todos sus fragmentos indexados de la base de conocimiento PostgreSQL?`}
+          confirmLabel="Eliminar Definitivamente"
+          cancelLabel="Cancelar"
+          variant="danger"
+          isDestructive
+          isLoading={isDeleting}
+          onConfirm={confirmDeleteDoc}
+          onClose={() => setDocToDelete(null)}
+        />
+      </div>
     </div>
   )
 }

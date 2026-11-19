@@ -42,6 +42,7 @@ export type TestConnectionResult = {
 
 export type AppSettings = {
   display_name?: string
+  version?: string
   jira?: Record<string, unknown>
   github?: Record<string, unknown>
   gitlab?: Record<string, unknown>

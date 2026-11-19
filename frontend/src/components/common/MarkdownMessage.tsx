@@ -1,6 +1,5 @@
 import React, { type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 
 interface MarkdownMessageProps {
   content: string
@@ -13,7 +12,7 @@ interface ComponentProps {
 }
 
 /**
- * Rich Markdown renderer with GitHub Flavored Markdown (GFM) support.
+ * Rich Markdown renderer with clean styling support.
  * Renders headings, bold/italic, code blocks, lists, and tables cleanly.
  */
 export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
@@ -25,7 +24,6 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
   return (
     <div className={`prose-sm max-w-none text-slate-800 leading-relaxed text-xs space-y-2 ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }: ComponentProps) => (
             <h1 className="text-base font-bold text-slate-900 mt-4 mb-2 first:mt-0 tracking-tight">
