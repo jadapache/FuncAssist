@@ -8,6 +8,7 @@ interface ProtectedRouteProps {
 
 export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
   const { user, isAuthenticated, isLoading } = useAuth()
+  const outletContext = useOutletContext()
 
   if (isLoading) {
     return (
@@ -29,6 +30,5 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
     return <Navigate to="/" replace />
   }
 
-  const outletContext = useOutletContext()
   return <Outlet context={outletContext} />
 }
