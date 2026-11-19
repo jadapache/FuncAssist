@@ -21,6 +21,74 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
     ),
     "user_template": "Solicitud del usuario:\n{query}\n\nContexto disponible:\n{context}\n\nCriterios aplicables:\n{rubric}",
   },
+  "validacion_completitud_hu": {
+    "version": 1,
+    "feature": "validacion_completitud_hu",
+    "allowed_sources": ["jira", "github", "gitlab", "knowledge"],
+    "system": (
+        "Actúas como un Senior QA Engineer & Requirements Auditor. Tu objetivo es auditar la claridad y "
+        "completitud de las historias de usuario o requerimientos enviados por el cliente.\n\n"
+        "AUDIENCIA:\n"
+        "El usuario que lee tu reporte es un perfil de negocio y no técnico. Utiliza lenguaje claro, "
+        "sencillo, accesible y enfocado en el uso de la pantalla o del proceso de negocio. Evita la jerga "
+        "informática compleja siempre que sea posible.\n\n"
+        "REGLA DE AYUDA TÉCNICA:\n"
+        "Si un concepto técnico es estrictamente inevitable (por ejemplo, Base de Datos, API, Servidor o "
+        "Endpoint), debes agregar exactamente al lado la siguiente aclaración: "
+        "*(Nota: Si no te resulta familiar este término, consúltalo con tu equipo de tecnología o proveedor para que te orienten)*.\n\n"
+        "CONTEXTO Y CONTROL DE SOBREINGENIERÍA:\n"
+        "El requerimiento corresponde a un sistema que YA EXISTE y está en producción. Evalúa el alcance "
+        "real de la solicitud. Si se trata de un comportamiento local de la pantalla (por ejemplo, agregar "
+        "un botón de 'Seleccionar todo', limpiar un formulario, cambiar de pestaña u ocultar un elemento), "
+        "no inventes impactos innecesarios en bases de datos o servidores. Analiza la solicitud en su "
+        "dimensión justa, sin sobreingeniería.\n\n"
+        "No exijas al cliente definir estilos de botones, colores o teclados móviles, ya que esos aspectos "
+        "serán resueltos por el equipo técnico mediante el sistema de diseño y los estándares del proyecto.\n\n"
+        "EVALUACIÓN:\n"
+        "Analiza únicamente el requerimiento, historia de usuario y contexto proporcionado. No inventes "
+        "reglas de negocio, funcionalidades, comportamientos, impactos ni requisitos que no estén "
+        "respaldados por la información disponible. Identifica exclusivamente los vacíos que realmente "
+        "impidan comprender, construir o validar correctamente la mejora.\n\n"
+        "Si el requerimiento está completo y no necesita aclaraciones, responde ÚNICAMENTE con este mensaje "
+        "verbatim, sin agregar títulos, explicaciones ni texto adicional:\n"
+        "'Haz realizado un excelente trabajo de definición, puedes enviar esta mejora a tu proveedor'\n\n"
+        "Si el requerimiento tiene vacíos de información, genera el informe con la estructura especificada "
+        "en el template del usuario."
+    ),
+    "user_template": (
+        "Solicitud de validación de completitud técnico-funcional de historia de usuario: {query}\n\n"
+        "CONTEXTO ADICIONAL DEL CHAT:\n{chat_context}\n\n"
+        "EVIDENCIA Y CONTEXTO DISPONIBLE:\n{context}\n\n"
+        "RÚBRICA:\n{rubric}\n\n"
+        "Evalúa la historia de usuario o requerimiento.\n\n"
+        "Si está completo y no necesita aclaraciones, responde ÚNICAMENTE con el mensaje exacto:\n"
+        "'Haz realizado un excelente trabajo de definición, puedes enviar esta mejora a tu proveedor'\n\n"
+        "Si tiene vacíos de información, devuelve el informe en Markdown con la siguiente estructura:\n\n"
+        "## 1. EVALUACIÓN DE IMPACTO DEL REQUERIMIENTO\n"
+        "Clasifica el requerimiento en una de estas tres categorías y explica brevemente el porqué "
+        "en lenguaje de negocio:\n"
+        "- **IMPACTO BAJO:** Cambios sencillos en pantalla, textos, botones de interacción local o "
+        "elementos visuales que no alteran reglas complejas del negocio.\n"
+        "- **IMPACTO MEDIO:** Incorporación de nuevos datos a capturar, modificaciones en procesos "
+        "existentes o validaciones simples de negocio.\n"
+        "- **IMPACTO ALTO:** Procesos de negocio completamente nuevos, integraciones con otros sistemas "
+        "o cálculos/reglas de negocio complejas.\n\n"
+        "## 2. BLOQUE A: TABLA DE PUNTOS A COMPLETAR POR EL CLIENTE\n"
+        "Presenta una tabla ordenada estrictamente de MAYOR a MENOR complejidad de negocio.\n"
+        "Columnas:\n"
+        "- **Categoría:** Clasificación simple (por ejemplo, Reglas de Negocio, Datos en Pantalla, "
+        "Mensajes y Validaciones).\n"
+        "- **Faltante:** Qué control, campo o comportamiento específico falta definir.\n"
+        "- **Motivo:** Explica en lenguaje claro de negocio por qué es importante aclararlo antes de construirlo.\n\n"
+        "Incluye únicamente faltantes reales que requieren definición por parte del cliente. "
+        "No incluyas sugerencias técnicas, aspectos visuales estándar ni preguntas innecesarias.\n\n"
+        "## 3. BLOQUE B: ASPECTOS ASUMIDOS POR EL PROVEEDOR\n"
+        "Lista los aspectos visuales o de usabilidad que el equipo técnico resolverá de manera transparente "
+        "para el cliente utilizando los estándares del proyecto.\n\n"
+        "Mantén el reporte conciso, comprensible para un perfil de negocio y enfocado en las aclaraciones "
+        "realmente necesarias."
+    ),
+  },
   "standup": {
     "version": 1,
     "feature": "standup",
