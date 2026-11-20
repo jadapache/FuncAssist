@@ -1,463 +1,316 @@
 # Arquitectura del Sistema — FuncAssist
 
-Guía completa del diseño, patrones y decisiones arquitectónicas de FuncAssist.
+Guía del diseño, patrones y decisiones arquitectónicas de FuncAssist (v0.8.0).
 
 ---
 
 ## 📐 Visión General
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     React 19 SPA (Vite)                        │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Pages (Standup, PRD Checker, QA Features, Ask Product) │  │
-│  │  Components (Settings, Integrations, Knowledge, Chat)   │  │
-│  │  Hooks (useChatPersistence, useDocumentHistory, etc)    │  │
-│  │  Context API (Auth, Toast)                              │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└──────────────────┬──────────────────────────────────────────────┘
-                   │ REST / JSON
-┌──────────────────▼──────────────────────────────────────────────┐
-│                    FastAPI Backend                              │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  HTTP Layer: app/api/ (routers REST)                   │   │
-│  │  ├─ auth.py        (Login, Register, Profile)         │   │
-│  │  ├─ features.py    (Standup, Ask, PRD, QA, Impact)    │   │
-│  │  ├─ knowledge.py   (Document Upload, Retrieve)        │   │
-│  │  ├─ integrations.py (Jira, GitHub, GitLab, Sync)     │   │
-│  │  └─ doc_agent.py   (Agentic RAG, Document Mutations) │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Business Logic: features/, context/, db/               │   │
-│  │  ├─ features/standup/service.py (Standup generation)  │   │
-│  │  ├─ features/mejoras/docx_builder.py (Export)         │   │
-│  │  ├─ context/service.py (RAG assembly)                 │   │
-│  │  ├─ context/knowledge.py (Document ingestion)         │   │
-│  │  ├─ context/retrieval.py (BM25 ranking)               │   │
-│  │  ├─ db/repositories/ (Repository Pattern)             │   │
-│  │  └─ integrations/{jira,github,gitlab}/ (Adapters)   │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  AI Engine: app/ai/                                    │   │
-│  │  ├─ runner.py (Orchestrator: prompt → LLM → log)      │   │
-│  │  ├─ artifacts.py (Parse múltiples artefactos XML)     │   │
-│  │  ├─ providers/ (Multi-provider abstraction)           │   │
-│  │  │  └─ implementations.py (LiteLLM wrapper)           │   │
-│  │  ├─ templates.py (System prompts, rúbricas)          │   │
-│  │  ├─ catalog.py (Model discovery)                      │   │
-│  │  └─ logging.py (Auditoría)                            │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Infrastructure: core/, db/                            │   │
-│  │  ├─ core/settings.py (Config management)              │   │
-│  │  ├─ core/security.py (JWT, password hashing)          │   │
-│  │  ├─ core/secrets.py (Fernet encryption for API keys)  │   │
-│  │  ├─ core/storage.py (Local file I/O, credentials)     │   │
-│  │  ├─ db/database.py (SQLite async pool)                │   │
-│  │  └─ db/interfaces/ (Repository pattern abstractions)   │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└──────────────────┬──────────────────────────────────────────────┘
-                   │
-        ┌──────────┼──────────┬──────────┐
-        ▼          ▼          ▼          ▼
-    ┌────────┐ ┌────────┐ ┌──────────┐ ┌─────────┐
-    │ Jira   │ │ GitHub │ │ GitLab   │ │ Ollama  │
-    │ OAuth  │ │ PAT    │ │ PAT      │ │ Remote  │
-    │ Sync   │ │        │ │          │ │ OpenAI  │
-    └────────┘ └────────┘ └──────────┘ │ Anthropic
-                                        └─────────┘
-        ▼          ▼          ▼
-    ┌────────────────────────────────────────┐
-    │  Local Storage (local/)                 │
-    │  ├─ SQLite Database (users, chats)     │
-    │  ├─ Knowledge Index (documents, BM25)  │
-    │  ├─ AI Logs (audit trail)              │
-    │  └─ Encrypted Credentials              │
-    └────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    React 19 SPA (Vite + Tailwind v4)             │
+│  pages/            Dashboard, Login                              │
+│  features/         chat · document · knowledge · integrations ·  │
+│                    settings · transcription · ai                 │
+│  context/          Auth, User, Chat, BackgroundJob, Loading,     │
+│                    Sidebar, Toast                                │
+│  core/api          apiClient + config                            │
+│  In-browser AI:    @mlc-ai/web-llm (WebGPU) · Whisper ONNX       │
+│                    (@huggingface/transformers en Web Worker)     │
+│  Editor visual:    Univer (docs + sheets)                        │
+└──────────────────┬───────────────────────────────────────────────┘
+                   │ REST / JSON + SSE (streaming)
+┌──────────────────▼───────────────────────────────────────────────┐
+│                    FastAPI Backend (app/)                        │
+│  api/            Routers bajo /api                               │
+│   ├─ auth, user, me (/me, /v1/me)                                │
+│   ├─ routers/features_pm   (standup, ask, prd-checker,           │
+│   │                         change-impact)                       │
+│   ├─ routers/features_qa   (qa/{feature_key})                    │
+│   ├─ routers/features_doc  (mejoras, inventario, levantamiento)  │
+│   ├─ document_agent        (/doc-agent: agentic-prompt[-stream], │
+│   │                         export-docx, export-xlsx)            │
+│   ├─ knowledge, history, drafts, templates                       │
+│   ├─ transcription, transcription_stream                         │
+│   ├─ routers/ai_settings, ai_management, ai_templates            │
+│   ├─ integrations, settings                                      │
+│   └─ middleware/error_handlers                                   │
+│  features/       standup, prd_checker, change_impact, mejoras,   │
+│                  inventario, levantamiento, transcription, drafts│
+│  services/       template_renderer (docx/xlsx), rubric_evaluator,│
+│                  documents, event_serializer                     │
+│  context/        RAG: builder, service, knowledge, retrieval,    │
+│                  memory                                          │
+│  ai/             runner, providers/, catalog, frontier_sync,     │
+│                  templates, seeds, map_reduce, section_generator,│
+│                  artifacts, endpoint_security, logging           │
+│  integrations/   jira, github, gitlab + registry, executor, sync │
+│  db/             models (SQLAlchemy), interfaces/, repositories/,│
+│                  unit_of_work                                    │
+│  core/           settings, security, secret_store, rls_context,  │
+│                  redis, storage_*, migration, index_refresher    │
+│  schemas/        Pydantic (chat, prd, standup, test_plan,        │
+│                  transcription, artifacts/, agent_events)        │
+└───────┬───────────────┬──────────────────┬───────────────────────┘
+        ▼               ▼                  ▼
+┌──────────────┐ ┌─────────────┐ ┌──────────────────────────────┐
+│ PostgreSQL 16│ │  Redis 7    │ │ Servicios externos           │
+│ + pgvector   │ │ caché       │ │ Jira · GitHub · GitLab       │
+│ RLS por      │ │ compartida  │ │ LLMs vía LiteLLM: OpenAI,    │
+│ usuario/org  │ │             │ │ Anthropic, Gemini, Groq,     │
+└──────────────┘ └─────────────┘ │ Ollama remoto · Servidores   │
+                                 │ MCP                          │
+                                 └──────────────────────────────┘
+        + Volúmenes de archivos: DATA_DIR (settings, cache, generated,
+          transcriptions) y KNOWLEDGE_DATA_DIR (documentos subidos)
 ```
+
+### Despliegue
+
+`compose.yaml` define cuatro servicios:
+
+| Servicio   | Imagen                     | Rol |
+|------------|----------------------------|-----|
+| `frontend` | nginx con el build de Vite | Sirve la SPA y hace proxy a `/api` (puerto `APP_PORT`, 6728 por defecto) |
+| `backend`  | `backend/Dockerfile`       | FastAPI/uvicorn en el puerto 8000, healthcheck en `/api/health` |
+| `db`       | `pgvector/pgvector:pg16`   | Base de datos relacional + vectores |
+| `redis`    | `redis:7-alpine` (AOF)     | Caché compartida |
+
+Variables obligatorias: `POSTGRES_PASSWORD`, `SECRET_KEY`, `PBKDF2_SALT`. El backend no arranca sin `DATABASE_URL` y `REDIS_URL`. También existe `render.yaml` para despliegue en Render.
 
 ---
 
 ## 🏛️ Principios de Diseño
 
-### 1. **Separación de Capas**
+### 1. Separación de capas
 
-El sistema respeta la arquitectura por capas:
+- **HTTP** (`api/`): validación con Pydantic, autenticación, mapeo de errores (`middleware/error_handlers.py`).
+- **Negocio** (`features/`, `services/`, `context/`, `ai/`): orquestación y lógica pura.
+- **Datos** (`db/`): repositorios sobre SQLAlchemy async; sin SQL en los handlers.
+- **Infraestructura** (`core/`): configuración, secretos, RLS, Redis, almacenamiento en disco.
 
-- **Capa HTTP**: Validación de entrada, conversión de tipos, error handling
-- **Capa de Negocio**: Lógica pura, orquestación de servicios
-- **Capa de Datos**: Repository pattern, acceso a BD via interfaces abstractas
-- **Capa de Infraestructura**: Configuración, secrets, logging, storage
+### 2. Inyección de dependencias
 
-**Ventaja**: Cambios en una capa no rompen otras. Ejemplo: cambiar de SQLite a PostgreSQL solo afecta `db/repositories/`.
-
-### 2. **Inyección de Dependencias**
-
-FastAPI's `Depends()` y type hints aseguran que cada handler reciba lo que necesita:
+Los handlers reciben repositorios, usuario actual y sesión de BD vía `Depends()` (`api/deps.py`):
 
 ```python
 async def ask_product(
     body: GroundedRequest,
     chat_repo: IChatRepository = Depends(get_chat_repository),
-) -> dict[str, Any]:
-    # chat_repo es el repositorio concreto, inyectado automáticamente
+) -> dict[str, Any]: ...
 ```
 
-**Ventaja**: Testeable, mockeable, composable.
+### 3. Repository Pattern + Unit of Work
 
-### 3. **Repository Pattern para Acceso a Datos**
+- **Interfaces** en `db/interfaces/` (`IUserRepository`, `ISettingsRepository`, `ISecretRepository`, `IIntegrationRepository`, `IMcpServerRepository`, `ITemplateRepository`, `ICorporateTemplateRepository`, `ICatalogRepository`, `ITranscriptionRepository`, `IOrganizationRepository`).
+- **Implementaciones** en `db/repositories/` heredando de `BaseRepository`.
+- **`AsyncUnitOfWork`** (`db/unit_of_work.py`) agrupa repositorios (chats, standups, PRD, test plans, etc.) en una sola transacción.
+- `db/database.py` expone engines y sesiones async (`psycopg`) y sync, con overrides para tests.
 
-Cada entidad (User, Chat, Standup) tiene:
-- **Interfaz abstracta**: `IUserRepository` → contrato que todos cumplen
-- **Implementación concreta**: `UserRepository(BaseRepository)` → SQLite específico
-- **Factory**: `get_user_repository()` → proveedor de dependencias
+### 4. Multi-tenant con Row-Level Security
 
-**Ventaja**: No hay SQL embebido en handlers. BD es intercambiable.
+`core/rls_context.py` fija por transacción `app.current_user_id` y `app.current_org_id`; las políticas RLS de PostgreSQL aíslan los datos entre usuarios y organizaciones (`organizations`, `organization_members`).
 
-### 4. **Abstracción de Proveedores de IA**
+### 5. Abstracción de proveedores de IA
 
-Múltiples proveedores (Ollama, OpenAI, Anthropic) comparten interfaz:
+`ai/providers/` define el protocolo base, un registro y una factory; `implementations.py` envuelve LiteLLM. El proveedor activo se resuelve en tiempo de ejecución a partir de las credenciales y preferencias del usuario (`user_provider_credentials`, `user_preferences`). Cambiar de proveedor es configuración, no código.
 
-```python
-class AIProvider(Protocol):
-    async def complete(messages: list[AIMessage]) -> AICompletion
-    async def complete_stream(messages) -> AsyncGenerator[str]
-```
+### 6. Persistencia en servidor
 
-Resolución dinámica: `resolve_provider()` → retorna el proveedor configurado actualmente.
+Todo el estado de negocio (conversaciones, artefactos, resultados de features, transcripciones, configuración) se persiste en el backend. El navegador solo guarda en `localStorage`:
 
-**Ventaja**: Cambiar de Ollama a OpenAI es un cambio de configuración, no de código.
+- el **token JWT** de sesión (`context/AuthContext.tsx`, `core/api/config.ts`);
+- la lista de **transcripciones en curso** (`features/transcription/utils/transcriptionStorage.ts`), para retomar su seguimiento tras recargar la página.
 
-### 5. **Local-First Storage**
+---
 
-- **No requiere servidor externo**: Todo funciona offline (excepto integraciones)
-- **Credenciales cifradas**: Fernet encryption con clave del sistema
-- **SQLite para BD relacional**: Portable, embebido, sin dependencias
-- **JSON para índices**: BM25 index serializado en JSON plano
+## 🤖 Arquitectura de IA y frontera de ejecución
 
-**Ventaja**: Privacidad, portabilidad, desarrollo sin fricción.
+FuncAssist sigue un paradigma **Client-First** para la IA local:
+
+1. **Ejecución en el navegador (sin pesos en el backend)**
+   - **Chat/escritura local**: `@mlc-ai/web-llm` sobre WebGPU; los pesos quedan en la caché del navegador (Cache API / OPFS).
+   - **Reconocimiento de voz local**: Whisper ONNX vía `@huggingface/transformers` en un Web Worker (WebGPU/WASM).
+   - El backend no descarga, almacena ni ejecuta modelos GGUF, Whisper u ONNX.
+
+2. **Proveedores cloud**
+   - OpenAI, Anthropic, Google Gemini y Groq se invocan desde el backend vía LiteLLM con claves cifradas.
+   - **Ollama remoto** se trata como API externa por HTTPS. `ai/endpoint_security.py` (y los validadores del frontend) rechazan loopback (`127.0.0.1`, `localhost`, `::1`) e IPs privadas.
+   - La transcripción en servidor usa Whisper cloud (`features/transcription/whisper_cloud.py`), con diarización y resumen.
+
+3. **Catálogo de modelos**
+   - `ai/frontier_sync.py` sincroniza en segundo plano precios, ventanas de contexto y límites de salida desde la base de LiteLLM (con fallback offline) hacia `ai_models_catalog`.
+   - `ai/map_reduce.py` calcula un presupuesto de caracteres por proveedor y divide entradas largas en chunks para evitar errores de límite de tokens.
+
+4. **Plantillas de IA versionadas**
+   - Prompts y rúbricas viven en BD (`ai_templates`, `ai_template_versions`), sembrados por `ai/seeds.py` y gestionados vía la API de `ai_templates`.
+   - Plantillas corporativas DOCX/XLSX (`corporate_templates`) se renderizan con `services/template_renderer/`.
 
 ---
 
 ## 🔄 Flujos Principales
 
-### Flujo 1: Generación de Standup
+### Flujo 1: Feature “grounded” (p. ej. Standup)
 
 ```
-1. Usuario: "Generate standup for today"
-   ↓
-2. API: POST /api/features/standup
-   {query: "Generate standup", sources: ["jira", "github"]}
-   ↓
-3. Backend Handler:
-   a) Validar request con Pydantic
-   b) Llamar run_grounded_feature(feature="standup", ...)
-   ↓
-4. Runner:
-   a) Obtener prompt de standup desde local/ai/prompts/standup.json
-   b) Obtener rúbrica desde local/ai/rubrics/standup.json
-   c) assemble_context():
-      - Conectar a Jira → obtener issues de hoy
-      - Conectar a GitHub → obtener PRs/commits
-      - Convertir a ContextChunks
-   d) Si contexto vacío → refused=true
-   e) Resolver proveedor AI (ej: Ollama)
-   f) Armar prompt user con template + contexto + rúbrica
-   g) Llamar LLM con mensajes
-   h) log_ai_call({...}) → escribe en local/ai/logs/{uuid}.json
-   ↓
-5. Response:
-   {
-     ok: true,
-     answer: "# Daily Standup\n...",
-     answer_clean: "# Daily Standup\n...",
-     artifacts: [],
-     citations: [{index: 1, source: "jira", title: "PROJ-123"}],
-     meta: {provider: "ollama", model: "llama2", log_id: "..."}
-   }
-   ↓
-6. Frontend:
-   a) Recibe respuesta
-   b) Renderiza markdown en UI
-   c) Opción de copiar/descargar
-   d) Guarda en localStorage (useChatPersistence)
+1. POST /api/features/standup  {query, sources: ["jira","github"]}
+2. Handler valida (Pydantic) y llama al runner
+3. Runner:
+   a) Carga la plantilla activa (prompt + rúbrica) desde ai_templates
+   b) assemble_context(): integraciones + conocimiento → ContextChunks
+   c) Si no hay contexto → refused = true
+   d) Aplica presupuesto de contexto (map_reduce) según proveedor
+   e) Resuelve proveedor y llama al LLM vía LiteLLM
+   f) Evalúa con la rúbrica (rubric_evaluator) y registra la llamada (ai/logging)
+4. Respuesta: {answer, answer_clean, artifacts, citations, meta}
+5. Persistencia del resultado en BD (standups / chat_sessions / chat_messages)
 ```
 
-### Flujo 2: Agentic RAG para Documento de Mejoras
+Mismo patrón para `ask`, `prd-checker`, `change-impact` y `qa/{feature_key}`.
+
+### Flujo 2: Agente de documentos (Mejoras / Inventario / Levantamiento)
 
 ```
-1. Usuario en MejorasPage:
-   - Carga documento (PDF/DOCX)
-   - Escribe prompt: "Agrega análisis de riesgos"
-   ↓
-2. API: POST /api/doc-agent/agentic-prompt
-   {
-     query: "Agrega análisis de riesgos",
-     document_ids: ["doc_123"],
-     current_document: "# Documento...",
-     chat_context: ["Contexto anterior..."]
-   }
-   ↓
+1. Usuario adjunta documentos (parse-attachment) y escribe un prompt
+2. POST /api/doc-agent/agentic-prompt-stream  (SSE)
 3. Backend:
-   a) Validar request + autenticación
-   b) Detectar intención (por palabras clave):
-      - "imagen/captura" → InspectImageOperation
-      - "corregir/cambiar" → ReplaceContentOperation
-      - "agregar responsable" → InsertTextOperation
-      - Default → run_grounded_feature(feature="mejoras_doc", ...)
-   c) Para el caso default (RAG):
-      - assemble_context(query, sources)
-      - chunks_from_documents(document_ids)
-      - Ensamblar bundle
-      - Llamar LLM
-      - Parsear respuesta para múltiples artefactos (<artifact> tags)
-   ↓
-4. Response:
-   {
-     answer: "# Documento de Mejora\n<artifact title='Análisis de Riesgos'>...",
-     answer_clean: "# Documento de Mejora\n...",
-     artifacts: [
-       {title: "Análisis de Riesgos", extension: "docx", content: "..."}
-     ],
-     operations: [InsertTextOperation, ...],
-     document_updates: "# Documento actualizado..."
-   }
-   ↓
-5. Frontend (AgenticDocumentWorkspace):
-   a) Recibe respuesta
-   b) Parsea res.artifacts (si el backend los retorna)
-   c) Crea/actualiza artifacts en la conversación
-   d) Renderiza en editor visual (Univer)
-   e) Autosave a localStorage cada 1.5s
-   ↓
-6. Usuario:
-   - Edita el documento en directo
-   - Descarga como .docx (POST /api/doc-agent/export-docx)
-   - Regenera con nuevo prompt
+   a) Valida request y sesión
+   b) Recupera contexto (chunks de los documentos + búsqueda híbrida)
+   c) section_generator genera el documento por secciones contra el
+      schema del artefacto (schemas/artifacts/*), validado por
+      core/document_agent/validator
+   d) Emite eventos (schemas/agent_events, event_serializer):
+      pasos de razonamiento, secciones, artefactos
+4. Frontend (features/document): muestra los pasos en vivo, actualiza
+   artefactos y los renderiza en Univer; la conversación y sus artefactos
+   se sincronizan con el backend (chatSessionsApi)
+5. Cancelación: POST /runs/{run_id}/cancel o /sessions/{id}/cancel
+6. Exportación: POST /export-docx | /export-xlsx (plantillas corporativas)
 ```
 
-### Flujo 3: Sincronización de Integración (GitHub)
+### Flujo 3: Integraciones (Jira / GitHub / GitLab)
 
 ```
-1. Usuario conecta GitHub con PAT:
-   POST /api/integrations/github/pat
-   {token: "ghp_...", selected_repos: ["repo1", "repo2"]}
-   ↓
-2. Backend:
-   a) Valida PAT con GET /user
-   b) Encripta credencial con Fernet
-   c) Guarda en local/connections/github.enc
-   d) Carga en registry singleton
-   ↓
-3. Sync (manual o automático):
-   POST /api/integrations/github/sync
-   ↓
-4. GitHubAdapter:
-   a) Obtiene PRs, commits, branches desde API
-   b) Cachea en local/integrations/github_cache.json
-   c) Retorna {repositories, pull_requests, commits}
-   ↓
-5. Uso en RAG:
-   assemble_context("query", sources=["github"])
-   → Llama adapter.get_pull_requests()
-   → Retorna ContextChunks [{source_type: "github", ...}]
+1. Usuario conecta (OAuth para Jira, PAT para GitHub/GitLab)
+2. Backend valida, cifra la credencial (SecretStore) y la guarda en
+   user_integrations / user_jira_connections (o organization_integrations)
+3. Sync (integrations/sync.py) obtiene issues, PRs, commits; caché en Redis
+4. En RAG, assemble_context(sources=[...]) consulta el adapter vía registry
+   y devuelve ContextChunks con source_type = jira | github | gitlab
+```
+
+Los servidores MCP configurados por el usuario (`mcp_servers`) se invocan mediante `integrations/executor.py`.
+
+### Flujo 4: Base de conocimiento
+
+```
+1. Upload (PDF/DOCX/TXT/MD) → archivo en KNOWLEDGE_DATA_DIR
+2. Ingesta (context/knowledge.py): extracción → chunks en PostgreSQL
+   con columna tsvector('spanish') generada y embedding (pgvector)
+3. Búsqueda (context/retrieval.py):
+   - Full-text: ts_rank_cd + websearch_to_tsquery('spanish')
+   - Vectorial: distancia coseno (embedding <=> vector)
+   - Fallback BM25 en Python (rank-bm25)
+4. core/index_refresher mantiene el índice actualizado
 ```
 
 ---
 
-## 💾 Modelo de Datos
+## 💾 Modelo de Datos (PostgreSQL)
 
-### Entidades Principales
+| Dominio | Tablas |
+|---------|--------|
+| Identidad y tenancy | `users`, `organizations`, `organization_members`, `audit_events` |
+| Configuración | `settings`, `user_preferences` |
+| Secretos | `user_secrets`, `user_provider_credentials` |
+| Integraciones | `user_jira_connections`, `user_integrations`, `organization_integrations`, `mcp_servers` |
+| Conversación | `chat_sessions`, `chat_messages` |
+| Resultados de features | `standups`, `prd_reviews`, `test_plans`, `transcriptions` |
+| IA | `ai_templates`, `ai_template_versions`, `ai_models_catalog` |
+| Plantillas documentales | `corporate_templates` |
+| Conocimiento | tablas de documentos/chunks (con `tsvector` y `embedding`) |
 
-```
-UserProfile (en local/settings/app.json)
-├─ display_name: str ("Juan Pérez")
-├─ user_role: str ("admin" | "pm" | "funcional" | "dev" | "qa")
-├─ theme: str ("command-center")
-└─ ai: dict (Encrypted API keys and model choices)
+`ContextChunk` (`context/models.py`) es un objeto en memoria, no persistido:
+`id, document_id, source_type, source_label, title, content, relevance_score`.
 
-ChatMessage (en local/history/chat_{session_id}.json)
-├─ id: str (UUID)
-├─ session_id: str
-├─ role: str ("user" | "assistant")
-├─ content: str
-├─ context_sources: list[dict]
-└─ created_at: str
-
-Standup
-├─ id: str (UUID)
-├─ title: str
-├─ content: str (Markdown)
-├─ sources: list[str]
-└─ created_at: str
-
-PRDReview
-├─ id: str (UUID)
-├─ prd_title: str
-├─ content: str (Markdown)
-└─ created_at: str
-
-KnowledgeDocument
-├─ id: str (UUID)
-├─ filename: str
-├─ file_type: str (".pdf" | ".docx" | ".txt" | ".md")
-├─ file_size: int
-├─ tags: list[str]
-├─ chunk_count: int
-└─ uploaded_at: str
-
-ContextChunk (en memoria, no persistido en DB)
-├─ id: str
-├─ document_id: str
-├─ source_type: str ("knowledge" | "jira" | "github" | "gitlab")
-├─ source_label: str (ej: "github/pull_requests")
-├─ title: str
-├─ content: str (segmento de texto)
-└─ relevance_score: float (para BM25)
-```
-
----
-
-## 🔌 Extensibilidad
-
-### Agregar Nueva Fuente de Integración
-
-1. Crear `app/integrations/{service}/integration.py` con clase que extienda `IntegrationAdapter`
-2. Implementar métodos abstractos: `authenticate()`, `test_connection()`, `get_capabilities()`
-3. Registrar en `app/integrations/registry.py`
-4. Crear endpoint en `app/api/integrations.py`
-5. Agregar UI en `frontend/src/components/integrations/{service}Page.tsx`
-
-### Agregar Nuevo Feature de IA
-
-1. Crear prompt en `local/ai/prompts/{feature}.json`:
-   ```json
-   {
-     "version": "1.0",
-     "system": "You are a QA expert...",
-     "user_template": "Analyze this:\n{context}\n\nRubric:\n{rubric}",
-     "allowed_sources": ["knowledge", "jira", "github"]
-   }
-   ```
-2. Crear rúbrica en `local/ai/rubrics/{feature}.json`
-3. Crear endpoint en `app/api/features.py`: `@router.post("/features/{feature}")`
-4. Llamar `run_grounded_feature(feature="{feature}", ...)`
-
-### Agregar Nuevo Proveedor de IA
-
-1. Crear clase en `app/ai/providers/implementations.py` heredando de `AIProvider`
-2. Implementar `complete()` y `complete_stream()` async
-3. Agregar entrada en `app/ai/catalog.py`
-4. Actualizar UI en `frontend/src/pages/SettingsPage.tsx`
-
----
-
-## 📊 Flujo de Estado en Frontend
-
-### Arquitectura de Hooks
-
-```
-AgenticDocumentWorkspace (página principal)
-├─ useChatPersistence(featureSlug)
-│  ├─ conversations: ChatConversation[]
-│  ├─ activeConversation: ChatConversation | null
-│  ├─ createConversation(), updateConversation(), ...
-│  └─ Persistencia en localStorage
-├─ useArtifacts(conversationArtifacts, onUpdateConversation)
-│  ├─ artifacts: Artifact[]
-│  ├─ activeArtifact: Artifact | null
-│  ├─ createArtifact(), deleteArtifact(), ...
-│  └─ Gestión de múltiples documentos
-├─ useDocumentHistory(activeArtifact?.content)
-│  ├─ content: string
-│  ├─ stack: string[] (undo/redo)
-│  ├─ pushContent(), undo(), redo(), ...
-│  └─ Undo/redo sin límite (hasta 100 estados)
-└─ useAgenticGeneration({...})
-   ├─ isGenerating: boolean
-   ├─ liveThinkingSteps: ThinkingStep[]
-   ├─ handleSendMessage(query)
-   └─ Orquestación de generación AI + RAG
-
-ArtifactsStudio (panel derecho)
-├─ Recibe: artifacts, activeArtifactId
-├─ Emite: onSelectArtifact, onCreate, onDelete, ...
-└─ Renderiza: lista o editor visual (Univer)
-```
+Las migraciones son manuales e idempotentes (`core/migration.py`, `context/knowledge_migration.py`, `core/integration_migration.py`), ejecutadas al arrancar; no se usa Alembic.
 
 ---
 
 ## 🔐 Seguridad
 
 ### Autenticación
+- JWT firmado (HMAC-SHA256), expiración de 7 días, sin renovación automática.
+- El token se guarda en `localStorage` del navegador (expuesto ante XSS; mitigable con CSP).
+- Contraseñas con PBKDF2-HMAC (`PBKDF2_SALT`).
 
-- **JWT Bearer tokens** con firma HMAC-SHA256
-- **Expiración**: 7 días
-- **Renovación**: No automática (requiere re-login)
-- **Almacenamiento**: `localStorage` (vulnerable a XSS, pero con CSP headers mitigable)
+### Secretos
+- `core/secret_store.py`: **AES-256-GCM** con nonce aleatorio de 96 bits y AAD por usuario y propósito; compatibilidad con tokens Fernet heredados.
+- Clave derivada de `SECRET_KEY`. Las credenciales nunca se exponen al frontend.
 
-### Credenciales de Integración
+### Aislamiento
+- RLS de PostgreSQL por usuario/organización (`rls_context`).
+- Validación SSRF de endpoints de IA (`endpoint_security`).
+- Registro de auditoría en `audit_events`.
 
-- **Encriptación**: Fernet (AES-128)
-- **Clave**: Derivada de `PMQA_SECRET_KEY` (env) o `keyring` del sistema
-- **Almacenamiento**: `local/connections/{service}.enc`
-- **Acceso**: Solo backend, nunca expuesto al frontend
-
-### Validación de Entrada
-
-- **Pydantic schemas** con validación estricta
-- **Type hints** para auto-documentación
-- **Field constraints**: min/max length, regex patterns
+### Validación de entrada
+- Esquemas Pydantic v2 estrictos con restricciones de campo.
 
 ---
 
-## 🚀 Optimizaciones y Trade-offs
+## 🔌 Extensibilidad
 
-### Decisiones Tecnológicas
+### Nueva integración
+1. `app/integrations/{service}/integration.py` extendiendo `IntegrationAdapter` (`integrations/base.py`).
+2. Registrar en `integrations/registry.py`.
+3. Endpoints en `api/integrations.py`.
+4. UI en `frontend/src/features/integrations/`.
+
+### Nuevo feature de IA
+1. Sembrar la plantilla (prompt + rúbrica) en `ai/seeds.py` o crearla vía la API de plantillas.
+2. Servicio en `app/features/{feature}/service.py`.
+3. Endpoint en el router correspondiente (`features_pm`, `features_qa` o `features_doc`).
+4. Si produce documento: schema en `schemas/artifacts/` y builder docx/xlsx.
+
+### Nuevo proveedor de IA
+1. Implementación en `ai/providers/implementations.py` y registro en `providers/registry.py`.
+2. Entrada en `ai/catalog.py`.
+3. UI en `frontend/src/features/settings/` y `features/ai/`.
+
+---
+
+## 📊 Frontend
+
+Organización por features (`frontend/src/features/*`), cada una con `api/`, `components/`, `hooks/`, `pages/` y `types/` según aplique:
+
+- **chat**: conversación grounded. `useChatPersistence` carga y guarda las sesiones en el backend vía `chatSessionsApi` (tablas `chat_sessions` / `chat_messages`); la sesión activa se refleja en la URL.
+- **document**: workspace agéntico (`agent/`, `univer/`), artefactos, undo/redo, streaming de pasos.
+- **knowledge**: gestión de documentos de conocimiento.
+- **transcription**: grabación/subida, ASR local en Web Worker o cloud, jobs en segundo plano.
+- **settings / ai**: proveedores, catálogos, políticas y validadores de endpoints.
+- **integrations**: conexión y estado de Jira/GitHub/GitLab.
+
+Estado global mediante Context API; trabajos largos notificados vía `BackgroundJobContext` + `FloatingJobToast`. Tests con Vitest.
+
+---
+
+## 🚀 Decisiones y Trade-offs
 
 | Decisión | Razón | Trade-off |
 |----------|-------|-----------|
-| **SQLite** en lugar de PostgreSQL | Local-first, sin dependencias | No escalable a múltiples procesos |
-| **BM25** en lugar de embeddings | Rápido, interpretable, offline | Menos semántico que LLMs |
-| **LiteLLM** como wrapper | Multi-provider, single abstraction | Overhead mínimo |
-| **localStorage** para persistencia frontend | Simple, offline | Limitado a 5-10 MB por origen |
-| **JSON para índices** | Serializable, legible | Más lento que pickle binary |
+| PostgreSQL + pgvector | Multi-usuario, RLS, FTS y vectores en un solo motor | Requiere servicio de BD |
+| Búsqueda híbrida FTS + vector (+ BM25 fallback) | Precisión léxica en español + semántica | Coste de embeddings e índices |
+| Redis | Caché compartida entre workers | Dependencia adicional obligatoria |
+| LiteLLM | Una sola abstracción multi-proveedor | Acoplamiento a su catálogo |
+| Persistencia en servidor (no en navegador) | Historial multi-dispositivo y aislado por tenant | Requiere conexión al backend |
+| IA local en navegador | Privacidad, cero inferencia en servidor | Depende de WebGPU del cliente |
+| Migraciones manuales | Simplicidad | Sin historial de versiones de esquema |
 
-### Limitaciones Conocidas
-
-1. **Concurrencia**: FastAPI con `uvicorn` single-worker no es thread-safe en BD. Usar `gunicorn` con workers para producción.
-2. **Escalabilidad de conocimiento**: BM25 con >100k chunks degrada en performance. Considerar Elasticsearch para producción.
-3. **Contexto del LLM**: Limite de tokens del modelo. Si contexto + prompt > max_tokens, se rechaza.
-4. **Streaming de artefactos**: En navegadores con internet lento, SSE puede degradarse.
-
----
-
-## 📚 Referencias y Estándares
-
-- **REST**: JSON:API-like patterns (pero no estricto)
-- **Async**: `asyncio` en Python, promises en JavaScript
-- **Type Safety**: Pydantic + TypeScript strict mode
-- **CSS**: Tailwind CSS v4 con tokens personalizados
-- **Database Migrations**: Manual (no Alembic) — migraciones en `db/database.py::init_db()`
+### Limitaciones conocidas
+1. **Contexto del LLM**: entradas grandes se dividen (map-reduce), pero proveedores con límites bajos (p. ej. Groq) reducen la calidad.
+2. **Streaming SSE**: puede degradarse con conexiones inestables.
+3. **IA en navegador**: requiere hardware/navegador con WebGPU.
 
 ---
 
-¡Para más detalles, consulta [BACKEND.md](./BACKEND.md) y [FRONTEND.md](./FRONTEND.md)!
-
----
-
-## AI Architecture and Model Execution Boundary
-
-FuncAssist operates under a strict **Client-First** paradigm for local AI capabilities:
-
-1. **Client-Side In-Browser Execution (Zero Backend Weights):**
-   - **Local Chat / Writing:** Executed entirely in the user's browser using `@mlc-ai/web-llm` powered by WebGPU. Model weights are cached directly in the browser cache (Cache API / Origin Private File System).
-   - **Local Speech Recognition (ASR):** Executed in the browser via a dedicated Web Worker running `@huggingface/transformers` (Whisper ONNX runtime via WebGPU/WASM).
-   - The backend server does not download, store, or execute GGUF, Whisper, or ONNX models.
-
-2. **External Cloud Providers:**
-   - External APIs (OpenAI, Anthropic Claude, Google Gemini, Groq Cloud) are routed through the backend via LiteLLM using securely stored API keys.
-   - **Ollama Remote:** Strictly treated as an external remote API over public HTTPS. Loopback addresses (`127.0.0.1`, `localhost`, `::1`) and private IP ranges are rejected by both frontend and backend validators.
-
-3. **Legacy Storage Cleanup:**
-   - Legacy directories on disk (`data/models/whisper`, `data/models/builtin`, `~/.cache/whisper`) can be safely deleted as the server has zero local inference runtime dependencies.
+Para más detalle, consulta [BACKEND.md](./BACKEND.md) y [FRONTEND.md](./FRONTEND.md).
