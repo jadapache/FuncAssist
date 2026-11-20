@@ -133,6 +133,28 @@ class ChatRepository:
     sources_json = json.dumps(context_sources, ensure_ascii=False) if context_sources else None
     attachments_json = json.dumps(attachments, ensure_ascii=False) if attachments else "[]"
 
+    # Idempotent by id: the agentic endpoint and the client autosave persist the same messages
+    # with shared ids, so a second save updates instead of duplicating.
+    if kwargs.get("id"):
+      existing = await self.session.get(ChatMessageModel, msg_id)
+      if existing is not None:
+        if existing.session_id == session_id and existing.user_id == user_id:
+          changed = False
+          if content and existing.content != content:
+            existing.content = content
+            changed = True
+          if context_sources and existing.context_sources_json != sources_json:
+            existing.context_sources_json = sources_json
+            changed = True
+          if attachments and existing.attachments_json != attachments_json:
+            existing.attachments_json = attachments_json
+            changed = True
+          if changed:
+            await self.session.flush()
+          return existing.to_dict()
+        # Id taken by another session/user: never overwrite it, store as a new message.
+        msg_id = str(uuid.uuid4())
+
     msg = ChatMessageModel(
       id=msg_id,
       session_id=session_id,

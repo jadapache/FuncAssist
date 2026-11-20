@@ -336,6 +336,9 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       }
 
       const targetConvId = targetConv.id
+      // One reply slot per turn: the backend persists the reply under this id and every outcome
+      // below (answer, artifact, stop notice, error) reuses it, so the autosave never duplicates it.
+      const assistantMsgId = crypto.randomUUID()
       setGeneratingConversationId(targetConvId)
       const currentMsgs = targetConv?.messages ?? []
       const updatedMsgs = [...currentMsgs, userMessage]
@@ -369,6 +372,8 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             chat_context: currentMsgs.slice(-4).map((m) => `${m.role}: ${m.content}`),
             sources,
             conversation_id: targetConvId,
+            user_message_id: userMessage.id,
+            assistant_message_id: assistantMsgId,
           },
           (accumulatedText) => {
             latestAccumulatedText = accumulatedText
@@ -438,7 +443,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           const rawChat = res.assistant_message || res.answer || candidateContent
           const cleanChat = rawChat.replace(/<\/?chat>/gi, '').trim()
           const assistantMessage: ChatPersistMessage = {
-            id: crypto.randomUUID(),
+            id: assistantMsgId,
             role: 'assistant',
             content: cleanChat,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -573,7 +578,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         )
 
         const assistantMessage: ChatPersistMessage = {
-          id: crypto.randomUUID(),
+          id: assistantMsgId,
           role: 'assistant',
           content: bubbleContent,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -601,7 +606,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         if (isAbortError) {
           if (!latestAccumulatedText.trim()) {
             const stoppedNoticeMessage: ChatPersistMessage = {
-              id: crypto.randomUUID(),
+              id: assistantMsgId,
               role: 'assistant',
               content: 'Detuviste esta respuesta',
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -651,7 +656,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         }
 
         const failureMessage: ChatPersistMessage = {
-          id: crypto.randomUUID(),
+          id: assistantMsgId,
           role: 'assistant',
           content: displayMsg,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),

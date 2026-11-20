@@ -26,6 +26,9 @@ export interface AgenticPromptPayload {
   template_id?: string
   run_id?: string
   conversation_id?: string
+  /** Client-generated ids so server-side persistence and the autosave share the same rows. */
+  user_message_id?: string
+  assistant_message_id?: string
   provider?: string
   model?: string
 }
@@ -65,6 +68,9 @@ export const docAgentApi = {
         sources: payload.sources,
         document_ids: payload.document_ids,
         templateId: payload.template_id,
+        conversationId: payload.conversation_id,
+        userMessageId: payload.user_message_id,
+        assistantMessageId: payload.assistant_message_id,
       }),
     }).then((r) =>
       handleResponse<AgenticPromptResponse>(r).then((res) => ({
@@ -124,6 +130,8 @@ export const docAgentApi = {
         templateId: payload.template_id,
         runId: payload.run_id,
         conversationId: payload.conversation_id,
+        userMessageId: payload.user_message_id,
+        assistantMessageId: payload.assistant_message_id,
         provider: payload.provider,
         model: payload.model,
       }),
