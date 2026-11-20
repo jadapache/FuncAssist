@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from contextlib import asynccontextmanager, contextmanager
-from typing import AsyncGenerator, Callable, Generator, Optional
+from typing import Any, AsyncGenerator, Callable, Generator, Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -85,16 +86,33 @@ def get_sync_engine():
   return _sync_engine
 
 
+async def _commit_async(session: Any) -> None:
+  """Commit if the session supports it (test doubles may not)."""
+  commit = getattr(session, "commit", None)
+  if commit is None:
+    return
+  res = commit()
+  if inspect.isawaitable(res):
+    await res
+
+
 @asynccontextmanager
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-  """Provide an asynchronous SQLAlchemy session with automatic commit / rollback."""
+  """Provide an asynchronous SQLAlchemy session that commits on success and rolls back on error.
+
+  Callers that already committed (e.g. AsyncUnitOfWork) are unaffected: a commit with no
+  pending changes is a no-op. If the final commit fails it is rolled back and re-raised.
+  """
   if _async_session_override is not None:
     async with _async_session_override() as session:
       try:
         yield session
-      except Exception:
+        await _commit_async(session)
+      except BaseException:
         if hasattr(session, "rollback"):
-          await session.rollback()
+          res = session.rollback()
+          if inspect.isawaitable(res):
+            await res
         raise
     return
 
@@ -103,19 +121,23 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
   async with _async_session_factory() as session:
     try:
       yield session
-    except Exception:
+      await session.commit()
+    except BaseException:
+      # BaseException: a cancelled request (client disconnect) must not leave half-written work.
       await session.rollback()
       raise
 
 
 @contextmanager
 def get_sync_db() -> Generator[Session, None]:
-  """Provide a synchronous SQLAlchemy session with automatic commit / rollback."""
+  """Provide a synchronous SQLAlchemy session that commits on success and rolls back on error."""
   if _sync_session_override is not None:
     with _sync_session_override() as session:
       try:
         yield session
-      except Exception:
+        if hasattr(session, "commit"):
+          session.commit()
+      except BaseException:
         if hasattr(session, "rollback"):
           session.rollback()
         raise
@@ -126,7 +148,8 @@ def get_sync_db() -> Generator[Session, None]:
   with _sync_session_factory() as session:
     try:
       yield session
-    except Exception:
+      session.commit()
+    except BaseException:
       session.rollback()
       raise
 
