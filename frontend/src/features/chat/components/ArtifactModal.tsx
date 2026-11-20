@@ -203,7 +203,7 @@ export const ArtifactModal = ({
         </div>
 
         {/* Modal Viewport (Univer Document Viewer) */}
-        <div className="flex-1 overflow-hidden bg-slate-50 relative">
+        <div className="flex-1 overflow-y-auto bg-slate-50 relative scrollbar-thin">
           <UniverContainer
             adapter={adapter}
             kind={artifact.extension === 'xlsx' ? 'spreadsheet' : 'document'}
