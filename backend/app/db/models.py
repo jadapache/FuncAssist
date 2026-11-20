@@ -470,6 +470,11 @@ class ChatSessionModel(Base):
   document_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
   artifacts_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
   active_artifact_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+  # Rolling summary of older conversation turns (see app/ai/history.py).
+  # history_summary_key = "<covered_message_count>:<sha256 of covered prefix>".
+  history_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  history_summary_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+  history_summary_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )

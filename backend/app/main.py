@@ -43,6 +43,8 @@ async def lifespan(app: FastAPI):
   await init_redis()
   from app.core.integration_migration import migrate_integrations_schema_if_needed
   migrate_integrations_schema_if_needed()
+  from app.core.chat_history_migration import migrate_chat_history_summary_if_needed
+  migrate_chat_history_summary_if_needed()
   migrate_knowledge_if_needed()
   ensure_knowledge_dirs()
   ensure_ai_files()

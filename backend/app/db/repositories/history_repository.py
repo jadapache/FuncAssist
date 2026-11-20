@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -185,6 +185,43 @@ class ChatRepository:
       seen_hashes.add(content_key)
       deduped.append(m.to_dict())
     return deduped
+
+  async def get_history_summary(
+    self, session_id: str, user_id: Optional[str] = None
+  ) -> Optional[tuple[str, str]]:
+    """Return (summary_key, summary) persisted for the conversation, if any."""
+    stmt = select(ChatSessionModel.history_summary_key, ChatSessionModel.history_summary).where(
+      ChatSessionModel.id == session_id
+    )
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    row = (await self.session.execute(stmt)).first()
+    if not row or not row[0] or not row[1]:
+      return None
+    return row[0], row[1]
+
+  async def save_history_summary(
+    self, session_id: str, summary_key: str, summary: str, user_id: Optional[str] = None
+  ) -> bool:
+    """Store the rolling summary on an existing session. Returns False if the session is missing."""
+    stmt = (
+      update(ChatSessionModel)
+      .where(ChatSessionModel.id == session_id)
+      .values(
+        history_summary=summary,
+        history_summary_key=summary_key,
+        history_summary_updated_at=datetime.now(timezone.utc),
+        # Not a conversation interaction: assign updated_at to itself so its onupdate
+        # default does not fire and the session keeps its position in the sidebar.
+        updated_at=ChatSessionModel.updated_at,
+      )
+      .execution_options(synchronize_session=False)
+    )
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    result = await self.session.execute(stmt)
+    await self.session.flush()
+    return bool(result.rowcount)
 
   async def clear_session(self, session_id: str) -> bool:
     stmt = delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id)
