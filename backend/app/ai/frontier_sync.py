@@ -50,410 +50,21 @@ PROVIDER_META: dict[str, dict[str, Any]] = {
     "openrouter": {"name": "OpenRouter", "badge_default": "OpenRouter", "is_free_default": False},
 }
 
-KNOWN_FRONTIER_MODELS: list[dict[str, Any]] = [
-    # Groq models
-    {
-        "id": "llama-3.3-70b-versatile",
-        "raw_id": "llama-3.3-70b-versatile",
-        "name": "Llama 3.3 70B Versatile (Recomendado)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Modelo insignia de Meta de código abierto optimizado en LPU para análisis profundo, historias de usuario y requerimientos QA.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "Recomendado (Free Tier)",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 1,000 RPD • 6k TPM",
-        "max_output_tokens": 4096,
-    },
-    {
-        "id": "llama-3.1-8b-instant",
-        "raw_id": "llama-3.1-8b-instant",
-        "name": "Llama 3.1 8B Instant (Ultra Rápido)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Modelo ultra veloz de baja latencia ideal para resúmenes ágiles y clasificaciones rápidas.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "Ultra Rápido (Free Tier)",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 14,400 RPD • 20k TPM",
-        "max_output_tokens": 4096,
-    },
-    {
-        "id": "qwen/qwen3.8-27b",
-        "raw_id": "qwen/qwen3.8-27b",
-        "name": "Qwen 3.8 27B (Razonamiento & Chat)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Modelo Qwen 3.8 de Alibaba alojado en Groq, alta precisión en español y lógica estructurada.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "Qwen Oficial (Groq)",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 1,000 OTPM • 8k TPM (Salida máx: 950)",
-        "max_output_tokens": 950,
-    },
-    {
-        "id": "openai/gpt-oss-120b",
-        "raw_id": "openai/gpt-oss-120b",
-        "name": "GPT OSS 120B (OpenAI en Groq)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Modelo abierto de alta escala de OpenAI alojado en la infraestructura acelerada de Groq.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "GPT OSS (Groq)",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 1,000 RPD • 8k TPM",
-        "max_output_tokens": 4096,
-    },
-    {
-        "id": "openai/gpt-oss-20b",
-        "raw_id": "openai/gpt-oss-20b",
-        "name": "GPT OSS 20B (Equilibrado)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Versión equilibrada y rápida de GPT OSS alojada en Groq.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "Free Tier",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 1,000 RPD • 8k TPM",
-        "max_output_tokens": 4096,
-    },
-    {
-        "id": "whisper-large-v3",
-        "raw_id": "whisper-large-v3",
-        "name": "Whisper Large v3 (Groq Cloud)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Transcripción de audio ultrarrápida impulsada por chips LPU de Groq con la más alta precisión.",
-        "context_window": "Audio (hasta 25MB)",
-        "context_length": 0,
-        "badge": "Recomendado Cloud (Free Tier)",
-        "task_type": "transcription",
-        "task_label": "Transcripción y Voz",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 14,400 RPD",
-    },
-    {
-        "id": "whisper-large-v3-turbo",
-        "raw_id": "whisper-large-v3-turbo",
-        "name": "Whisper Large v3 Turbo (Groq Cloud)",
-        "provider": "groq",
-        "provider_name": "Groq Cloud",
-        "description": "Versión Turbo de Whisper en Groq optimizada para latencia ultra baja y velocidad extrema.",
-        "context_window": "Audio (hasta 25MB)",
-        "context_length": 0,
-        "badge": "Ultra Rápido (Free Tier)",
-        "task_type": "transcription",
-        "task_label": "Transcripción y Voz",
-        "is_free": True,
-        "tier_type": "free",
-        "pricing_prompt": 0.0,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.00 (Gratuito en Groq Cloud)",
-        "rate_limits": "30 RPM • 14,400 RPD",
-    },
-    # Claude models
-    {
-        "id": "claude-3-5-haiku-latest",
-        "raw_id": "claude-3-5-haiku-latest",
-        "name": "Claude 3.5 Haiku (Recomendado)",
-        "provider": "claude",
-        "provider_name": "Anthropic Claude",
-        "description": "Modelo veloz y preciso de Anthropic con alta velocidad de respuesta y excelente razonamiento.",
-        "context_window": "200k tokens",
-        "context_length": 200000,
-        "badge": "Ultra Rápido",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.8,
-        "pricing_completion": 4.0,
-        "pricing_label": "$0.80 / 1M input • $4.00 / 1M output",
-        "rate_limits": "Tier 1: 50 RPM • 50k TPM",
-    },
-    {
-        "id": "claude-3-5-sonnet-latest",
-        "raw_id": "claude-3-5-sonnet-latest",
-        "name": "Claude 3.5 Sonnet (Razonamiento Superior)",
-        "provider": "claude",
-        "provider_name": "Anthropic Claude",
-        "description": "Líder en benchmarks de ingeniería de software, comprensión de requerimientos técnicos y QA.",
-        "context_window": "200k tokens",
-        "context_length": 200000,
-        "badge": "Estado del Arte",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 3.0,
-        "pricing_completion": 15.0,
-        "pricing_label": "$3.00 / 1M input • $15.00 / 1M output",
-        "rate_limits": "Tier 1: 50 RPM • 40k TPM",
-    },
-    {
-        "id": "claude-3-7-sonnet-20250219",
-        "raw_id": "claude-3-7-sonnet-20250219",
-        "name": "Claude 3.7 Sonnet (Hybrid Reasoning)",
-        "provider": "claude",
-        "provider_name": "Anthropic Claude",
-        "description": "El modelo insignia más avanzado de Anthropic con pensamiento híbrido adaptativo.",
-        "context_window": "200k tokens",
-        "context_length": 200000,
-        "badge": "Frontier 3.7",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 3.0,
-        "pricing_completion": 15.0,
-        "pricing_label": "$3.00 / 1M input • $15.00 / 1M output",
-        "rate_limits": "Tier 1: 50 RPM • 40k TPM",
-    },
-    # OpenAI models
-    {
-        "id": "gpt-4o-mini",
-        "raw_id": "gpt-4o-mini",
-        "name": "GPT-4o Mini (Económico y Rápido)",
-        "provider": "openai",
-        "provider_name": "OpenAI",
-        "description": "Modelo inteligente, eficiente y de bajo costo de OpenAI para tareas cotidianas y QA.",
-        "context_window": "128k tokens",
-        "context_length": 128000,
-        "badge": "Recomendado OpenAI",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.15,
-        "pricing_completion": 0.60,
-        "pricing_label": "$0.15 / 1M input • $0.60 / 1M output",
-        "rate_limits": "Tier 1: 500 RPM • 200k TPM",
-    },
-    {
-        "id": "gpt-4o",
-        "raw_id": "gpt-4o",
-        "name": "GPT-4o (Omni Multimodal)",
-        "provider": "openai",
-        "provider_name": "OpenAI",
-        "description": "Modelo insignia multimodal de OpenAI con alta capacidad de comprensión y generación.",
-        "context_window": "128k tokens",
-        "context_length": 128000,
-        "badge": "Flagship OpenAI",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 2.50,
-        "pricing_completion": 10.00,
-        "pricing_label": "$2.50 / 1M input • $10.00 / 1M output",
-        "rate_limits": "Tier 1: 500 RPM • 30k TPM",
-    },
-    {
-        "id": "o3-mini",
-        "raw_id": "o3-mini",
-        "name": "o3-mini (Razonamiento STEM y Código)",
-        "provider": "openai",
-        "provider_name": "OpenAI",
-        "description": "Modelo especializado en razonamiento complejo, código y resolución de problemas técnicos.",
-        "context_window": "200k tokens",
-        "context_length": 200000,
-        "badge": "Reasoning STEM",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 1.10,
-        "pricing_completion": 4.40,
-        "pricing_label": "$1.10 / 1M input • $4.40 / 1M output",
-        "rate_limits": "Tier 1: 100 RPM • 100k TPM",
-    },
-    {
-        "id": "whisper-1",
-        "raw_id": "whisper-1",
-        "name": "Whisper 1 (OpenAI Audio)",
-        "provider": "openai",
-        "provider_name": "OpenAI",
-        "description": "Modelo de transcripción de voz oficial de OpenAI Audio API.",
-        "context_window": "Audio (hasta 25MB)",
-        "context_length": 0,
-        "badge": "OpenAI Audio",
-        "task_type": "transcription",
-        "task_label": "Transcripción y Voz",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.006,
-        "pricing_completion": 0.0,
-        "pricing_label": "$0.006 por minuto de audio",
-        "rate_limits": "50 RPM",
-    },
-    # Gemini models
-    {
-        "id": "gemini-2.5-flash",
-        "raw_id": "gemini-2.5-flash",
-        "name": "Gemini 2.5 Flash (Recomendado Gemini)",
-        "provider": "gemini",
-        "provider_name": "Google Gemini",
-        "description": "Modelo insignia de Google con pensamiento adaptativo, latencia ultra baja y ventana de contexto masiva de 1M tokens.",
-        "context_window": "1M tokens",
-        "context_length": 1048576,
-        "badge": "Recomendado Gemini",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.075,
-        "pricing_completion": 0.30,
-        "pricing_label": "$0.075 / 1M input • $0.30 / 1M output",
-        "rate_limits": "15 RPM • 1M TPM (Free Tier disponible)",
-    },
-    {
-        "id": "gemini-2.5-pro",
-        "raw_id": "gemini-2.5-pro",
-        "name": "Gemini 2.5 Pro (Razonamiento Complejo)",
-        "provider": "gemini",
-        "provider_name": "Google Gemini",
-        "description": "El modelo de razonamiento más potente de Google para análisis multimodal extenso y código.",
-        "context_window": "2M tokens",
-        "context_length": 2097152,
-        "badge": "Flagship 2M Context",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 1.25,
-        "pricing_completion": 5.00,
-        "pricing_label": "$1.25 / 1M input • $5.00 / 1M output",
-        "rate_limits": "15 RPM • 1M TPM",
-    },
-    {
-        "id": "gemini-2.0-flash",
-        "raw_id": "gemini-2.0-flash",
-        "name": "Gemini 2.0 Flash (Next-Gen)",
-        "provider": "gemini",
-        "provider_name": "Google Gemini",
-        "description": "Generación rápida en tiempo real con capacidades nativas multimodales.",
-        "context_window": "1M tokens",
-        "context_length": 1048576,
-        "badge": "Next-Gen Flash",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.10,
-        "pricing_completion": 0.40,
-        "pricing_label": "$0.10 / 1M input • $0.40 / 1M output",
-        "rate_limits": "15 RPM • 1M TPM",
-    },
-    # DeepSeek models
-    {
-        "id": "deepseek-chat",
-        "raw_id": "deepseek-chat",
-        "name": "DeepSeek V3 (Chat & Redacción)",
-        "provider": "deepseek",
-        "provider_name": "DeepSeek",
-        "description": "Modelo de lenguaje avanzado de DeepSeek con arquitectura MoE de alta eficiencia.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "DeepSeek V3",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.28,
-        "pricing_completion": 0.42,
-        "pricing_label": "$0.28 / 1M input • $0.42 / 1M output",
-        "rate_limits": "60 RPM",
-    },
-    {
-        "id": "deepseek-reasoner",
-        "raw_id": "deepseek-reasoner",
-        "name": "DeepSeek R1 (Razonamiento Profundo)",
-        "provider": "deepseek",
-        "provider_name": "DeepSeek",
-        "description": "Modelo de razonamiento lógico y matemático por cadena de pensamiento de DeepSeek.",
-        "context_window": "128k tokens",
-        "context_length": 131072,
-        "badge": "DeepSeek R1",
-        "task_type": "chat_writing",
-        "task_label": "Redacción y Chat",
-        "is_free": False,
-        "tier_type": "paid",
-        "pricing_prompt": 0.55,
-        "pricing_completion": 2.19,
-        "pricing_label": "$0.55 / 1M input • $2.19 / 1M output",
-        "rate_limits": "60 RPM",
-    },
-]
-
 
 async def fetch_litellm_cost_map(timeout_seconds: float = 6.0) -> tuple[dict[str, Any], str]:
-    """Fetch latest LiteLLM model cost map asynchronously.
-    
-    Falls back gracefully to the bundled LiteLLM cost map if network is unavailable.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
-            resp = await client.get(LITELLM_REMOTE_URL)
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, dict) and len(data) > 100:
-                    try:
-                        if hasattr(litellm, "model_cost") and isinstance(litellm.model_cost, dict):
-                            litellm.model_cost.update(data)
-                    except Exception:
-                        pass
-                    return data, "remote_litellm"
-    except Exception as exc:
-        logger.debug(f"Remote LiteLLM cost map fetch skipped/failed ({exc}); using bundled cost map")
-
-    # Offline / local fallback
-    local_map: dict[str, Any] = {}
-    try:
-        if hasattr(litellm, "model_cost") and isinstance(litellm.model_cost, dict):
-            local_map = dict(litellm.model_cost)
-    except Exception as exc:
-        logger.debug(f"Failed to access litellm.model_cost: {exc}")
-
-    return local_map, "bundled_litellm"
+    """Fetch latest LiteLLM model cost map asynchronously from remote repository."""
+    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+        resp = await client.get(LITELLM_REMOTE_URL)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict) and len(data) > 100:
+                try:
+                    if hasattr(litellm, "model_cost") and isinstance(litellm.model_cost, dict):
+                        litellm.model_cost.update(data)
+                except Exception:
+                    pass
+                return data, "remote_litellm"
+        raise RuntimeError(f"Respuesta no válida de LiteLLM (status {resp.status_code})")
 
 
 def _format_context_window(ctx_len: int) -> str:
@@ -495,6 +106,33 @@ def _find_litellm_entry(cost_map: dict[str, Any], model_id: str, provider: str) 
     return None
 
 
+def _build_model_description(
+    entry: dict[str, Any] | None,
+    provider_name: str,
+    model_id: str,
+    task_type: str,
+    context_window: str,
+) -> str:
+    """Generate dynamic model description based on LiteLLM capabilities."""
+    if task_type == "transcription":
+        diarize = " con diarización" if "diarize" in model_id.lower() else ""
+        return f"Modelo de audio para transcripción{diarize} alojado en {provider_name}."
+
+    entry_data = entry or {}
+    caps: list[str] = []
+    if entry_data.get("supports_reasoning"):
+        caps.append("razonamiento")
+    if entry_data.get("supports_vision") or "image" in (entry_data.get("supported_modalities") or []):
+        caps.append("visión multimodal")
+    if entry_data.get("supports_function_calling"):
+        caps.append("herramientas")
+    if entry_data.get("supports_prompt_caching"):
+        caps.append("prompt caching")
+
+    cap_str = f", optimizado para {', '.join(caps)}" if caps else ""
+    return f"Modelo {provider_name} con ventana de {context_window}{cap_str}."
+
+
 def _discover_litellm_models(cost_map: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Build catalog candidates directly from LiteLLM model keys.
 
@@ -515,18 +153,29 @@ def _discover_litellm_models(cost_map: dict[str, Any]) -> dict[str, dict[str, An
     for raw_key, entry in cost_map.items():
         if not isinstance(raw_key, str) or not isinstance(entry, dict):
             continue
+
+        mode = (entry.get("mode") or "").strip().lower()
+        if mode == "audio_transcription":
+            task_type = "transcription"
+        elif mode == "chat":
+            task_type = "chat_writing"
+        else:
+            continue
+
         prefix, separator, model_name = raw_key.partition("/")
-        provider = provider_prefixes.get(prefix.lower())
-        if not provider or not separator or not model_name:
+        if separator and model_name:
+            provider = provider_prefixes.get(prefix.lower())
+            model_id = model_name.strip()
+        elif not separator:
+            raw_prov = (entry.get("litellm_provider") or "").strip().lower()
+            provider = provider_prefixes.get(raw_prov)
+            model_id = raw_key.strip()
+        else:
             continue
-        model_id = model_name.strip()
-        lowered = model_id.lower()
-        if model_id in DEPRECATED_MODEL_IDS:
+
+        if not provider or not model_id:
             continue
-        task_type = "transcription" if any(token in lowered for token in ("whisper", "transcrib", "speech-to-text", "audio")) else "chat_writing"
-        # Do not expose embedding, moderation, image, reranker or text-to-speech entries.
-        if any(token in lowered for token in ("embed", "moderation", "rerank", "image", "vision", "tts")) and task_type != "transcription":
-            continue
+
         key = f"{provider}:{model_id}"
         discovered[key] = {
             "id": model_id,
@@ -550,25 +199,6 @@ def _discover_litellm_models(cost_map: dict[str, Any]) -> dict[str, dict[str, An
     return discovered
 
 
-DEPRECATED_MODEL_IDS: set[str] = {
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash-8b",
-    "gemini-1.0-pro",
-    "gpt-3.5-turbo",
-    "gpt-3.5-turbo-16k",
-    "gpt-4-0613",
-    "gpt-4-0314",
-    "claude-2.1",
-    "claude-2.0",
-    "claude-instant-1.2",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
-    "mixtral-8x7b-32768",
-    "gemma-7b-it",
-}
-
-
 async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, Any]:
     """Synchronize frontier model catalog with the latest LiteLLM database.
     
@@ -581,15 +211,9 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
     try:
         cost_map, source = await fetch_litellm_cost_map(timeout_seconds=8.0 if force_remote else 5.0)
 
-        # External models are discovered from LiteLLM. Browser models are owned
-        # by catalog.py and preserved by replace_external_sync().
+        # External models are discovered exclusively from LiteLLM. Browser models are owned
+        # by catalog.py and preserved by replace_external().
         model_dict = _discover_litellm_models(cost_map)
-        for km in KNOWN_FRONTIER_MODELS:
-            mid = km["id"]
-            key = f"{km.get('provider')}:{mid}"
-            if mid in DEPRECATED_MODEL_IDS or key not in model_dict:
-                continue
-            model_dict[key].update(km)
 
         # Enrich each frontier model with LiteLLM specs
         for _, model_item in model_dict.items():
@@ -635,6 +259,14 @@ async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, 
 
             prompt_p = model_item.get("pricing_prompt", 0.0)
             comp_p = model_item.get("pricing_completion", 0.0)
+
+            model_item["description"] = _build_model_description(
+                entry,
+                model_item["provider_name"],
+                mid,
+                task_type,
+                model_item["context_window"],
+            )
 
             if prov == "groq" and model_item.get("is_free", True):
                 model_item["tier_type"] = "free"

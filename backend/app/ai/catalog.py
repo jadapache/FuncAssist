@@ -158,11 +158,9 @@ KNOWN_BROWSER_MODELS: list[dict[str, Any]] = [
 
 def _ensure_catalog_seeded() -> None:
     try:
-        from app.ai.frontier_sync import KNOWN_FRONTIER_MODELS
         from app.db.unit_of_work import SyncUnitOfWork
         with SyncUnitOfWork() as uow:
             uow.model_catalog.bulk_upsert(KNOWN_BROWSER_MODELS)
-            uow.model_catalog.bulk_upsert(KNOWN_FRONTIER_MODELS)
             uow.commit()
     except Exception as exc:
         logger.debug("Failed ensuring catalog seeded in DB: %s", exc)

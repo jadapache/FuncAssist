@@ -40,13 +40,17 @@ async def ai_models_catalog(
     provider: str = "all",
     task_type: str = "all",
 ) -> dict[str, Any]:
+    sync_error = None
     if refresh:
-        try:
-            await sync_frontier_models_catalog(force_remote=False)
-        except Exception:
-            pass
+        sync_res = await sync_frontier_models_catalog(force_remote=True)
+        if sync_res.get("status") == "error":
+            sync_error = "No se ha podido refrescar el catálogo de proveedores desde LiteLLM."
+
     catalog = await get_model_catalog(refresh=refresh, provider=provider, task_type=task_type)
-    return catalog.model_dump()
+    dumped = catalog.model_dump()
+    if sync_error:
+        dumped["error"] = sync_error
+    return dumped
 
 
 @router.post("/models/sync")

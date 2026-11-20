@@ -15,13 +15,21 @@ from app.ai.frontier_sync import (
 
 
 @pytest.mark.asyncio
-async def test_fetch_litellm_cost_map_offline_fallback():
-    """Verify that when remote HTTP fails, bundled LiteLLM cost map is used without throwing."""
+async def test_fetch_litellm_cost_map_offline_error():
+    """Verify that when remote HTTP fails, an exception is raised when remote is unavailable."""
     with patch("httpx.AsyncClient.get", side_effect=Exception("Connection refused")):
-        cost_map, source = await fetch_litellm_cost_map(timeout_seconds=0.1)
-        assert source == "bundled_litellm"
-        assert isinstance(cost_map, dict)
-        assert len(cost_map) > 0
+        with pytest.raises(Exception):
+            await fetch_litellm_cost_map(timeout_seconds=0.1)
+
+
+@pytest.mark.asyncio
+async def test_sync_frontier_models_catalog_offline_error():
+    """Verify that when remote fetch fails, sync reports error status."""
+    with patch("app.ai.frontier_sync.fetch_litellm_cost_map", side_effect=Exception("Connection error")):
+        result = await sync_frontier_models_catalog(force_remote=True)
+        assert result["status"] == "error"
+        assert result["models_count"] == 0
+        assert "Connection error" in result["error"]
 
 
 @pytest.mark.asyncio
