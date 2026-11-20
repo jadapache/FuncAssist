@@ -346,9 +346,9 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       const resolution = resolveIntentAndStatus(queryText, defaultFeature, templateId)
       setGenerationStatus(resolution.initialStatus)
 
+      let latestAccumulatedText = ''
       try {
         const currentDocContent = docHistoryContent || activeArtifact?.content || templateContent || ''
-        let latestAccumulatedText = ''
         let liveIntent = resolution.targetFeature
 
         const res = await executeRun(
@@ -593,6 +593,28 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       } catch (err) {
         console.error('Error in agentic pipeline:', err)
         const errMsg = err instanceof Error ? err.message : String(err || 'Error desconocido')
+
+        const isAbortError =
+          runState.status === 'cancelled' ||
+          /abort|signal is aborted|detuviste|cancelado/i.test(errMsg)
+
+        if (isAbortError) {
+          if (!latestAccumulatedText.trim()) {
+            const stoppedNoticeMessage: ChatPersistMessage = {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: 'Detuviste esta respuesta',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }
+            onUpdateConversation(
+              {
+                messages: [...updatedMsgs, stoppedNoticeMessage],
+              },
+              targetConvId,
+            )
+          }
+          return
+        }
 
         const isGpuError =
           /device\s*(was\s*)?lost|gpu|dxgi|device_hung|0x887a0006|already\s*been\s*disposed|insufficient\s*memory|vram|memoria.*gr[aá]fica/i.test(

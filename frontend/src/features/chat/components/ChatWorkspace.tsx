@@ -377,6 +377,30 @@ export const ChatWorkspace = ({
     void handleSendMessage(query, imagesToSend, docsToSend)
   }
 
+  const handleRetryMessage = (content: string, attachments?: typeof messages[number]['attachments']) => {
+    if (isGenerating) return
+
+    const imagesToSend: Array<{ name: string; dataUrl: string; size?: number }> = []
+    const docsToSend: Array<{ id: string; filename: string; content: string; char_count: number }> = []
+
+    if (attachments) {
+      for (const att of attachments) {
+        if (att.type === 'image' && att.dataUrl) {
+          imagesToSend.push({ name: att.name, dataUrl: att.dataUrl, size: att.size })
+        } else if (att.type === 'file' && att.content) {
+          docsToSend.push({
+            id: att.id,
+            filename: att.name,
+            content: att.content,
+            char_count: att.size || att.content.length,
+          })
+        }
+      }
+    }
+
+    void handleSendMessage(content, imagesToSend, docsToSend)
+  }
+
   return (
     <div className="flex flex-col h-full w-full bg-white font-sans overflow-hidden">
       <input
@@ -435,6 +459,7 @@ export const ChatWorkspace = ({
           chatBottomRef={chatBottomRef}
           onCancelRun={() => void handleCancelRun()}
           onOpenArtifact={(art) => setModalArtifact(art)}
+          onRetryMessage={handleRetryMessage}
         />
 
         <div className="pb-4 pt-2">
