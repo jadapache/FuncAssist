@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.ai.catalog import get_model_catalog, has_catalog_model
 from app.ai.endpoint_security import validate_remote_endpoint_url
 from app.ai.frontier_sync import get_frontier_sync_status, sync_frontier_models_catalog
-from app.ai.providers.factory import get_ai_settings
+from app.ai.providers.factory import clear_provider_cache, get_ai_settings
 from app.ai.providers.registry import find_provider_spec
 from app.api.deps import get_current_user
 from app.api.middleware.error_handlers import handle_grounded_errors
@@ -31,6 +31,8 @@ class AISettingsUpdate(BaseModel):
     transcription_groq_api_key: Optional[str] = None
     transcription_openai_api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
+    fallback_models: Optional[list[str]] = None
+    fast_model: Optional[str] = None
 
 
 @router.get("/models/catalog")
@@ -113,6 +115,8 @@ async def get_settings_endpoint(
             config.get("transcription_openai_api_key") or config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
         ),
         "ollama_base_url": config.get("ollama_base_url"),
+        "fallback_models": config.get("fallback_models") or [],
+        "fast_model": config.get("fast_model") or None,
         "active_api_key_set": active_key_set,
         "user_id": user_id,
     }
@@ -144,6 +148,16 @@ async def update_ai_settings(
             detail="Los modelos en formato GGUF no están admitidos. Usa WebLLM en navegador o una API externa.",
         )
 
+    if "fallback_models" in data:
+        fallbacks = [str(m).strip() for m in data["fallback_models"] if str(m).strip()]
+        if any(m.lower().endswith(".gguf") for m in fallbacks):
+            raise HTTPException(status_code=400, detail="Los modelos de respaldo no pueden ser GGUF.")
+        if len(fallbacks) > 3:
+            raise HTTPException(status_code=400, detail="Se admiten como máximo 3 modelos de respaldo.")
+        data["fallback_models"] = list(dict.fromkeys(fallbacks))
+    if (data.get("fast_model") or "").lower().endswith(".gguf"):
+        raise HTTPException(status_code=400, detail="El modelo rápido no puede ser GGUF.")
+
     prov = (data.get("provider") or "").lower()
     if prov in {"ollama", "ollama_remote"}:
         base_url = (data.get("ollama_base_url") or "").strip()
@@ -163,4 +177,5 @@ async def update_ai_settings(
             raise HTTPException(status_code=400, detail="El modelo ASR no existe en el catálogo persistido.")
 
     save_user_ai_settings(user_id, data)
+    clear_provider_cache(user_id)
     return await get_settings_endpoint(current_user=current_user)
