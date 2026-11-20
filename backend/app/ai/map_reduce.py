@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 from typing import Any, List, Optional
 
@@ -90,19 +92,28 @@ async def map_reduce_condense_context(
         f"Mantén nombres técnicos, parámetros y definiciones sin omitir nada crítico."
     )
 
-    for idx, c in enumerate(raw_chunks):
-        messages = [
-            AIMessage(role="system", content=map_prompt),
-            AIMessage(role="user", content=f"[PARTE {idx + 1} DE {len(raw_chunks)}]:\n{c}"),
-        ]
-        try:
-            res = await provider.complete(messages, max_tokens=1000)
-            summary_txt = res.text.strip()
-            if summary_txt:
-                mapped_summaries.append(f"--- Hallazgos Parte {idx + 1} ---\n{summary_txt}")
-        except Exception:
-            # Fallback if map completion fails: truncate chunk cleanly
-            mapped_summaries.append(f"--- Extracto Parte {idx + 1} ---\n{c[:1200]}")
+    prov_id = getattr(provider, "id", "")
+    default_concurrency = 2 if prov_id == "groq" else 4
+    concurrency_limit = int(os.getenv("AI_MAP_CONCURRENCY", str(default_concurrency)))
+    semaphore = asyncio.Semaphore(concurrency_limit)
+
+    async def _process_chunk(idx: int, c: str) -> str:
+        async with semaphore:
+            messages = [
+                AIMessage(role="system", content=map_prompt),
+                AIMessage(role="user", content=f"[PARTE {idx + 1} DE {len(raw_chunks)}]:\n{c}"),
+            ]
+            try:
+                res = await provider.complete(messages, max_tokens=1000)
+                summary_txt = res.text.strip()
+                if summary_txt:
+                    return f"--- Hallazgos Parte {idx + 1} ---\n{summary_txt}"
+            except Exception:
+                pass
+            return f"--- Extracto Parte {idx + 1} ---\n{c[:1200]}"
+
+    tasks = [_process_chunk(idx, c) for idx, c in enumerate(raw_chunks)]
+    mapped_summaries = await asyncio.gather(*tasks)
 
     combined_map = "\n\n".join(mapped_summaries)
     if len(combined_map) <= target_budget:
