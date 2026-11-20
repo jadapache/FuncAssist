@@ -11,6 +11,7 @@ class SimpleFeatureRequest:
     """For features that only need a query"""
     feature: str
     query: str
+    user_id: str | None = None
 
 
 @dataclass
@@ -20,6 +21,7 @@ class DocumentFeatureRequest:
     query: str
     document_ids: list[str]
     sources: list[str] | None = None
+    user_id: str | None = None
 
 
 @dataclass
@@ -31,19 +33,4 @@ class GroundedFeatureRequest:
     document_ids: list[str] | None = None
     chat_context: str | None = None
     template_content: str | None = None
-
-
-class IFeatureRunner(Protocol):
-    """Interface for running AI features"""
-
-    async def run(self, request: GroundedFeatureRequest) -> dict[str, Any]:
-        """Execute feature with full context"""
-        ...
-
-    async def run_simple(self, request: SimpleFeatureRequest) -> dict[str, Any]:
-        """Execute simple feature (query only)"""
-        ...
-
-    async def run_with_documents(self, request: DocumentFeatureRequest) -> dict[str, Any]:
-        """Execute feature with document analysis"""
-        ...
+    user_id: str | None = None

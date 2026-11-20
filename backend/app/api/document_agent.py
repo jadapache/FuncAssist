@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import re
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 import json
 import logging
@@ -31,6 +31,7 @@ from app.core.document_agent.schema import (
     VerificationReport,
 )
 from app.ai.artifacts import extract_artifacts, artifacts_to_dict, build_fallback_artifact
+from app.ai.events import AgentEvent as AIAgentEvent
 from app.ai.runner import (
     AgenticChatConfig,
     run_agentic_chat_stream,
@@ -48,6 +49,7 @@ from app.services.rubric_evaluator import RubricEvaluator
 from app.services.template_renderer.docx_engine import DocxTemplateRenderer
 from app.services.template_renderer.xlsx_engine import XlsxTemplateRenderer
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/doc-agent",
     tags=["document-agent"],
@@ -320,6 +322,39 @@ def validate_operation(payload: Dict[str, Any]):
     return {"valid": valid, "message": message}
 
 
+
+HISTORY_DB_LIMIT = 60
+
+
+async def _resolve_chat_history(
+    req: "AgenticPromptRequest",
+    chat_repo: ChatRepository,
+    user_id: str | None,
+) -> list[dict[str, Any]] | list[str] | None:
+    """Pick the most complete history source for the agentic chat.
+
+    1. Persisted messages of the conversation (authoritative, scoped to the user).
+    2. Structured `conversationHistory` sent by the client.
+    3. Legacy `chat_context` lines (`"role: content"`), parsed downstream.
+    """
+    if req.conversation_id:
+        try:
+            stored = await chat_repo.get_session_messages(req.conversation_id, limit=0, user_id=user_id)
+            turns = [
+                {"role": m.get("role"), "content": m.get("content")}
+                for m in stored[-HISTORY_DB_LIMIT:]
+                if m.get("role") in ("user", "assistant") and m.get("content")
+            ]
+            if turns:
+                return turns
+        except Exception as exc:  # history is best-effort; never block the answer
+            logger.warning("Could not load conversation history %s: %s", req.conversation_id, exc)
+    if req.conversation_history:
+        return req.conversation_history
+    if req.chat_context:
+        return req.chat_context if isinstance(req.chat_context, list) else [str(req.chat_context)]
+    return None
+
 @router.post("/agentic-prompt", response_model=AgenticPromptResponse)
 async def handle_agentic_prompt(
     req: AgenticPromptRequest,
@@ -469,6 +504,7 @@ async def handle_agentic_prompt(
             chat_ctx_str = "\n".join(req.chat_context)
         else:
             chat_ctx_str = str(req.chat_context)
+    chat_history = await _resolve_chat_history(req, chat_repo, user_id)
 
     sources_to_use = req.sources or ["knowledge"]
     intent = classify_prompt_intent(prompt_str, req.mode, template_id=req.template_id)
@@ -503,6 +539,8 @@ async def handle_agentic_prompt(
         sources=sources_to_use,
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
+        history=chat_history,
+        conversation_id=req.conversation_id,
         template_content=template_content,
         template_extension=template_ext,
         images=req.images,
@@ -515,7 +553,8 @@ async def handle_agentic_prompt(
     try:
         accumulated: list[str] = []
         async for chunk in run_agentic_chat_stream(cfg):
-            accumulated.append(chunk)
+            if isinstance(chunk, str):  # typed AgentEvents only matter to streaming clients
+                accumulated.append(chunk)
 
         full_content = "".join(accumulated)
         parsed_arts, clean_ans = extract_artifacts(full_content)
@@ -584,9 +623,11 @@ async def handle_agentic_prompt(
 
 @router.post("/agentic-prompt-stream")
 async def handle_agentic_prompt_stream(
+    request: Request,
     req: AgenticPromptRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
     chat_repo: ChatRepository = Depends(get_chat_repository),
+    protocol: str = "v1",
 ):
     """
     Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
@@ -620,6 +661,7 @@ async def handle_agentic_prompt_stream(
             chat_ctx_str = "\n".join(req.chat_context)
         else:
             chat_ctx_str = str(req.chat_context)
+    chat_history = await _resolve_chat_history(req, chat_repo, user_id)
 
     sources_to_use = req.sources or ["knowledge"]
     intent = classify_prompt_intent(prompt_str, req.mode, template_id=req.template_id)
@@ -654,6 +696,8 @@ async def handle_agentic_prompt_stream(
         sources=sources_to_use,
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
+        history=chat_history,
+        conversation_id=req.conversation_id,
         template_content=template_content,
         template_extension=template_ext,
         images=req.images,
@@ -678,12 +722,32 @@ async def handle_agentic_prompt_stream(
             yield emitter.step_started("step-generate", "Generando contenido...").to_sse_packet()
 
             async for chunk in run_agentic_chat_stream(cfg):
-                if emitter.is_cancelled:
-                    yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
+                if await request.is_disconnected():
+                    emitter.cancel(reason="Client disconnected")
                     return
+                if emitter.is_cancelled:
+                    if protocol == "v2":
+                        yield f"event: error\ndata: {json.dumps({'code': 'cancelled', 'message': 'Cancelado por el usuario'})}\n\n"
+                    else:
+                        yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
+                    return
+                if isinstance(chunk, AIAgentEvent):
+                    # status / tool_call / tool_result / usage from the agent loop
+                    if protocol == "v2":
+                        yield chunk.to_sse()
+                    elif chunk.type == "tool_call":
+                        step_id = f"step-tool-{chunk.data.get('id', '')}"
+                        yield emitter.step_started(step_id, f"Usando herramienta: {chunk.data.get('name')}").to_sse_packet()
+                    elif chunk.type == "tool_result":
+                        step_id = f"step-tool-{chunk.data.get('id', '')}"
+                        yield emitter.step_completed(step_id, f"Herramienta {chunk.data.get('name')} finalizada").to_sse_packet()
+                    continue
                 accumulated_chunks.append(chunk)
-                yield emitter.message_delta(chunk).to_sse_packet()
-                yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
+                if protocol == "v2":
+                    yield f"event: delta\ndata: {json.dumps({'text': chunk})}\n\n"
+                else:
+                    yield emitter.message_delta(chunk).to_sse_packet()
+                    yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
 
             if emitter.is_cancelled:
                 yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
@@ -773,8 +837,13 @@ async def handle_agentic_prompt_stream(
                 "run_id": run_id,
                 "conversation_id": conv_id,
             }
-            yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            if protocol == "v2":
+                for idx, art in enumerate(art_dicts):
+                    yield f"event: artifact_end\ndata: {json.dumps(art, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps(final_response, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as err:
             err_msg = _format_stream_error(err)
             yield emitter.failed("RUN_EXCEPTION", err_msg).to_sse_packet()
