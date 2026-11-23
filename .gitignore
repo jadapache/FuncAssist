@@ -59,7 +59,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-secrets/
+openbao/approle/
+openbao-init.txt
 
 # Node.js / JavaScript
 node_modules/
