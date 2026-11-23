@@ -326,10 +326,11 @@ export const transcriptionApi = {
     description: string = '',
     transcriptionId?: string,
     filename: string = file instanceof File ? file.name : 'media.wav',
-    options: UploadProgressOptions = {},
+    options: UploadProgressOptions & { consentConfirmed?: boolean } = {},
   ): Promise<UploadMediaResponse> {
     const formData = new FormData()
     formData.append('file', file, filename)
+    formData.append('consent_confirmed', options.consentConfirmed ? 'true' : 'false')
     formData.append('title', title)
     formData.append('description', description)
     if (transcriptionId) formData.append('transcription_id', transcriptionId)

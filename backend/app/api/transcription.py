@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import asyncio
 import logging
 import re
@@ -106,9 +108,19 @@ async def upload_transcription_media(
   title: str = Form(""),
   description: str = Form(""),
   transcription_id: Optional[str] = Form(None),
+  consent_confirmed: bool = Form(False),
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-  """Stream the media file to disk (size-limited) and create the transcription record."""
+  """Stream the media file to disk (size-limited) and create the transcription record.
+
+  The uploader must confirm that every participant gave prior, informed consent to the recording and its processing. 
+  The confirmation is stored with the record.
+  """
+  if not consent_confirmed:
+    raise HTTPException(
+      status_code=400,
+      detail="Debes confirmar que los participantes autorizaron la grabación y su tratamiento (Ley 1581 de 2012).",
+    )
   tid = _new_id(transcription_id)
   existing = await records.get_record(tid)
   if existing is not None:
@@ -118,7 +130,14 @@ async def upload_transcription_media(
     entry = await storage.save_upload(file, tid, title or file.filename or "Reunión", description)
   except TranscriptionJobError as exc:
     raise _http_error(exc) from exc
-  await records.save_record(service.media_entry_for_upload(entry, current_user))
+  record = service.media_entry_for_upload(entry, current_user)
+  record["consent"] = {
+    "confirmed": True,
+    "confirmed_by": current_user.get("username"),
+    "confirmed_at": datetime.now(timezone.utc).isoformat(),
+    "legal_basis": "Ley 1581 de 2012 - autorización previa e informada",
+  }
+  await records.save_record(record)
   return {
     "ok": True,
     "media_id": tid,

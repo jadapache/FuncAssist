@@ -23,6 +23,7 @@ export interface UploadJobOptions {
   diarize?: boolean
   numSpeakers?: number | null
   vocabulary?: string
+  consentConfirmed?: boolean
 }
 
 export interface ToastApi {
@@ -84,6 +85,7 @@ export function useTranscriptionJobRunners(deps: RunnerDeps) {
 
       try {
         const upload = await transcriptionApi.uploadMediaFile(file, title, description, id, file.name, {
+          consentConfirmed: options.consentConfirmed === true,
           signal: controller.signal,
           onProgress: (loaded, total) => {
             const fraction = total > 0 ? loaded / total : 0
