@@ -155,15 +155,25 @@ async def save_upload(upload: UploadFile, transcription_id: str, title: str, des
   return _media_entry(transcription_id, filename, stored, dest, size, digest.hexdigest(), resolved_title, description.strip())
 
 
-def is_allowed_local_path(path: Path) -> bool:
-  resolved = path.resolve()
-  return any(resolved.is_relative_to(root) for root in config.local_roots())
+def resolve_allowed_local_path(raw: str | Path) -> Optional[Path]:
+  """Resolve a user-supplied local path; return it only if it lies inside TRANSCRIPTION_LOCAL_ROOTS."""
+  text = str(raw).strip().strip("'\"")
+  if not text:
+    return None
+  resolved = Path(text).resolve()
+  if any(resolved.is_relative_to(root) for root in config.local_roots()):
+    return resolved
+  return None
+
+
+def is_allowed_local_path(path: str | Path) -> bool:
+  return resolve_allowed_local_path(path) is not None
 
 
 def local_media_entry(transcription_id: str, local_path: str, title: str, description: str = "") -> dict[str, Any]:
   """Desktop mode only: reference a file inside TRANSCRIPTION_LOCAL_ROOTS without copying it."""
-  path = Path(local_path)
-  if not config.desktop_mode() or not is_allowed_local_path(path):
+  path = resolve_allowed_local_path(local_path) if config.desktop_mode() else None
+  if path is None:
     raise TranscriptionJobError("bad_request", "Ruta local no permitida.")
   if not path.is_file():
     raise TranscriptionJobError("bad_request", f"El archivo local no existe o no es accesible: {local_path}")
@@ -172,8 +182,8 @@ def local_media_entry(transcription_id: str, local_path: str, title: str, descri
   if not ok:
     raise TranscriptionJobError("unsupported_format", err)
   get_transcription_dir(transcription_id).mkdir(parents=True, exist_ok=True)
-  entry = _media_entry(transcription_id, path.name, path.name, path.resolve(), size, "", title.strip() or path.name, description.strip())
-  entry["source_path"] = str(path.resolve())
+  entry = _media_entry(transcription_id, path.name, path.name, path, size, "", title.strip() or path.name, description.strip())
+  entry["source_path"] = str(path)
   return entry
 
 

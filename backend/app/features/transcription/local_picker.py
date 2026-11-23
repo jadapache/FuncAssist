@@ -10,6 +10,7 @@ from app.features.transcription.storage import (
   SUPPORTED_FORMATS,
   SUPPORTED_VIDEO_EXTS,
   format_size_bytes,
+  resolve_allowed_local_path,
   validate_file,
 )
 
@@ -64,8 +65,10 @@ def open_native_file_dialog_sync() -> Optional[str]:
 
 def inspect_local_file(file_path_str: str) -> dict[str, Any]:
   """Inspects an existing local file and returns metadata."""
-  p = Path(file_path_str.strip('\'"'))
-  if not p.exists() or not p.is_file():
+  p = resolve_allowed_local_path(file_path_str)
+  if p is None:
+    return {"ok": False, "exists": False, "error": "Ruta local no permitida."}
+  if not p.is_file():
     return {
       "ok": False,
       "exists": False,
@@ -85,7 +88,7 @@ def inspect_local_file(file_path_str: str) -> dict[str, Any]:
   return {
     "ok": True,
     "exists": True,
-    "path": str(p.resolve()),
+    "path": str(p),
     "filename": p.name,
     "size_bytes": size,
     "size_formatted": format_size_bytes(size),
