@@ -31,7 +31,7 @@ def migrate_ai_models_catalog() -> None:
       db.commit()
       logger.info("Successfully altered ai_models_catalog id column to VARCHAR(128).")
     except Exception as exc:
-      logger.debug("Migration skipped or not supported (e.g. SQLite): %s", exc)
+      logger.debug("Migration skipped or not supported: %s", exc)
   logger.info("Migration completed.")
 
 

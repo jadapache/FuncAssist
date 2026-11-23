@@ -1,6 +1,6 @@
 """In-memory SQLAlchemy Fake Sessions for testing PostgreSQL ORM queries.
 
-Zero SQLite dependencies - operates strictly as an in-memory double of SQLAlchemy AsyncSession/Session.
+Operates strictly as an in-memory double of SQLAlchemy AsyncSession/Session.
 """
 
 from __future__ import annotations

@@ -33,12 +33,12 @@ backend/app/
 │   ├── settings.py            # Configuración, salud
 │   └── history.py             # Historial de conversaciones
 │
-├── context/                     # RAG Engine (SQLite FTS5 + BM25)
+├── context/                     # RAG Engine (PostgreSQL full-text/vectorial + BM25)
 │   ├── __init__.py
 │   ├── models.py              # ContextChunk, ContextBundle
-│   ├── knowledge.py           # Ingesta, chunking y almacenamiento SQLite FTS5
-│   ├── knowledge_migration.py # Migración JSON->SQLite, export y recovery
-│   ├── retrieval.py           # Búsqueda híbrida (FTS5 + BM25 fallback)
+│   ├── knowledge.py           # Ingesta, chunking y almacenamiento en PostgreSQL
+│   ├── knowledge_migration.py # Migración de datos legados a PostgreSQL, export y recovery
+│   ├── retrieval.py           # Búsqueda híbrida (full-text/vectorial + BM25 fallback)
 │   └── service.py             # Orquestación (assemble_context)
 │
 ├── core/                        # Núcleo de infraestructura
@@ -612,7 +612,7 @@ class AIProvider(Protocol):
 
 ### Repository Pattern
 
-> **Implementación actual:** La capa de datos utiliza SQLAlchemy sobre PostgreSQL. Los ejemplos SQLite que aparecen más abajo son históricos y no representan la implementación vigente.
+> La capa de datos utiliza SQLAlchemy 2 (async) sobre PostgreSQL con el driver psycopg 3.
 
 Los repositorios reciben una sesión obligatoria por inyección y no crean sesiones ni ejecutan `commit()` internamente. Las APIs y servicios deben utilizar interfaces y dependencias de FastAPI. Las operaciones multi-entidad deben coordinarse mediante `AsyncUnitOfWork` o `SyncUnitOfWork` en `app/db/unit_of_work.py`.
 
@@ -638,13 +638,15 @@ class IUserRepository(Protocol):
     async def update(id: str, updates: dict) -> dict
 ```
 
-**Implementación SQLite:**
+**Implementación (SQLAlchemy + PostgreSQL):**
 
 ```python
-class UserRepository(BaseRepository):
-    async def get_by_id(id: str) -> dict | None:
-        sql = "SELECT * FROM users WHERE id = ?"
-        return await self._fetch_one(sql, (id,))
+class UserRepository:
+    async def get_by_id(self, user_id: str) -> dict | None:
+        stmt = select(UserModel).where(UserModel.id == user_id)
+        result = await self.session.execute(stmt)
+        user = result.scalar_one_or_none()
+        return user.to_dict() if user else None
 ```
 
 ### Database Schema

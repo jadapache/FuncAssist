@@ -479,7 +479,7 @@ export const KnowledgePage = () => {
             {busy ? (
               <>
                 <RefreshCw className="h-4 w-4 animate-spin" />
-                <span>Extrayendo e indexando en FTS5...</span>
+                <span>Extrayendo e indexando en PostgreSQL...</span>
               </>
             ) : (
               <>
@@ -726,7 +726,7 @@ export const KnowledgePage = () => {
                         <span>•</span>
                         <span className="flex items-center gap-1 font-medium text-slate-600">
                           <Layers className="h-3 w-3 text-slate-400 shrink-0" />
-                          <span>{doc.chunk_count} fragmentos FTS5</span>
+                          <span>{doc.chunk_count} fragmentos indexados</span>
                         </span>
                         <span>•</span>
                         <span className="flex items-center gap-1 font-medium text-slate-600">
@@ -820,7 +820,7 @@ export const KnowledgePage = () => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Verificador de Recuperación RAG (FTS5 + BM25)
+                Verificador de Recuperación RAG (PostgreSQL full-text + BM25)
               </h2>
               <p className="text-xs text-slate-500">
                 Prueba qué fragmentos son recuperados y clasificados por relevancia ante una consulta.

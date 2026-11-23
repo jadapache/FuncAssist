@@ -1,6 +1,4 @@
 """SQLAlchemy ORM-based User Repository for PostgreSQL.
-
-Pure PostgreSQL - No SQLite, no raw file dependencies.
 """
 
 from __future__ import annotations

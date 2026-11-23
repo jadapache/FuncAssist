@@ -1,4 +1,4 @@
-"""Retrieval over knowledge chunks — FTS5 persistent index with Python BM25 fallback."""
+"""Retrieval over knowledge chunks — PostgreSQL full-text/vector search with Python BM25 fallback."""
 
 from __future__ import annotations
 

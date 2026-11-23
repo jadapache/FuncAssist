@@ -1,4 +1,4 @@
-"""Unit and integration tests for PostgreSQL RAG Knowledge Base (pure PostgreSQL, no SQLite)."""
+"""Unit and integration tests for PostgreSQL RAG Knowledge Base."""
 
 import re
 import unicodedata
