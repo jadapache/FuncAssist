@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
-import secrets
 from typing import Any, Optional
 
 from app.ai.catalog import pick_model
@@ -15,7 +12,6 @@ from app.ai.providers.implementations import LiteLLMProvider
 from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS, find_provider_spec
 from app.core.storage import load_app_settings, load_user_ai_settings
 
-_CACHE_KEY_SALT = secrets.token_bytes(32)
 
 _PROVIDER_CACHE: dict[tuple[Any, ...], AIProvider] = {}
 MAX_FALLBACK_MODELS = 3
@@ -150,9 +146,7 @@ def resolve_provider(
     env_hint = f" ({spec.env_key})" if spec.env_key else ""
     raise ValueError(f"{spec.name} is selected but API key{env_hint} is missing.")
 
-  # Keyed digest: the cache never holds a plain, offline-guessable hash of the API key.
-  key_hash = hmac.new(_CACHE_KEY_SALT, key.encode("utf-8"), hashlib.sha256).hexdigest()
-  cache_key = (user_id, target_name, chosen_model, key_hash, base_url, fb_key)
+  cache_key = (user_id, target_name, chosen_model, key, base_url, fb_key)
   if cache_key in _PROVIDER_CACHE:
     return _PROVIDER_CACHE[cache_key]
 

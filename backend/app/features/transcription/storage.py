@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,9 +41,18 @@ def ensure_transcription_dirs() -> None:
   APP_TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
 def get_transcription_dir(transcription_id: str) -> Path:
-  safe = Path(transcription_id).name  # never escape the transcriptions directory
-  return TRANSCRIPTIONS_DIR / safe
+  """Folder of one transcription; raises if the id could escape the transcriptions directory."""
+  if not _ID_RE.fullmatch(str(transcription_id)):
+    raise TranscriptionJobError("bad_request", "Identificador de transcripción no válido.")
+  base = os.path.realpath(TRANSCRIPTIONS_DIR)
+  folder = os.path.realpath(os.path.join(base, transcription_id))
+  if not folder.startswith(base + os.sep):
+    raise TranscriptionJobError("bad_request", "Identificador de transcripción no válido.")
+  return Path(folder)
 
 
 def chunks_dir(transcription_id: str) -> Path:
@@ -123,7 +134,11 @@ async def save_upload(upload: UploadFile, transcription_id: str, title: str, des
   ensure_transcription_dirs()
   folder = get_transcription_dir(transcription_id)
   folder.mkdir(parents=True, exist_ok=True)
-  stored = f"media{Path(filename).suffix.lower()}"
+  # Only a known extension from the allow-list reaches the file name, never raw upload text.
+  ext = next((e for e in SUPPORTED_FORMATS if e == Path(filename).suffix.lower()), None)
+  if ext is None:
+    raise TranscriptionJobError("unsupported_format", "Formato de archivo no soportado.")
+  stored = f"media{ext}"
   dest = folder / stored
   tmp = folder / f".{stored}.part"
   limit = config.max_upload_bytes()
@@ -160,9 +175,11 @@ def resolve_allowed_local_path(raw: str | Path) -> Optional[Path]:
   text = str(raw).strip().strip("'\"")
   if not text:
     return None
-  resolved = Path(text).resolve()
-  if any(resolved.is_relative_to(root) for root in config.local_roots()):
-    return resolved
+  resolved = os.path.realpath(text)
+  for root in config.local_roots():
+    base = os.path.realpath(root)
+    if resolved == base or resolved.startswith(base.rstrip(os.sep) + os.sep):
+      return Path(resolved)
   return None
 
 
