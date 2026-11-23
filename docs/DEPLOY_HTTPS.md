@@ -21,8 +21,8 @@ Además, por HTTP las contraseñas, los tokens de sesión y las claves de API vi
 
 El contenedor `frontend` (nginx) decide al arrancar:
 
-- Si en `TLS_CERT_DIR` (por defecto `./certs`, junto a `compose.yaml`) existen `tls.crt` y `tls.key`, sirve **HTTPS** en el puerto `APP_HTTPS_PORT` (por defecto 6729). El puerto `APP_PORT` (6728) solo redirige a HTTPS y responde `/healthz`.
-- Si no existen, sirve **HTTP** en `APP_PORT`, como hasta ahora.
+- FuncAssist se sirve **solo por HTTPS**. En `TLS_CERT_DIR` (por defecto `./certs`, junto a `compose.yaml`) deben existir `tls.crt` y `tls.key`; si faltan, el contenedor `frontend` no arranca.
+- El puerto publicado `APP_PORT` (6728) solo habla TLS. Una petición `http://<servidor>:6728` se redirige a `https://<servidor>:6728`. No se publica ningún puerto HTTP plano.
 
 El registro del contenedor lo dice en la primera línea: `docker compose logs frontend | grep funcassist`.
 
@@ -33,14 +33,14 @@ El registro del contenedor lo dice en la primera línea: `docker compose logs fr
    - `certs/tls.key`: clave privada sin contraseña.
 2. En `.env`:
    ```
-   APP_HTTPS_PORT=443          # o 6729 si el 443 del servidor está ocupado
+   APP_PORT=6728               # puerto HTTPS publicado
    FRONTEND_URL=https://funcassist.miempresa.local
    ```
 3. `docker compose up -d --force-recreate frontend backend`
 4. Comprueba:
    ```
    docker compose logs frontend | grep funcassist      # "HTTPS habilitado…"
-   curl -I http://<servidor>:6728/                       # 301 hacia https://
+   curl -kI https://<servidor>:6728/                     # 200 por HTTPS
    curl -I https://funcassist.miempresa.local/           # 200, sin errores de certificado
    ```
 5. En un equipo de usuario, abre la dirección HTTPS: el candado no debe mostrar avisos. En Configuración → Modelo en este navegador debe aparecer "WebGPU activo".
@@ -97,6 +97,6 @@ Mientras llega el certificado, TI puede marcar la dirección HTTP como segura en
 |---|---|
 | `NET::ERR_CERT_AUTHORITY_INVALID` | El equipo no confía en la CA que firmó el certificado (opción 2: falta la raíz en el almacén). |
 | `NET::ERR_CERT_COMMON_NAME_INVALID` | El nombre o la IP con que se entra no está en el SAN del certificado. |
-| El contenedor arranca en HTTP con los archivos puestos | Los nombres deben ser exactamente `tls.crt` y `tls.key`, no estar vacíos, y estar en `TLS_CERT_DIR`. |
+| El contenedor `frontend` no arranca ("no hay certificado") | Los nombres deben ser exactamente `tls.crt` y `tls.key`, no estar vacíos, y estar en `TLS_CERT_DIR`. |
 | `nginx: [emerg] cannot load certificate key` | La clave tiene contraseña o no corresponde al certificado. |
 | HTTPS correcto pero "WebGPU no detectado" | Aceleración por hardware desactivada en el navegador, o GPU no compatible: revisar `chrome://gpu` / `edge://gpu`. |
