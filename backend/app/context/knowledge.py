@@ -56,7 +56,6 @@ def get_knowledge_documents_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 _PGVECTOR_AVAILABLE: bool | None = None
-_PGTRGM_AVAILABLE: bool = False
 
 
 def is_postgres_configured() -> bool:
@@ -97,7 +96,7 @@ def _register_vector_adapter(conn) -> None:
 
 
 def _init_extensions(conn) -> None:
-  global _PGVECTOR_AVAILABLE, _PGTRGM_AVAILABLE
+  global _PGVECTOR_AVAILABLE
   cur = conn.cursor()
   try:
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
@@ -114,14 +113,16 @@ def _init_extensions(conn) -> None:
   except Exception:
     conn.rollback()
 
+  # pg_trgm is required: the trigram fallback search depends on it.
   try:
     cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
     conn.commit()
-    _PGTRGM_AVAILABLE = True
   except Exception as exc:
     conn.rollback()
-    _PGTRGM_AVAILABLE = False
-    logger.info("pg_trgm extension not available; trigram search falls back to ILIKE: %s", exc)
+    raise RuntimeError(
+      "PostgreSQL extension pg_trgm is required but could not be created. "
+      "Run 'CREATE EXTENSION pg_trgm;' as a superuser on the knowledge database."
+    ) from exc
 
   if _PGVECTOR_AVAILABLE:
     _register_vector_adapter(conn)
@@ -202,15 +203,12 @@ def _init_indexes(conn) -> None:
       conn.rollback()
       logger.warning("Could not create vector hnsw index: %s", exc)
 
-  if _PGTRGM_AVAILABLE:
-    try:
-      cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_chunks_text_trgm ON chunks USING gin (text gin_trgm_ops);"
-      )
-      conn.commit()
-    except Exception as exc:
-      conn.rollback()
-      logger.warning("Could not create trigram index: %s", exc)
+  try:
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_text_trgm ON chunks USING gin (text gin_trgm_ops);")
+    conn.commit()
+  except Exception as exc:
+    conn.rollback()
+    logger.warning("Could not create trigram index: %s", exc)
 
 
 def _init_metadata(conn) -> None:
@@ -691,9 +689,9 @@ def search_chunks_trigram(
   top_k: int = 8,
   tags: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-  """Fuzzy lexical search for terms the Spanish tsvector misses (acronyms, IDs, English words).
+  """Fuzzy lexical search via pg_trgm word similarity.
 
-  Uses pg_trgm word similarity when available, otherwise a case-insensitive ILIKE match.
+  Catches terms the Spanish tsvector misses, such as acronyms, IDs and English words.
   """
   if not is_postgres_configured() or not query.strip():
     return []
@@ -702,29 +700,15 @@ def search_chunks_trigram(
   with _db() as conn:
     cur = conn.cursor()
     try:
-      if _PGTRGM_AVAILABLE:
-        cur.execute(
-          """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
-                    word_similarity(%(query)s, text) AS score
-             FROM chunks
-             WHERE %(query)s <%% text
-             ORDER BY score DESC
-             LIMIT %(limit)s""",
-          {"query": query, "limit": limit},
-        )
-      else:
-        terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2] or [query.strip().lower()]
-        patterns = [f"%{t.replace('%', '').replace('_', '')}%" for t in terms]
-        cur.execute(
-          """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
-                    (SELECT COUNT(*) FROM unnest(%(patterns)s::text[]) AS p WHERE text ILIKE p)::float
-                      / %(n)s AS score
-             FROM chunks
-             WHERE text ILIKE ANY(%(patterns)s)
-             ORDER BY score DESC
-             LIMIT %(limit)s""",
-          {"patterns": patterns, "n": len(patterns), "limit": limit},
-        )
+      cur.execute(
+        """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
+                  word_similarity(%(query)s, text) AS score
+           FROM chunks
+           WHERE %(query)s <%% text
+           ORDER BY score DESC
+           LIMIT %(limit)s""",
+        {"query": query, "limit": limit},
+      )
       rows = cur.fetchall()
     except Exception as exc:
       logger.warning("Trigram search query failed: %s", exc)

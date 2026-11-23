@@ -139,12 +139,9 @@ class FakePGCursor:
         self._last_result = matched
         return
 
-      if "word_similarity" in q or "ILIKE" in q:
-        # Trigram / ILIKE fallback: case-insensitive substring match
-        if isinstance(p, dict) and "patterns" in p:
-          terms = [pat.strip("%") for pat in p["patterns"]]
-        else:
-          terms = [str((p or {}).get("query", "")).lower()]
+      if "word_similarity" in q:
+        # Trigram fallback: case-insensitive substring match
+        terms = [str((p or {}).get("query", "")).lower()]
         matched = [
           {**c, "score": 0.5}
           for c in self.storage["chunks"]

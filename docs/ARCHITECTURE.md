@@ -211,7 +211,7 @@ Los servidores MCP configurados por el usuario (`mcp_servers`) se invocan median
 3. Búsqueda (context/retrieval.py):
    - Full-text: ts_rank_cd + websearch_to_tsquery('spanish')
    - Vectorial: distancia coseno (embedding <=> vector)
-   - Fallback por trigramas (pg_trgm word_similarity, o ILIKE si no está la extensión)
+   - Fallback por trigramas (pg_trgm word_similarity, extensión obligatoria)
 4. core/index_refresher mantiene el índice actualizado
 ```
 
