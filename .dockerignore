@@ -13,3 +13,4 @@ backend/knowledge_data
 data
 knowledge_data
 *.log
+certs
