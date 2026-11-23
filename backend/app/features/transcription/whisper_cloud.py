@@ -17,6 +17,7 @@ from typing import Any, Optional, Sequence
 
 import httpx
 
+from app.ai.catalog import pick_diarization_model, pick_transcription_model
 from app.ai.providers.factory import get_ai_settings
 from app.features.transcription import config
 from app.features.transcription.errors import TranscriptionJobError, error_from_status, is_transient
@@ -27,12 +28,9 @@ ENDPOINTS = {
   "groq": "https://api.groq.com/openai/v1/audio/transcriptions",
   "openai": "https://api.openai.com/v1/audio/transcriptions",
 }
-# Models that return timestamped segments (`verbose_json`). gpt-4o-(mini-)transcribe only return text.
-SEGMENT_MODELS = {
-  "groq": ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"],
-  "openai": ["whisper-1"],
-}
-DEFAULT_MODEL = {"groq": "whisper-large-v3", "openai": "whisper-1"}
+# Last resort only, when the catalog has no segment-capable model for the provider (empty or
+# unreachable catalog). The model is otherwise chosen from the catalog, see `pick_transcription_model`.
+FALLBACK_MODEL = {"groq": "whisper-large-v3", "openai": "whisper-1"}
 # USD per audio minute, used for cost estimates in metrics only.
 PRICE_PER_MINUTE = {"groq": 0.00185, "openai": 0.006, "openai-diarize": 0.006}
 
@@ -73,11 +71,13 @@ def resolve_speech_target(user_id: Optional[str]) -> SpeechTarget:
       continue
     if configured in {"groq", "openai"} and provider != configured:
       logger.warning("Transcription provider %s has no API key; using %s instead", configured, provider)
-    model = (cfg.get("transcription_model") or "").strip()
-    if model not in SEGMENT_MODELS[provider]:
-      if model:
-        logger.info("Transcription model %r is not usable with %s segments; using %s", model, provider, DEFAULT_MODEL[provider])
-      model = DEFAULT_MODEL[provider]
+    configured_model = (cfg.get("transcription_model") or "").strip()
+    model = pick_transcription_model(provider, configured_model) or FALLBACK_MODEL[provider]
+    if configured_model and model != configured_model:
+      logger.info(
+        "Transcription model %r is not a %s catalog model with timestamped segments; using %s",
+        configured_model, provider, model,
+      )
     return SpeechTarget(provider=provider, api_key=keys[provider], model=model)
   raise TranscriptionJobError("no_credentials")
 
@@ -92,7 +92,16 @@ def resolve_diarization_target(user_id: Optional[str], requested: bool) -> Optio
   key = _keys(cfg)["openai"]
   if not key:
     return None
-  return SpeechTarget(provider="openai", api_key=key, model=config.diarize_model(), diarize=True)
+  configured = config.diarize_model()
+  model, catalog_known = pick_diarization_model("openai", configured)
+  if not catalog_known:
+    model = configured  # empty or unreachable catalog: trust the configured model
+  elif model is None:
+    logger.warning("No OpenAI diarization model in the catalog (configured %r); transcribing without speakers", configured)
+    return None
+  elif model != configured:
+    logger.info("Diarization model %r is not in the catalog; using %s", configured, model)
+  return SpeechTarget(provider="openai", api_key=key, model=model, diarize=True)
 
 
 def available_providers(user_id: Optional[str]) -> dict[str, bool]:

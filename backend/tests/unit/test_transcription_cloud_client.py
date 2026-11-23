@@ -5,6 +5,7 @@ import json
 import httpx
 import pytest
 
+from app.ai import catalog
 from app.features.transcription import whisper_cloud
 from app.features.transcription.errors import TranscriptionJobError
 from app.features.transcription.whisper_cloud import SpeechClient, SpeechTarget, resolve_diarization_target, resolve_speech_target
@@ -17,6 +18,70 @@ def settings(monkeypatch):
   monkeypatch.delenv("GROQ_API_KEY", raising=False)
   monkeypatch.delenv("OPENAI_API_KEY", raising=False)
   return values
+
+
+CATALOG = {
+  "groq": ["whisper-large-v3", "whisper-large-v3-turbo"],
+  "openai": ["whisper-1", "gpt-4o-transcribe", "gpt-4o-transcribe-diarize", "gpt-realtime-whisper"],
+}
+
+
+@pytest.fixture
+def transcription_catalog(monkeypatch):
+  models = {k: list(v) for k, v in CATALOG.items()}
+  monkeypatch.setattr(catalog, "catalog_transcription_models", lambda provider: models.get(provider, []))
+  return models
+
+
+class TestCatalogModels:
+  def test_segment_capability_by_family(self):
+    assert catalog.supports_transcript_segments("whisper-1")
+    assert catalog.supports_transcript_segments("whisper-large-v3-turbo")
+    assert not catalog.supports_transcript_segments("gpt-4o-transcribe")
+    assert not catalog.supports_transcript_segments("gpt-realtime-whisper")
+
+  def test_configured_catalog_model_is_kept(self, settings, transcription_catalog):
+    settings.update(transcription_provider="groq", groq_api_key="g", transcription_model="whisper-large-v3-turbo")
+    assert resolve_speech_target("u1").model == "whisper-large-v3-turbo"
+
+  def test_new_catalog_whisper_model_is_accepted(self, settings, transcription_catalog):
+    transcription_catalog["groq"].append("whisper-large-v4")
+    settings.update(transcription_provider="groq", groq_api_key="g", transcription_model="whisper-large-v4")
+    assert resolve_speech_target("u1").model == "whisper-large-v4"
+
+  def test_model_missing_from_catalog_is_replaced(self, settings, transcription_catalog):
+    settings.update(transcription_provider="groq", groq_api_key="g", transcription_model="distil-whisper-large-v3-en")
+    assert resolve_speech_target("u1").model == "whisper-large-v3"
+
+  def test_text_only_catalog_model_is_replaced(self, settings, transcription_catalog):
+    settings.update(transcription_provider="openai", openai_api_key="o", transcription_model="gpt-4o-transcribe")
+    assert resolve_speech_target("u1").model == "whisper-1"
+
+  def test_empty_catalog_uses_fallback(self, settings, transcription_catalog):
+    transcription_catalog["groq"].clear()
+    settings.update(transcription_provider="groq", groq_api_key="g")
+    assert resolve_speech_target("u1").model == "whisper-large-v3"
+
+
+class TestDiarizationCatalog:
+  def test_configured_catalog_model_is_used(self, settings, transcription_catalog):
+    settings.update(openai_api_key="o")
+    assert resolve_diarization_target("u1", True).model == "gpt-4o-transcribe-diarize"
+
+  def test_unknown_configured_model_is_replaced(self, settings, transcription_catalog, monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_DIARIZE_MODEL", "gpt-3-diarize-old")
+    settings.update(openai_api_key="o")
+    assert resolve_diarization_target("u1", True).model == "gpt-4o-transcribe-diarize"
+
+  def test_catalog_without_diarizer_disables_diarization(self, settings, transcription_catalog):
+    transcription_catalog["openai"].remove("gpt-4o-transcribe-diarize")
+    settings.update(openai_api_key="o")
+    assert resolve_diarization_target("u1", True) is None
+
+  def test_empty_catalog_trusts_configured(self, settings, transcription_catalog):
+    transcription_catalog["openai"].clear()
+    settings.update(openai_api_key="o")
+    assert resolve_diarization_target("u1", True).model == "gpt-4o-transcribe-diarize"
 
 
 class TestTargets:
