@@ -445,7 +445,7 @@ export const ProfilePage = () => {
         />
         <StatCard
           label="Búsqueda RAG"
-          value="BM25"
+          value="Híbrida"
           icon={Zap}
           accent="primary"
           trend="Contexto en vivo y documentos"

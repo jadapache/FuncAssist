@@ -237,8 +237,6 @@ local/
 │   └── logs/                 # Auditoría de llamadas AI (JSON)
 ├── connections/              # Credenciales encriptadas por servicio
 ├── knowledge/
-│   ├── documents.json        # Índice de documentos cargados
-│   ├── chunks.json           # Chunks de texto indexados con BM25
 │   └── uploads/              # Archivos originales cargados
 ```
 

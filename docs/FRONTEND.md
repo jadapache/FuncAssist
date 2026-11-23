@@ -466,7 +466,7 @@ export const api = {
    └─ Presiona Enviar
    ↓
 4. Backend:
-   ├─ BM25 search en knowledge base
+   ├─ Búsqueda híbrida en knowledge base (PostgreSQL)
    ├─ Corre LLM con contexto
    └─ Retorna respuesta + citations
    ↓

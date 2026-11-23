@@ -157,7 +157,7 @@ export const KnowledgeBaseSection = () => {
               tsvector (Español) + GIN
             </p>
             <p className="text-[11px] text-slate-500">
-              BM25 / ts_rank_cd con normalización de acentos.
+              ts_rank_cd con normalización de acentos + trigramas (pg_trgm).
             </p>
           </div>
 

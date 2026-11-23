@@ -211,7 +211,7 @@ Los servidores MCP configurados por el usuario (`mcp_servers`) se invocan median
 3. Búsqueda (context/retrieval.py):
    - Full-text: ts_rank_cd + websearch_to_tsquery('spanish')
    - Vectorial: distancia coseno (embedding <=> vector)
-   - Fallback BM25 en Python (rank-bm25)
+   - Fallback por trigramas (pg_trgm word_similarity, o ILIKE si no está la extensión)
 4. core/index_refresher mantiene el índice actualizado
 ```
 
@@ -300,7 +300,7 @@ Estado global mediante Context API; trabajos largos notificados vía `Background
 | Decisión | Razón | Trade-off |
 |----------|-------|-----------|
 | PostgreSQL + pgvector | Multi-usuario, RLS, FTS y vectores en un solo motor | Requiere servicio de BD |
-| Búsqueda híbrida FTS + vector (+ BM25 fallback) | Precisión léxica en español + semántica | Coste de embeddings e índices |
+| Búsqueda híbrida FTS + vector (+ fallback por trigramas) | Precisión léxica en español + semántica | Coste de embeddings e índices |
 | Valkey | Caché compartida entre workers | Dependencia adicional obligatoria |
 | LiteLLM | Una sola abstracción multi-proveedor | Acoplamiento a su catálogo |
 | Persistencia en servidor (no en navegador) | Historial multi-dispositivo y aislado por tenant | Requiere conexión al backend |

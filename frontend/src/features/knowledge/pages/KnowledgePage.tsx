@@ -820,7 +820,7 @@ export const KnowledgePage = () => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Verificador de Recuperación RAG (PostgreSQL full-text + BM25)
+                Verificador de Recuperación RAG (PostgreSQL vectorial + full-text + trigramas)
               </h2>
               <p className="text-xs text-slate-500">
                 Prueba qué fragmentos son recuperados y clasificados por relevancia ante una consulta.

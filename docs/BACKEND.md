@@ -33,12 +33,12 @@ backend/app/
 │   ├── settings.py            # Configuración, salud
 │   └── history.py             # Historial de conversaciones
 │
-├── context/                     # RAG Engine (PostgreSQL full-text/vectorial + BM25)
+├── context/                     # RAG Engine (PostgreSQL vectorial + full-text + trigramas)
 │   ├── __init__.py
 │   ├── models.py              # ContextChunk, ContextBundle
 │   ├── knowledge.py           # Ingesta, chunking y almacenamiento en PostgreSQL
 │   ├── knowledge_migration.py # Migración de datos legados a PostgreSQL, export y recovery
-│   ├── retrieval.py           # Búsqueda híbrida (full-text/vectorial + BM25 fallback)
+│   ├── retrieval.py           # Búsqueda híbrida (vectorial → full-text → trigramas)
 │   └── service.py             # Orquestación (assemble_context)
 │
 ├── core/                        # Núcleo de infraestructura
