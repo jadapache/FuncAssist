@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from typing import Any, List, Optional
 
+from app.ai.policies import resolve_intent_max_tokens
 from app.ai.providers.base import AIMessage, AIProvider
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_input_character_budget(provider_id: str) -> int:
@@ -104,12 +108,16 @@ async def map_reduce_condense_context(
                 AIMessage(role="user", content=f"[PARTE {idx + 1} DE {len(raw_chunks)}]:\n{c}"),
             ]
             try:
-                res = await provider.complete(messages, max_tokens=1000)
+                res = await provider.complete(messages, max_tokens=resolve_intent_max_tokens("map_chunk"))
                 summary_txt = res.text.strip()
                 if summary_txt:
                     return f"--- Hallazgos Parte {idx + 1} ---\n{summary_txt}"
-            except Exception:
-                pass
+                logger.warning("Map-reduce chunk %d/%d returned an empty summary; using an excerpt", idx + 1, len(raw_chunks))
+            except Exception as exc:
+                logger.warning(
+                    "Map-reduce chunk %d/%d failed with model %s; using an excerpt: %s",
+                    idx + 1, len(raw_chunks), getattr(provider, "default_model", "?"), exc, exc_info=True,
+                )
             return f"--- Extracto Parte {idx + 1} ---\n{c[:1200]}"
 
     tasks = [_process_chunk(idx, c) for idx, c in enumerate(raw_chunks)]
@@ -129,8 +137,12 @@ async def map_reduce_condense_context(
         AIMessage(role="user", content=combined_map),
     ]
     try:
-        reduce_res = await provider.complete(messages, max_tokens=1500)
+        reduce_res = await provider.complete(messages, max_tokens=resolve_intent_max_tokens("reduce"))
         final_txt = reduce_res.text.strip()
         return final_txt if final_txt else combined_map[:target_budget]
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Map-reduce final synthesis failed with model %s; truncating the combined summaries: %s",
+            getattr(provider, "default_model", "?"), exc, exc_info=True,
+        )
         return combined_map[:target_budget]

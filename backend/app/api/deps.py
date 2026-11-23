@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, AsyncGenerator, Generator
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -46,6 +47,24 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     yield session
 
 
+# get_db_session commits when its dependency scope ends. By default (FastAPI >= 0.118) that is after
+# the response has been sent, so a failed commit is invisible to the client. FastAPI >= 0.121 accepts
+# `Depends(..., scope="function")`, which ends the dependency when the endpoint returns: the commit
+# then happens before the response and a failure becomes an error response.
+# Streaming endpoints must keep the session until the stream ends, so they use the request scope.
+_DEPENDS_SUPPORTS_SCOPE = "scope" in inspect.signature(Depends).parameters
+
+
+def _db_session_dependency(scope: str) -> Any:
+  if _DEPENDS_SUPPORTS_SCOPE:
+    return Depends(get_db_session, scope=scope)
+  return Depends(get_db_session)
+
+
+FUNCTION_SCOPED_SESSION = _db_session_dependency("function")
+REQUEST_SCOPED_SESSION = _db_session_dependency("request")
+
+
 def get_sync_db_session() -> Generator[Session, None]:
   """Dependency provider for sync Session."""
   with get_sync_db() as session:
@@ -53,21 +72,21 @@ def get_sync_db_session() -> Generator[Session, None]:
 
 
 def get_user_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> IUserRepository:
   """Dependency provider for User Repository."""
   return UserRepository(session)
 
 
 def get_mcp_server_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> IMcpServerRepository:
   """Dependency provider for McpServer Repository."""
   return McpServerRepository(session)
 
 
 def get_organization_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> IOrganizationRepository:
   """Dependency provider for Organization Repository."""
   return OrganizationRepository(session)
@@ -95,49 +114,56 @@ def get_settings_repository(
 
 
 def get_chat_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> ChatRepository:
   """Dependency provider for Chat Repository."""
   return ChatRepository(session)
 
 
+def get_streaming_chat_repository(
+  session: AsyncSession = REQUEST_SCOPED_SESSION,
+) -> ChatRepository:
+  """Chat Repository for streaming endpoints: the session stays open until the stream finishes."""
+  return ChatRepository(session)
+
+
 def get_standup_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> StandupRepository:
   """Dependency provider for Standup Repository."""
   return StandupRepository(session)
 
 
 def get_prd_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> PRDRepository:
   """Dependency provider for PRD Repository."""
   return PRDRepository(session)
 
 
 def get_test_plan_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> TestPlanRepository:
   """Dependency provider for Test Plan Repository."""
   return TestPlanRepository(session)
 
 
 def get_ai_template_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> IAITemplateRepository:
   """Dependency provider for AITemplate Repository."""
   return AITemplateRepository(session)
 
 
 def get_transcription_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> ITranscriptionRepository:
   """Dependency provider for Transcription Repository."""
   return TranscriptionRepository(session)
 
 
 def get_corporate_template_repository(
-  session: AsyncSession = Depends(get_db_session),
+  session: AsyncSession = FUNCTION_SCOPED_SESSION,
 ) -> ICorporateTemplateRepository:
   """Dependency provider for Corporate Template Repository."""
   return CorporateTemplateRepository(session)

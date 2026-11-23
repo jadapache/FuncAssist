@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
-from app.ai.logging import list_logs
+from app.ai.logging import list_logs, summarize_logs
 from app.ai.templates import (
     get_prompt,
     get_rubric,
@@ -247,20 +247,7 @@ async def ai_logs(limit: int = 20) -> dict[str, Any]:
 @router.get("/logs/stats")
 @handle_grounded_errors
 async def ai_logs_stats(limit: int = 100) -> dict[str, Any]:
-    """Summary dashboard of token usage, latency and costs."""
+    """Summary dashboard: tokens, cost, p50/p95 latency and TTFT, fallback/cache/error rates, routes."""
     logs = await asyncio.to_thread(list_logs, limit=limit)
-    total_calls = len(logs)
-    total_prompt_tokens = sum(l.get("prompt_tokens") or 0 for l in logs)
-    total_completion_tokens = sum(l.get("completion_tokens") or 0 for l in logs)
-    total_cost = sum(l.get("cost_usd") or 0.0 for l in logs)
-    durations = [l.get("duration_ms") for l in logs if l.get("duration_ms")]
-
-    avg_duration = sum(durations) / len(durations) if durations else 0.0
-    return {
-        "total_calls": total_calls,
-        "total_prompt_tokens": total_prompt_tokens,
-        "total_completion_tokens": total_completion_tokens,
-        "total_cost_usd": round(total_cost, 4),
-        "avg_duration_ms": round(avg_duration, 2),
-    }
+    return summarize_logs(logs)
 

@@ -67,6 +67,7 @@ class AIProvider(ABC):
     *,
     model: str | None = None,
     max_tokens: int | None = None,
+    **extra: Any,
   ) -> AICompletion:
     raise NotImplementedError
 
@@ -77,6 +78,13 @@ class AIProvider(ABC):
     *,
     model: str | None = None,
     max_tokens: int | None = None,
+    usage_sink: dict[str, Any] | None = None,
+    **extra: Any,
   ):
+    """Yield text deltas; fill `usage_sink` (tokens, finish_reason, tool_calls...) at the end."""
     raise NotImplementedError
+
+  def supports_tools(self, model: str | None = None) -> bool:
+    """Whether the model can run the tool-calling agent loop. Conservative default."""
+    return False
 

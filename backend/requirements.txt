@@ -1,4 +1,4 @@
-fastapi>=0.111.0
+fastapi>=0.121.0  # Depends(scope="function"): commit before responding (app/api/deps.py)
 uvicorn[standard]>=0.29.0
 httpx>=0.28.0
 pydantic>=2.10.0

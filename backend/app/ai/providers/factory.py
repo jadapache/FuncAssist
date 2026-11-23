@@ -6,6 +6,7 @@ import hashlib
 import os
 from typing import Any, Optional
 
+from app.ai.catalog import pick_model
 from app.ai.endpoint_security import validate_remote_endpoint_url
 from app.ai.providers.base import AIProvider
 from app.ai.providers.implementations import LiteLLMProvider
@@ -66,9 +67,21 @@ def resolve_provider(
   base_url: str | None = None,
   user_id: str | None = None,
   tier: str = "main",
+  main_model: str | None = None,
 ) -> AIProvider:
+  """Build (or reuse) the provider for a request.
+
+  Model resolution, most specific first:
+  - main tier: `model_name` → configured model → catalog pick for the tier → registry default.
+  - fast tier: `model_name` → configured fast model → catalog pick for the tier → the main model.
+    `main_model` lets the caller name the main model actually in use (e.g. a per-request override);
+    the fast provider retries once with it if its own model no longer exists.
+  User settings (model, fast model, fallbacks) apply only when the request targets the configured
+  provider: they name that provider's models.
+  """
   config = get_ai_settings(user_id=user_id)
-  target_name = (provider_name or config.get("provider") or "").lower()
+  configured_provider = (config.get("provider") or "").lower()
+  target_name = (provider_name or configured_provider).lower()
 
   if target_name in FORBIDDEN_BACKEND_PROVIDERS:
     raise ValueError(
@@ -76,28 +89,32 @@ def resolve_provider(
       "La inferencia local se ejecuta exclusivamente en el navegador mediante WebLLM."
     )
 
-  chosen_model = model_name or config.get("model") or ""
-  if chosen_model.lower().endswith(".gguf"):
+  spec = find_provider_spec(target_name)
+  same_provider = bool(spec) and find_provider_spec(configured_provider) is spec
+  user_model = model_name or (config.get("model") if same_provider else None) or ""
+  if user_model.lower().endswith(".gguf"):
     raise ValueError("Modelos GGUF no están admitidos en el backend.")
 
-  spec = find_provider_spec(target_name)
   if not spec:
     raise ValueError(
       f"No valid AI provider found for '{target_name}'. "
       "Configure provider in Settings (groq | gemini | claude | openai | ollama_remote | openrouter | deepseek)."
     )
 
+  resolved_main = main_model or user_model or pick_model(spec.id, "main", spec.default_model) or spec.default_model
+  not_found_fallback: str | None = None
   if tier == "fast":
-    chosen_model = model_name or config.get("fast_model") or spec.fast_model or chosen_model or spec.default_model
+    configured_fast = config.get("fast_model") if same_provider else None
+    chosen_model = model_name or configured_fast or pick_model(spec.id, "fast", spec.fast_model) or resolved_main
+    if chosen_model != resolved_main:
+      not_found_fallback = resolved_main
   else:
-    chosen_model = chosen_model or spec.default_model
+    chosen_model = resolved_main
 
   # Fallbacks belong to the main tier only: the fast tier is already the cheap path,
   # and the user's list refers to their main provider's models.
-  fallbacks = (config.get("fallback_models") or []) if tier == "main" else []
-  if tier == "main" and provider_name and provider_name.lower() != (config.get("provider") or "").lower():
-    fallbacks = []  # list was configured for a different provider
-  fb_key = tuple(fallbacks)
+  fallbacks = (config.get("fallback_models") or []) if tier == "main" and same_provider else []
+  fb_key = (tuple(fallbacks), not_found_fallback)
 
   if spec.id == "ollama_remote" or "ollama" in spec.aliases:
     target_base_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
@@ -109,7 +126,13 @@ def resolve_provider(
     cache_key = (user_id, target_name, chosen_model, "", target_base_url, fb_key)
     if cache_key in _PROVIDER_CACHE:
       return _PROVIDER_CACHE[cache_key]
-    provider = LiteLLMProvider(spec, base_url=target_base_url, default_model=chosen_model, fallback_models=fallbacks)
+    provider = LiteLLMProvider(
+      spec,
+      base_url=target_base_url,
+      default_model=chosen_model,
+      fallback_models=fallbacks,
+      not_found_fallback=not_found_fallback,
+    )
     _PROVIDER_CACHE[cache_key] = provider
     return provider
 
@@ -128,6 +151,12 @@ def resolve_provider(
   if cache_key in _PROVIDER_CACHE:
     return _PROVIDER_CACHE[cache_key]
 
-  provider = LiteLLMProvider(spec, api_key=key, default_model=chosen_model, fallback_models=fallbacks)
+  provider = LiteLLMProvider(
+    spec,
+    api_key=key,
+    default_model=chosen_model,
+    fallback_models=fallbacks,
+    not_found_fallback=not_found_fallback,
+  )
   _PROVIDER_CACHE[cache_key] = provider
   return provider
