@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { inferenceService } from '../../ai/services/InferenceService'
 import { transcriptionApi } from '../api/transcriptionApi'
-import { condenseTranscriptForBrowser } from '../hooks/useTranscriptionActions'
+import { condenseTranscriptForBrowser, formatTranscriptForPrompt } from '../utils/transcriptFormat'
 import { api, type CorporateTemplate } from '../../../api/client'
 import { draftsApi } from '../../../features/document/api/draftsApi'
 import { useToast } from '../../../context/ToastContext'
@@ -149,7 +149,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     if (!transcriptionId) return ''
     try {
       const transResult = await transcriptionApi.getTranscriptionResult(transcriptionId)
-      const rawText = transResult.text || ''
+      const rawText = formatTranscriptForPrompt(transResult) || transResult.text || ''
       const summary = transResult.summary?.summary_text || ''
       const insights = transResult.summary?.key_insights?.join('\n- ') || ''
       const safeText = condenseTranscriptForBrowser(rawText, 10000)

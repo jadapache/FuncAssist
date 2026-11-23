@@ -8,7 +8,6 @@ import React, {
   useState,
 } from 'react'
 import { api } from '../api/client'
-import { transcriptionApi } from '../features/transcription/api/transcriptionApi'
 import { useToast } from './ToastContext'
 
 export interface BackgroundJobItem {
@@ -39,6 +38,11 @@ interface BackgroundJobContextValue {
   addOrUpdateJob: (job: BackgroundJobItem) => void
   removeJob: (id: string) => void
   cancelJob: (id: string) => Promise<void>
+  /**
+   * Replaces the jobs published by a feature (e.g. "transcription"). Their state lives in that
+   * feature; cancel and dismiss go through each item's own callbacks.
+   */
+  setExternalJobs: (source: string, items: BackgroundJobItem[]) => void
   activeDownloadsCount: number
   activeTranscriptionsCount: number
   registerDownloadJob: (modelId: string, title?: string) => void
@@ -46,45 +50,78 @@ interface BackgroundJobContextValue {
 
 const BackgroundJobContext = createContext<BackgroundJobContextValue | undefined>(undefined)
 
+const isTerminalStatus = (status: BackgroundJobItem['status']) =>
+  status === 'complete' || status === 'failed' || status === 'cancelled'
+
 /**
  * BackgroundJobProvider
- * Generic background job presentation coordinator for floating toasts and global counters.
- * Domain-specific stream/polling management (e.g. transcription SSE) is delegated
- * to feature providers (e.g. TranscriptionProvider).
+ * Presentation coordinator for the floating job widget and global counters. Model downloads are
+ * tracked here; features with their own job state (transcription) publish a read-only
+ * projection through `setExternalJobs`.
  */
 export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { toast } = useToast()
 
-  // Dynamic jobs collection in memory
+  // Jobs owned by this provider (model downloads)
   const [jobsMap, setJobsMap] = useState<Record<string, BackgroundJobItem>>({})
   const jobsMapRef = useRef(jobsMap)
   useEffect(() => {
     jobsMapRef.current = jobsMap
   }, [jobsMap])
 
+  // Jobs published by features, by source
+  const [externalJobs, setExternalJobsState] = useState<Record<string, BackgroundJobItem[]>>({})
+  const externalJobsRef = useRef(externalJobs)
+  useEffect(() => {
+    externalJobsRef.current = externalJobs
+  }, [externalJobs])
+
+  const findExternal = useCallback((id: string): BackgroundJobItem | undefined => {
+    for (const items of Object.values(externalJobsRef.current)) {
+      const found = items.find((item) => item.id === id)
+      if (found) return found
+    }
+    return undefined
+  }, [])
+
+  const setExternalJobs = useCallback((source: string, items: BackgroundJobItem[]) => {
+    setExternalJobsState((prev) => {
+      if (items.length === 0 && !prev[source]) return prev
+      return { ...prev, [source]: items }
+    })
+  }, [])
+
   const dismissTimersRef = useRef<Record<string, number>>({})
   const dismissedJobsRef = useRef<Set<string>>(new Set())
   const cancelledJobsRef = useRef<Set<string>>(new Set())
 
   // 1. Helper to remove a job (manual dismiss or timer expiry)
-  const removeJob = useCallback((id: string) => {
-    dismissedJobsRef.current.add(id)
-    cancelledJobsRef.current.delete(id)
-    if (dismissTimersRef.current[id]) {
-      window.clearTimeout(dismissTimersRef.current[id])
-      delete dismissTimersRef.current[id]
-    }
-    setJobsMap((prev) => {
-      const copy = { ...prev }
-      delete copy[id]
-      return copy
-    })
-  }, [])
+  const removeJob = useCallback(
+    (id: string) => {
+      const external = findExternal(id)
+      if (external) {
+        external.onDismiss?.()
+        return
+      }
+      dismissedJobsRef.current.add(id)
+      cancelledJobsRef.current.delete(id)
+      if (dismissTimersRef.current[id]) {
+        window.clearTimeout(dismissTimersRef.current[id])
+        delete dismissTimersRef.current[id]
+      }
+      setJobsMap((prev) => {
+        const copy = { ...prev }
+        delete copy[id]
+        return copy
+      })
+    },
+    [findExternal],
+  )
 
-  // 2. Helper to add or update any job
+  // 2. Helper to add or update a download job
   const addOrUpdateJob = useCallback(
     (job: BackgroundJobItem) => {
-      const isTerminal = job.status === 'complete' || job.status === 'failed' || job.status === 'cancelled'
+      const isTerminal = isTerminalStatus(job.status)
 
       // If job has been cancelled, reject any incoming non-cancelled update
       if (cancelledJobsRef.current.has(job.id) && job.status !== 'cancelled') {
@@ -98,9 +135,6 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       // If a job becomes active again, allow showing it
       if (!isTerminal && dismissedJobsRef.current.has(job.id)) {
         dismissedJobsRef.current.delete(job.id)
-      }
-      if (!isTerminal && cancelledJobsRef.current.has(job.id)) {
-        cancelledJobsRef.current.delete(job.id)
       }
 
       setJobsMap((prev) => ({
@@ -120,29 +154,28 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
             delete dismissTimersRef.current[job.id]
           }, timeoutMs)
         }
-      } else {
+      } else if (dismissTimersRef.current[job.id]) {
         // If back to in-progress, clear any pending dismissal
-        if (dismissTimersRef.current[job.id]) {
-          window.clearTimeout(dismissTimersRef.current[job.id])
-          delete dismissTimersRef.current[job.id]
-        }
+        window.clearTimeout(dismissTimersRef.current[job.id])
+        delete dismissTimersRef.current[job.id]
       }
     },
-    [removeJob]
+    [removeJob],
   )
 
   // 3. Cancel a job by ID
   const cancelJob = useCallback(
     async (id: string) => {
+      const external = findExternal(id)
+      if (external) {
+        external.onCancel?.()
+        return
+      }
+
       cancelledJobsRef.current.add(id)
       const current = jobsMapRef.current[id]
-      const isTranscription =
-        current?.type === 'transcription' ||
-        id.startsWith('trans_') ||
-        (id.includes('-') && id.length >= 32)
 
       // Set cancelling state immediately for prompt visual feedback
-      const cancellingText = isTranscription ? 'Cancelando transcripción...' : 'Cancelando descarga...'
       setJobsMap((prev) => {
         if (!prev[id]) return prev
         return {
@@ -150,41 +183,31 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
           [id]: {
             ...prev[id],
             status: 'cancelled',
-            stageText: cancellingText,
+            stageText: 'Cancelando descarga...',
             eta: null,
           },
         }
       })
 
-      if (isTranscription) {
-        try {
-          await transcriptionApi.cancelTranscription(id)
-          toast.info('Transcripción cancelada.')
-        } catch (e) {
-          console.warn(`Error al cancelar transcripción ${id}:`, e)
-        }
-      } else {
-        try {
-          await api.cancelBuiltinModelDownload(id)
-          toast.info(`Descarga del modelo ${id} cancelada.`)
-        } catch (e) {
-          console.warn(`Error al cancelar descarga ${id}:`, e)
-        }
+      try {
+        await api.cancelBuiltinModelDownload(id)
+        toast.info(`Descarga del modelo ${id} cancelada.`)
+      } catch (e) {
+        console.warn(`Error al cancelar descarga ${id}:`, e)
       }
 
       // Mark final cancelled status in UI and reset progress
-      const cancelledText = isTranscription ? 'Transcripción cancelada' : 'Descarga cancelada'
       addOrUpdateJob({
         id,
-        type: current?.type || (isTranscription ? 'transcription' : 'download'),
-        title: current?.title || (isTranscription ? 'Transcripción' : 'Descarga'),
+        type: current?.type || 'download',
+        title: current?.title || 'Descarga',
         progress: 0,
         status: 'cancelled',
-        stageText: cancelledText,
+        stageText: 'Descarga cancelada',
         eta: null,
       })
     },
-    [addOrUpdateJob, toast]
+    [addOrUpdateJob, findExternal, toast],
   )
 
   // 4. Register a download job immediately
@@ -217,14 +240,14 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })
     },
-    [cancelJob, removeJob]
+    [cancelJob, removeJob],
   )
 
   // 5. Polling loop for active model downloads
   useEffect(() => {
     const pollInterval = window.setInterval(async () => {
       const hasActive = Object.values(jobsMapRef.current).some(
-        (j) => j.type === 'download' && j.status !== 'complete' && j.status !== 'failed' && j.status !== 'cancelled'
+        (j) => j.type === 'download' && !isTerminalStatus(j.status)
       )
       if (!hasActive) return
 
@@ -300,25 +323,18 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [])
 
   // Derived memoized values
-  const jobsList = useMemo(() => Object.values(jobsMap), [jobsMap])
+  const jobsList = useMemo(
+    () => [...Object.values(jobsMap), ...Object.values(externalJobs).flat()],
+    [jobsMap, externalJobs],
+  )
 
   const activeDownloadsCount = useMemo(
-    () =>
-      jobsList.filter(
-        (j) => j.type === 'download' && j.status !== 'complete' && j.status !== 'failed' && j.status !== 'cancelled'
-      ).length,
+    () => jobsList.filter((j) => j.type === 'download' && !isTerminalStatus(j.status)).length,
     [jobsList]
   )
 
   const activeTranscriptionsCount = useMemo(
-    () =>
-      jobsList.filter(
-        (j) =>
-          j.type === 'transcription' &&
-          j.status !== 'complete' &&
-          j.status !== 'failed' &&
-          j.status !== 'cancelled'
-      ).length,
+    () => jobsList.filter((j) => j.type === 'transcription' && !isTerminalStatus(j.status)).length,
     [jobsList]
   )
 
@@ -328,6 +344,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       addOrUpdateJob,
       removeJob,
       cancelJob,
+      setExternalJobs,
       activeDownloadsCount,
       activeTranscriptionsCount,
       registerDownloadJob,
@@ -337,6 +354,7 @@ export const BackgroundJobProvider: React.FC<{ children: React.ReactNode }> = ({
       addOrUpdateJob,
       removeJob,
       cancelJob,
+      setExternalJobs,
       activeDownloadsCount,
       activeTranscriptionsCount,
       registerDownloadJob,

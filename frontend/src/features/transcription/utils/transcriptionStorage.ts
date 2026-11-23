@@ -1,49 +1,67 @@
-import type { TranscriptionProgress } from '../api/transcriptionApi'
+import type { JobKind, TranscriptionJob } from '../context/transcriptionJobs'
+import { isTerminalStage } from './transcriptionStages'
 
 export const LOCAL_STORAGE_ACTIVE_JOBS = 'qa_active_transcription_jobs'
 
-function isPersistableJob(
-  id: string,
-  job: TranscriptionProgress,
-  clientJobIds?: Set<string>,
-): boolean {
-  if (id.startsWith('upload_')) return false
-  if (clientJobIds?.has(id)) return false
-  if (job.model_info === 'Whisper Web (Client)') return false
-  const terminalStatuses = ['complete', 'failed', 'cancelled']
-  return !terminalStatuses.includes(job.status)
+/**
+ * Only a reference to each running job is kept locally; its real state comes from
+ * `GET /transcription/jobs/active` after login.
+ */
+export interface StoredJobRef {
+  id: string
+  title: string
+  kind: JobKind
+  startedAt: number
 }
 
-export function loadStoredActiveJobs(): Record<string, TranscriptionProgress> {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_ACTIVE_JOBS)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, TranscriptionProgress>
-    const valid: Record<string, TranscriptionProgress> = {}
-    for (const [id, job] of Object.entries(parsed)) {
-      if (isPersistableJob(id, job)) {
-        valid[id] = job
-      }
-    }
-    return valid
-  } catch (err) {
-    console.warn('Error reading active jobs from storage:', err)
-    return {}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function toRef(value: unknown, fallbackId?: string): StoredJobRef | null {
+  if (!isRecord(value)) return null
+  const id = typeof value.id === 'string' && value.id ? value.id : fallbackId
+  if (!id) return null
+  // Older versions stored the whole progress object: skip the ones already finished.
+  const stage = typeof value.stage === 'string' ? value.stage : typeof value.status === 'string' ? value.status : ''
+  if (stage && isTerminalStage(stage)) return null
+  return {
+    id,
+    title: typeof value.title === 'string' && value.title ? value.title : 'Transcripción',
+    kind: value.kind === 'browser' ? 'browser' : 'server',
+    startedAt: typeof value.startedAt === 'number' ? value.startedAt : Date.now(),
   }
 }
 
-export function saveActiveJobsToStorage(
-  jobs: Record<string, TranscriptionProgress>,
-  clientJobIds?: Set<string>,
-): void {
+export function loadStoredJobRefs(): StoredJobRef[] {
   try {
-    const activeOnly: Record<string, TranscriptionProgress> = {}
-    for (const [id, job] of Object.entries(jobs)) {
-      if (isPersistableJob(id, job, clientJobIds)) {
-        activeOnly[id] = job
-      }
+    const raw = localStorage.getItem(LOCAL_STORAGE_ACTIVE_JOBS)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    const entries: Array<[string | undefined, unknown]> = Array.isArray(parsed)
+      ? parsed.map((item) => [undefined, item])
+      : isRecord(parsed)
+        ? Object.entries(parsed)
+        : []
+    const refs: StoredJobRef[] = []
+    for (const [key, value] of entries) {
+      const ref = toRef(value, key)
+      if (ref) refs.push(ref)
     }
-    localStorage.setItem(LOCAL_STORAGE_ACTIVE_JOBS, JSON.stringify(activeOnly))
+    return refs
+  } catch (err) {
+    console.warn('Error reading active jobs from storage:', err)
+    return []
+  }
+}
+
+export function saveJobRefs(jobs: TranscriptionJob[]): void {
+  try {
+    const refs: StoredJobRef[] = jobs
+      .filter((job) => !isTerminalStage(job.stage))
+      .map((job) => ({ id: job.id, title: job.title, kind: job.kind, startedAt: job.startedAt }))
+    if (refs.length === 0) localStorage.removeItem(LOCAL_STORAGE_ACTIVE_JOBS)
+    else localStorage.setItem(LOCAL_STORAGE_ACTIVE_JOBS, JSON.stringify(refs))
   } catch (err) {
     console.warn('Could not persist active jobs to localStorage:', err)
   }
@@ -53,7 +71,7 @@ export function generateTranscriptionSlug(title: string, id: string): string {
   const cleaned = (title || 'transcripcion')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^\w\s-]/g, '')
     .trim()
     .replace(/[\s_-]+/g, '-')
@@ -62,4 +80,3 @@ export function generateTranscriptionSlug(title: string, id: string): string {
   const shortId = id.slice(0, 8)
   return cleaned ? `${cleaned}-${shortId}` : id
 }
-
