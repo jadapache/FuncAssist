@@ -166,6 +166,7 @@ export function useTranscriptionJobRunners(deps: RunnerDeps) {
           signal: controller.signal,
           diarize: options.diarize ?? availableModels?.browser_diarization ?? false,
           numSpeakers: options.numSpeakers ?? null,
+          consentConfirmed: options.consentConfirmed === true,
           onWarning: (message) => depsRef.current.toast.warning(message, 'Interlocutores'),
           onStage: (update) =>
             depsRef.current.dispatch({

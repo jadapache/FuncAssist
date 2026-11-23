@@ -99,6 +99,24 @@ async def _write_limited(upload: UploadFile, dest: Path, limit: int) -> int:
   return size
 
 
+def _require_consent(confirmed: bool) -> None:
+  """PRI-04 (Ley 1581 de 2012): recordings need the participants' prior, informed consent."""
+  if not confirmed:
+    raise HTTPException(
+      status_code=400,
+      detail="Debes confirmar que los participantes autorizaron la grabación y su tratamiento (Ley 1581 de 2012).",
+    )
+
+
+def _consent_record(current_user: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "confirmed": True,
+    "confirmed_by": current_user.get("username"),
+    "confirmed_at": datetime.now(timezone.utc).isoformat(),
+    "legal_basis": "Ley 1581 de 2012 - autorización previa e informada",
+  }
+
+
 # --- upload and jobs ---------------------------------------------------------------------------
 
 
@@ -116,11 +134,7 @@ async def upload_transcription_media(
   The uploader must confirm that every participant gave prior, informed consent to the recording and its processing. 
   The confirmation is stored with the record.
   """
-  if not consent_confirmed:
-    raise HTTPException(
-      status_code=400,
-      detail="Debes confirmar que los participantes autorizaron la grabación y su tratamiento (Ley 1581 de 2012).",
-    )
+  _require_consent(consent_confirmed)
   tid = _new_id(transcription_id)
   existing = await records.get_record(tid)
   if existing is not None:
@@ -131,12 +145,7 @@ async def upload_transcription_media(
   except TranscriptionJobError as exc:
     raise _http_error(exc) from exc
   record = service.media_entry_for_upload(entry, current_user)
-  record["consent"] = {
-    "confirmed": True,
-    "confirmed_by": current_user.get("username"),
-    "confirmed_at": datetime.now(timezone.utc).isoformat(),
-    "legal_basis": "Ley 1581 de 2012 - autorización previa e informada",
-  }
+  record["consent"] = _consent_record(current_user)
   await records.save_record(record)
   return {
     "ok": True,
@@ -236,8 +245,11 @@ async def submit_client_transcription(
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
   """Persist a transcript decoded in the browser (rule cleanup applied here)."""
+  _require_consent(req.consent_confirmed)
+  payload = req.model_dump(exclude={"consent_confirmed"})
+  payload["consent"] = _consent_record(current_user)
   try:
-    saved, summary = await service.submit_client_transcription(req.model_dump(), current_user)
+    saved, summary = await service.submit_client_transcription(payload, current_user)
   except TranscriptionJobError as exc:
     raise _http_error(exc) from exc
   saved.pop("user_id", None)

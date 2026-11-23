@@ -229,3 +229,25 @@ def test_upload_requires_recording_consent(client, sample_wav_bytes):
   )
   assert resp.status_code == 400
   assert "1581" in resp.json()["detail"]
+
+
+def test_upload_stores_consent_record(client, sample_wav_bytes):
+  import asyncio
+  from app.features.transcription import records
+
+  resp = client.post(
+    "/api/transcription/upload",
+    files={"file": ("sesion.wav", sample_wav_bytes, "audio/wav")},
+    data={"title": "Con consentimiento", "consent_confirmed": "true"},
+  )
+  assert resp.status_code == 200, resp.text
+  saved = asyncio.run(records.get_record(resp.json()["transcription_id"]))
+  assert saved["consent"]["confirmed"] is True
+  assert "1581" in saved["consent"]["legal_basis"]
+
+
+def test_browser_transcription_requires_consent(client):
+  payload = {"id": "browser-no-consent", "title": "Navegador", "text": "hola", "segments": []}
+  resp = client.post("/api/transcription/submit-client-transcription", json=payload)
+  assert resp.status_code == 400
+  assert "1581" in resp.json()["detail"]

@@ -198,8 +198,8 @@ export type ClientTranscriptionPayload = {
   duration_seconds: number
   language?: string
   generate_summary_now?: boolean
-  /** "browser" when segment speaker ids come from in-browser diarization. */
   diarization?: 'browser' | 'none'
+  consent_confirmed: boolean
 }
 
 /** HTTP error carrying the response status (413, 404…). */
