@@ -143,7 +143,8 @@ class TestSectionGeneration:
     prov.complete = AsyncMock(side_effect=fake_complete)
     plan = DocumentPlan("Doc", "md", "", [PlanSection("A"), PlanSection("B"), PlanSection("C")])
 
-    full = "".join([c async for c in generate_sections_stream(plan, "SYS", "CTX", prov)])
+    # The stream also yields AgentEvents (the section plan); only text chunks build the document.
+    full = "".join([c async for c in generate_sections_stream(plan, "SYS", "CTX", prov) if isinstance(c, str)])
 
     assert full.index("## A") < full.index("## B") < full.index("## C")
     assert full.startswith("<chat>") and full.rstrip().endswith("</artifact>")
