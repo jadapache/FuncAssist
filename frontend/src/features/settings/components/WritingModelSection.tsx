@@ -11,6 +11,8 @@ import type { AISettings, ModelCatalogItem } from '../../../api/client'
 import { BuiltinModelsList } from './writing/BuiltinModelsList'
 import { CloudModelSelector } from './writing/CloudModelSelector'
 import { OllamaManager } from './writing/OllamaManager'
+import { TierModelsSelector } from './writing/TierModelsSelector'
+import { pickDefaultCloudModel } from './writing/defaultModels'
 import { DEFAULT_WEBLLM_MODEL } from '../../ai/catalogs/clientCatalog'
 
 export type WritingModelSectionProps = {
@@ -19,6 +21,10 @@ export type WritingModelSectionProps = {
   setProvider: (p: string) => void
   model: string
   setModel: (m: string) => void
+  fastModel: string
+  setFastModel: (m: string) => void
+  fallbackModels: string[]
+  setFallbackModels: (models: string[]) => void
   isWritingOpen: boolean
   setIsWritingOpen: (open: boolean) => void
   showEndpointSection: boolean
@@ -52,6 +58,10 @@ export const WritingModelSection = ({
   setProvider,
   model,
   setModel,
+  fastModel,
+  setFastModel,
+  fallbackModels,
+  setFallbackModels,
   isWritingOpen,
   setIsWritingOpen,
   showEndpointSection,
@@ -133,14 +143,8 @@ export const WritingModelSection = ({
                 } else if (newProv === 'ollama_remote') {
                   setModel(ollamaModels.length > 0 ? ollamaModels[0] : 'qwen2.5:2b')
                   void fetchOllamaModels(undefined, false)
-                } else if (newProv === 'groq') {
-                  setModel('llama-3.3-70b-versatile')
-                } else if (newProv === 'gemini') {
-                  setModel('gemini-2.5-flash')
-                } else if (newProv === 'openai') {
-                  setModel('gpt-4o-mini')
-                } else if (newProv === 'claude') {
-                  setModel('claude-3-5-haiku-latest')
+                } else {
+                  setModel(pickDefaultCloudModel(newProv, catalogModels))
                 }
               }}
               className="input-field text-sm font-medium text-slate-900 w-full bg-white border border-slate-300 rounded-xl py-2.5 px-3"
@@ -193,6 +197,18 @@ export const WritingModelSection = ({
               setClaudeKey={setClaudeKey}
               showKey={showKey}
               setShowKey={setShowKey}
+            />
+          )}
+
+          {!isBrowserMode && !isOllamaRemote && (
+            <TierModelsSelector
+              provider={provider}
+              mainModel={model}
+              catalogModels={catalogModels}
+              fastModel={fastModel}
+              setFastModel={setFastModel}
+              fallbackModels={fallbackModels}
+              setFallbackModels={setFallbackModels}
             />
           )}
 

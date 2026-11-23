@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react'
 import { generateArtifactSubtitle, parseMultipleArtifacts, parseStreamForChatAndArtifacts } from '../../../utils/artifactSplitter'
 import type { EphemeralAttachmentDoc } from '../api/docAgentApi'
 import { useAgentRun } from './useAgentRun'
+import { isBrowserLlmError } from '../../ai/errors/browserLlmErrors'
 import type { AgentRunState } from '../types/agentEvents'
 import type { ChatPersistMessage, DocumentArtifact, ChatConversation, ChatAttachment } from './useChatPersistence'
 import type { Artifact } from '../../../types/artifacts'
@@ -621,10 +622,9 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           return
         }
 
-        const isGpuError =
-          /device\s*(was\s*)?lost|gpu|dxgi|device_hung|0x887a0006|already\s*been\s*disposed|insufficient\s*memory|vram|memoria.*gr[aá]fica/i.test(
-            errMsg,
-          )
+        // In-browser model failures arrive already classified (no WebGPU / HTTP origin, out of
+        // memory, GPU timeout, prompt too long…) with their own message: show it as is.
+        const isGpuError = isBrowserLlmError(err)
 
         const isAuthError =
           /api\s*key|autenticaci[oó]n|authentication|unauthorized|401|forbidden|403|invalid_api_key/i.test(errMsg)
@@ -643,8 +643,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
 
         let displayMsg = errMsg
         if (isGpuError) {
-          displayMsg =
-            'La GPU se quedó sin memoria (VRAM) o se desconectó al ejecutar el modelo en el navegador. Te recomendamos seleccionar un modelo más ligero (ej. Llama 3.2 1B) en Configuración o utilizar un proveedor externo (Ollama o API en la nube).'
+          displayMsg = errMsg
         } else if (isAuthError) {
           displayMsg = 'Error: La API key guardada no es válida. Por favor actualízala en Configuración.'
         } else if (isRateLimitError) {

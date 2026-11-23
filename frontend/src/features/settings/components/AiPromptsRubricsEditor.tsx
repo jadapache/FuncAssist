@@ -1,3 +1,4 @@
+import { copyText } from '../../../core/browser/secureContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
@@ -140,7 +141,7 @@ export const AiPromptsRubricsEditor = () => {
 
   // Copy to clipboard
   const handleCopyJson = () => {
-    void navigator.clipboard.writeText(rawJsonText)
+    void copyText(rawJsonText)
     toast.success('JSON copiado al portapapeles')
   }
 

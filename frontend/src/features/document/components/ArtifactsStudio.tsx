@@ -1,3 +1,4 @@
+import { copyText } from '../../../core/browser/secureContext'
 import { useCallback, useEffect, useState } from 'react'
 import {
   FileText,
@@ -116,7 +117,7 @@ export const ArtifactsStudio = ({
   // Copy document text to clipboard
   const handleCopyContent = () => {
     if (!activeArtifact) return
-    navigator.clipboard.writeText(activeArtifact.content)
+    void copyText(activeArtifact.content)
     toast.success('Contenido copiado al portapapeles')
   }
 

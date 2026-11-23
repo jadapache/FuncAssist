@@ -8,7 +8,10 @@ export interface WebLLMModelDefinition {
   downloadSize: string
   vramRequiredMB: number
   vramFormatted: string
+  /** Display text of the context window used in the browser. */
   contextWindow: string
+  /** Context window (tokens) the model is loaded with in the browser; it sizes the KV cache. */
+  contextTokens?: number
   tier: ModelPreference
   requiredFeatures?: string[]
   isDownloaded?: boolean
@@ -16,6 +19,8 @@ export interface WebLLMModelDefinition {
 
 export interface HardwareProfile {
   hasWebGPU: boolean
+  /** HTTPS or localhost. On plain http://<IP> the browser hides WebGPU. */
+  secureContext: boolean
   hasShaderF16: boolean
   adapterName: string
   deviceMemoryGB: number

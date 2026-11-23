@@ -107,6 +107,7 @@ declare module 'lucide-react' {
   export const Rocket: LucideIcon
   export const RotateCcw: LucideIcon
   export const Save: LucideIcon
+  export const Scissors: LucideIcon
   export const Search: LucideIcon
   export const Send: LucideIcon
   export const Server: LucideIcon

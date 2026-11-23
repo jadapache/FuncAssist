@@ -1,3 +1,4 @@
+import { copyText } from '../../../core/browser/secureContext'
 /**
  * UniverErrorBoundary.tsx
  * Resilient React Error Boundary that prevents white-screen crashes in document and spreadsheet workspaces.
@@ -45,7 +46,7 @@ export class UniverErrorBoundary extends Component<Props, State> {
 
   private handleCopyFallback = () => {
     if (this.props.fallbackContent) {
-      void navigator.clipboard.writeText(this.props.fallbackContent)
+      void copyText(this.props.fallbackContent)
       this.setState({ copied: true })
       setTimeout(() => this.setState({ copied: false }), 2000)
     }
