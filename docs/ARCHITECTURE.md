@@ -54,7 +54,7 @@ Guía del diseño, patrones y decisiones arquitectónicas de FuncAssist (v0.8.0)
 └───────┬───────────────┬──────────────────┬───────────────────────┘
         ▼               ▼                  ▼
 ┌──────────────┐ ┌─────────────┐ ┌──────────────────────────────┐
-│ PostgreSQL 16│ │  Redis 7    │ │ Servicios externos           │
+│ PostgreSQL 16│ │  Valkey 8   │ │ Servicios externos           │
 │ + pgvector   │ │ caché       │ │ Jira · GitHub · GitLab       │
 │ RLS por      │ │ compartida  │ │ LLMs vía LiteLLM: OpenAI,    │
 │ usuario/org  │ │             │ │ Anthropic, Gemini, Groq,     │
@@ -73,10 +73,11 @@ Guía del diseño, patrones y decisiones arquitectónicas de FuncAssist (v0.8.0)
 |------------|----------------------------|-----|
 | `frontend` | nginx con el build de Vite | Sirve la SPA y hace proxy a `/api` (puerto `APP_PORT`, 6728 por defecto) |
 | `backend`  | `backend/Dockerfile`       | FastAPI/uvicorn en el puerto 8000, healthcheck en `/api/health` |
-| `db`       | `pgvector/pgvector:pg16`   | Base de datos relacional + vectores |
-| `redis`    | `redis:7-alpine` (AOF)     | Caché compartida |
+| `db`       | `pgvector/pgvector:0.8.7-pg16-bookworm`| Base de datos relacional + vectores |
+| `valkey`   | `valkey/valkey:8.1.12-alpine` (AOF) | Caché compartida |
+| `openbao` + `openbao-agent` | `openbao/openbao:2.7.3` | Gestión de secretos (SECRET_KEY, PBKDF2_SALT) |
 
-Variables obligatorias: `POSTGRES_PASSWORD`, `SECRET_KEY`, `PBKDF2_SALT`. El backend no arranca sin `DATABASE_URL` y `REDIS_URL`. También existe `render.yaml` para despliegue en Render.
+Variables obligatorias: `POSTGRES_PASSWORD`. `SECRET_KEY` y `PBKDF2_SALT` se leen desde OpenBao (ver `SECURITY_COMPLIANCE.md`). El backend no arranca sin `DATABASE_URL` y `VALKEY_URL`. También existe `render.yaml` para despliegue en Render.
 
 ---
 
@@ -87,7 +88,7 @@ Variables obligatorias: `POSTGRES_PASSWORD`, `SECRET_KEY`, `PBKDF2_SALT`. El bac
 - **HTTP** (`api/`): validación con Pydantic, autenticación, mapeo de errores (`middleware/error_handlers.py`).
 - **Negocio** (`features/`, `services/`, `context/`, `ai/`): orquestación y lógica pura.
 - **Datos** (`db/`): repositorios sobre SQLAlchemy async; sin SQL en los handlers.
-- **Infraestructura** (`core/`): configuración, secretos, RLS, Redis, almacenamiento en disco.
+- **Infraestructura** (`core/`): configuración, secretos, RLS, Valkey, almacenamiento en disco.
 
 ### 2. Inyección de dependencias
 
@@ -194,7 +195,7 @@ Mismo patrón para `ask`, `prd-checker`, `change-impact` y `qa/{feature_key}`.
 1. Usuario conecta (OAuth para Jira, PAT para GitHub/GitLab)
 2. Backend valida, cifra la credencial (SecretStore) y la guarda en
    user_integrations / user_jira_connections (o organization_integrations)
-3. Sync (integrations/sync.py) obtiene issues, PRs, commits; caché en Redis
+3. Sync (integrations/sync.py) obtiene issues, PRs, commits; caché en Valkey
 4. En RAG, assemble_context(sources=[...]) consulta el adapter vía registry
    y devuelve ContextChunks con source_type = jira | github | gitlab
 ```
@@ -300,7 +301,7 @@ Estado global mediante Context API; trabajos largos notificados vía `Background
 |----------|-------|-----------|
 | PostgreSQL + pgvector | Multi-usuario, RLS, FTS y vectores en un solo motor | Requiere servicio de BD |
 | Búsqueda híbrida FTS + vector (+ BM25 fallback) | Precisión léxica en español + semántica | Coste de embeddings e índices |
-| Redis | Caché compartida entre workers | Dependencia adicional obligatoria |
+| Valkey | Caché compartida entre workers | Dependencia adicional obligatoria |
 | LiteLLM | Una sola abstracción multi-proveedor | Acoplamiento a su catálogo |
 | Persistencia en servidor (no en navegador) | Historial multi-dispositivo y aislado por tenant | Requiere conexión al backend |
 | IA local en navegador | Privacidad, cero inferencia en servidor | Depende de WebGPU del cliente |

@@ -137,8 +137,8 @@ class Settings(BaseSettings):
   # Database Connection
   database_url: str | None = None
 
-  # Redis Cache Connection
-  redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+  # Valkey shared cache (Redis protocol)
+  valkey_url: str | None = Field(default=None, validation_alias="VALKEY_URL")
 
   # Knowledge Base Volume Mount Directory
   knowledge_data_dir: str | None = Field(default=None, validation_alias="KNOWLEDGE_DATA_DIR")
