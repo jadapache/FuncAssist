@@ -36,3 +36,19 @@ jobs:
       - run: npm run typecheck --prefix frontend
       - run: npm run lint --prefix frontend
       - run: npm run build --prefix frontend
+
+  validate-angular:
+    name: Validate Angular frontend (migration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web-angular/package-lock.json
+      - run: npm ci --prefix apps/web-angular
+      # `ng build` performs full TypeScript + strict template type checking.
+      - run: npm run build --prefix apps/web-angular
+      - run: npm test --prefix apps/web-angular -- --watch=false

@@ -46,6 +46,19 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
           provenance: false
           sbom: false
+      - name: Build and publish Angular frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.angular
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-frontend-angular:${{ github.ref_name }}
+            ${{ env.IMAGE_PREFIX }}-frontend-angular:latest
+          cache-from: type=gha,scope=frontend-angular
+          cache-to: type=gha,mode=max,scope=frontend-angular
+          provenance: false
+          sbom: false
       - name: Build and publish backend image
         uses: docker/build-push-action@v6
         with:

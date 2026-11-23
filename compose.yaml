@@ -13,6 +13,19 @@ services:
     depends_on:
       backend: { condition: service_healthy }
     healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"], interval: 30s, timeout: 5s, retries: 3 }
+  frontend-angular:
+    image: ${FRONTEND_ANGULAR_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend-angular}:${APP_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.angular
+      tags:
+        - ${FRONTEND_ANGULAR_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend-angular}:${APP_VERSION:-latest}
+        - ${FRONTEND_ANGULAR_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend-angular}:latest
+    restart: unless-stopped
+    ports: ["${ANGULAR_APP_PORT:-6729}:80"]
+    depends_on:
+      backend: { condition: service_healthy }
+    healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"], interval: 30s, timeout: 5s, retries: 3 }
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-backend}:${APP_VERSION:-latest}
     build:

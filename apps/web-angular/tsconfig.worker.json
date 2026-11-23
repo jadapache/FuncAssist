@@ -1,0 +1,9 @@
+/* Web Workers (WebLLM engine + Whisper ASR) are bundled separately by the Angular builder. */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "WebWorker"],
+    "types": []
+  },
+  "include": ["src/**/*.worker.ts", "src/app/types/transformers.d.ts"]
+}

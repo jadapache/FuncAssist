@@ -8,6 +8,9 @@
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
-    "install:all": "npm --prefix frontend install && cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt"
+    "install:all": "npm --prefix frontend install && npm --prefix apps/web-angular install && cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt",
+    "dev:angular": "npm --prefix apps/web-angular start",
+    "build:angular": "npm --prefix apps/web-angular run build",
+    "test:angular": "npm --prefix apps/web-angular test -- --watch=false"
   }
 }
