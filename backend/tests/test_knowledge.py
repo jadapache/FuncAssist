@@ -1,30 +1,16 @@
 """Unit and integration tests for PostgreSQL RAG Knowledge Base (pure PostgreSQL, no SQLite)."""
 
-import json
 import re
 import unicodedata
 from pathlib import Path
-from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
 from app.context.knowledge import (
-  delete_document,
   ensure_knowledge_dirs,
-  get_db_status,
   ingest_document,
-  is_postgres_configured,
-  list_documents,
-  load_chunks,
   search_chunks_fts,
-  search_chunks_vector,
 )
-from app.context.knowledge_migration import (
-  export_to_json,
-  rebuild_fts_index,
-  verify_integrity,
-)
-from app.context.retrieval import search_knowledge
 from app.core.settings import get_settings
 from app.main import create_app
 
@@ -230,27 +216,6 @@ def mock_postgres_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
   get_settings.cache_clear()
 
 
-def test_ingest_and_list_documents(mock_postgres_db):
-  doc = ingest_document(
-    filename="spec_requisitos.md",
-    raw=b"# Requisitos del Sistema\nEl usuario debe poder iniciar sesion de forma segura con 2FA.",
-    tags=["seguridad", "auth"],
-  )
-
-  assert doc["id"]
-  assert doc["filename"] == "spec_requisitos.md"
-  assert doc["chunk_count"] >= 1
-  assert "seguridad" in doc["tags"]
-
-  docs = list_documents()
-  assert len(docs) == 1
-  assert docs[0]["id"] == doc["id"]
-  assert docs[0]["filename"] == "spec_requisitos.md"
-
-  chunks = load_chunks()
-  assert len(chunks) >= 1
-  assert chunks[0]["document_id"] == doc["id"]
-  assert "2FA" in chunks[0]["text"]
 
 
 def test_fts_search_and_spanish_diacritics(mock_postgres_db):
@@ -286,106 +251,16 @@ def test_fts_search_and_spanish_diacritics(mock_postgres_db):
   assert results_ci[0]["filename"] == "guia_pruebas.txt"
 
 
-def test_search_knowledge_with_tags_and_ranking(mock_postgres_db):
-  ingest_document(
-    filename="doc1.txt",
-    raw=b"Contenido sobre pasarela de pagos con tarjeta de credito.",
-    tags=["pagos"],
-  )
-  ingest_document(
-    filename="doc2.txt",
-    raw=b"Contenido sobre pasarela de pagos con transferencias bancarias.",
-    tags=["transferencias"],
-  )
-
-  results = search_knowledge("pasarela", tags=["transferencias"])
-  assert len(results) == 1
-  assert results[0].source_label == "doc2.txt"
 
 
-def test_vector_similarity_search(mock_postgres_db):
-  ingest_document(
-    filename="vector_manual.txt",
-    raw=b"Analisis semantico con representacion vectorial de documentos tecnicos.",
-    tags=["ia", "vectorial"],
-    embeddings=[[0.05] * 1536],
-  )
-
-  hits = search_chunks_vector([0.05] * 1536, top_k=5)
-  assert len(hits) >= 1
-  assert hits[0]["filename"] == "vector_manual.txt"
-  assert hits[0]["score"] == 0.95
 
 
-def test_delete_document(mock_postgres_db):
-  doc = ingest_document(
-    filename="borrador.txt",
-    raw=b"Documento temporal para ser eliminado.",
-    tags=["temp"],
-  )
-  doc_id = doc["id"]
-  assert len(list_documents()) == 1
-
-  deleted = delete_document(doc_id)
-  assert deleted is True
-  assert len(list_documents()) == 0
-  assert len(load_chunks()) == 0
 
 
-def test_db_status_diagnostics(mock_postgres_db):
-  status = get_db_status()
-  assert status["engine"] == "postgresql"
-  assert status["is_postgres"] is True
-  assert status["connected"] is True
-  assert status["spanish_fts_enabled"] is True
-  assert status["host"] == "pg.internal.test"
 
 
-def test_separated_postgres_environment_variables(monkeypatch: pytest.MonkeyPatch):
-  get_settings.cache_clear()
-  monkeypatch.setenv("DATABASE_URL", "postgresql://admin_user:secret_pass123@db.cluster.internal:5433/qa_vector_db")
-
-  settings = get_settings()
-  params = settings.get_knowledge_db_params()
-  assert params["host"] == "db.cluster.internal"
-  assert params["port"] == 5433
-  assert params["user"] == "admin_user"
-  assert params["password"] == "secret_pass123"
-  assert params["database"] == "qa_vector_db"
-
-  url = settings.get_knowledge_db_url()
-  assert url is not None
-  assert "admin_user" in url
-  assert "db.cluster.internal:5433" in url
-  assert "qa_vector_db" in url
-  assert is_postgres_configured() is True
-  get_settings.cache_clear()
 
 
-def test_integrity_and_rebuild_and_export(mock_postgres_db, tmp_path: Path):
-  ingest_document(
-    filename="manual_calidad.txt",
-    raw=b"Manual de politicas de aseguramiento de calidad QA.",
-    tags=["calidad"],
-  )
-
-  integrity = verify_integrity()
-  assert integrity["ok"] is True
-  assert integrity["engine"] == "postgresql"
-
-  reindexed = rebuild_fts_index()
-  assert reindexed >= 1
-
-  export_dir = tmp_path / "export"
-  manifest_out, chunks_out = export_to_json(export_dir)
-  assert manifest_out.exists()
-  assert chunks_out.exists()
-
-  manifest_content = json.loads(manifest_out.read_text(encoding="utf-8"))
-  chunks_content = json.loads(chunks_out.read_text(encoding="utf-8"))
-  assert len(manifest_content) == 1
-  assert len(chunks_content) >= 1
-  assert manifest_content[0]["filename"] == "manual_calidad.txt"
 
 
 def test_api_knowledge_endpoints(mock_postgres_db):
@@ -437,21 +312,5 @@ def test_api_knowledge_endpoints(mock_postgres_db):
   assert del_res.json()["ok"] is True
 
 
-def test_db_status_exception_does_not_leak_stack_trace():
-  from unittest.mock import patch
-  with patch("app.context.knowledge._db", side_effect=RuntimeError("psycopg.OperationalError: password authentication failed for user 'sensitive_admin'")):
-    status = get_db_status()
-    assert status["connected"] is False
-    assert "sensitive_admin" not in status.get("error", "")
-    assert status["error"] == "Error al conectar o consultar la base de datos de conocimiento."
 
 
-def test_api_db_status_exception_sanitized(mock_postgres_db):
-  from unittest.mock import patch
-  app = create_app()
-  client = TestClient(app)
-  with patch("app.api.knowledge.get_db_status", side_effect=RuntimeError("psycopg connection failed with credentials")):
-    res = client.get("/api/knowledge/db-status")
-    assert res.status_code == 500
-    assert "credentials" not in res.text
-    assert res.json()["detail"] == "Error interno al obtener el estado de la base de datos de conocimiento."

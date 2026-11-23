@@ -757,7 +757,7 @@ def decrypt_secret(encrypted: str) -> str:
 
 ```bash
 cd backend
-python -m pytest tests/unit/ -v --cov=app
+python -m pytest tests -v --cov=app
 ```
 
 ---

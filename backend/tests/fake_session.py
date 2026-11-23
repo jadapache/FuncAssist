@@ -8,9 +8,8 @@ from __future__ import annotations
 import copy
 import uuid
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, Dict, Generator, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
-from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
 
 def _eval_clause(clause: Any, obj: Any) -> bool:
