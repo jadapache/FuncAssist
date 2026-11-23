@@ -1,10 +1,11 @@
-import base64
 import hashlib
 import hmac
-import json
+import os
 import secrets
 import time
 from typing import Any, Dict, Optional, Tuple
+
+import jwt
 
 from app.core.settings import get_settings
 
@@ -35,6 +36,11 @@ def verify_password(password: str, password_hash: str, salt: str) -> bool:
     return hmac.compare_digest(computed_hash, password_hash)
 
 
+JWT_ALGORITHM = "HS256"
+JWT_ISSUER = "funcassist"
+ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 12 
+
+
 def _get_signing_key() -> bytes:
     settings = get_settings()
     secret = settings.secret_key or os.getenv("SECRET_KEY")
@@ -43,44 +49,25 @@ def _get_signing_key() -> bytes:
     return hashlib.sha256(secret.strip().encode("utf-8")).digest()
 
 
-def create_access_token(payload: Dict[str, Any], expires_in_seconds: int = 86400 * 7) -> str:
-    """Genera un token Bearer firmado usando HMAC-SHA256."""
-    data = dict(payload)
-    data["exp"] = int(time.time()) + expires_in_seconds
-    raw_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    b64_payload = base64.urlsafe_b64encode(raw_bytes).decode("ascii").rstrip("=")
-
-    signature = hmac.new(_get_signing_key(), b64_payload.encode("ascii"), hashlib.sha256).digest()
-    b64_sig = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
-
-    return f"{b64_payload}.{b64_sig}"
+def create_access_token(payload: Dict[str, Any], expires_in_seconds: int = ACCESS_TOKEN_TTL_SECONDS) -> str:
+    """Genera un JWT (RFC 7519) firmado con HS256 mediante PyJWT."""
+    now = int(time.time())
+    claims = dict(payload)
+    claims.update({"iat": now, "nbf": now, "exp": now + expires_in_seconds, "iss": JWT_ISSUER})
+    return jwt.encode(claims, _get_signing_key(), algorithm=JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
-    """Valida la firma y fecha de expiracion del token Bearer."""
+    """Valida firma, algoritmo, emisor y expiracion del JWT. Retorna None si no es valido."""
     try:
-        parts = token.split(".")
-        if len(parts) != 2:
-            return None
-        b64_payload, b64_sig = parts
-
-        # Verify signature
-        expected_sig = hmac.new(_get_signing_key(), b64_payload.encode("ascii"), hashlib.sha256).digest()
-        expected_b64_sig = base64.urlsafe_b64encode(expected_sig).decode("ascii").rstrip("=")
-
-        if not hmac.compare_digest(b64_sig, expected_b64_sig):
-            return None
-
-        # Restore padding for base64 decoding
-        padded = b64_payload + "=" * (-len(b64_payload) % 4)
-        raw_bytes = base64.urlsafe_b64decode(padded)
-        data = json.loads(raw_bytes.decode("utf-8"))
-
-        if data.get("exp", 0) < time.time():
-            return None  # Token expired
-
-        return data
-    except Exception:
+        return jwt.decode(
+            token,
+            _get_signing_key(),
+            algorithms=[JWT_ALGORITHM],
+            issuer=JWT_ISSUER,
+            options={"require": ["exp", "iat", "iss", "sub"]},
+        )
+    except jwt.PyJWTError:
         return None
 
 
@@ -100,3 +87,28 @@ def machine_fingerprint() -> str:
         str(Path.home()),
     ]
     return "|".join(parts)
+
+
+def set_session_cookie(response: Any, token: str) -> None:
+    """Entrega el JWT en una cookie HttpOnly + Secure + SameSite=Strict (no accesible desde JS)."""
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=token,
+        max_age=ACCESS_TOKEN_TTL_SECONDS,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="strict",
+        path="/api",
+    )
+
+
+def clear_session_cookie(response: Any) -> None:
+    settings = get_settings()
+    response.delete_cookie(
+        key=settings.session_cookie_name,
+        path="/api",
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="strict",
+    )

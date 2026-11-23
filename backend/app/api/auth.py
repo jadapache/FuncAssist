@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.deps import (
@@ -11,8 +11,10 @@ from app.api.deps import (
     get_user_repository,
 )
 from app.core.security import (
+    clear_session_cookie,
     create_access_token,
     hash_password,
+    set_session_cookie,
     verify_password,
 )
 from app.db.interfaces import IUserRepository
@@ -56,7 +58,6 @@ class LoginRequest(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    token: Optional[str] = None
     status: str = "approved"
     message: str = ""
     user: dict[str, Any]
@@ -65,6 +66,7 @@ class AuthResponse(BaseModel):
 @router.post("/register", response_model=AuthResponse)
 async def register(
     body: RegisterRequest,
+    response: Response,
     user_repo: IUserRepository = Depends(get_user_repository),
 ) -> dict[str, Any]:
     username = body.username.strip()
@@ -130,15 +132,14 @@ async def register(
             "username": str(clean_user["username"]),
             "role": str(clean_user.get("role", "admin")),
         })
+        set_session_cookie(response, token)
         return {
-            "token": token,
             "status": "approved",
             "message": "Cuenta creada y aprobada automáticamente como Administrador.",
             "user": clean_user,
         }
 
     return {
-        "token": None,
         "status": "pending",
         "message": "Solicitud de acceso enviada correctamente. Un administrador debe aprobar tu cuenta antes de que puedas ingresar.",
         "user": clean_user,
@@ -148,6 +149,7 @@ async def register(
 @router.post("/login", response_model=AuthResponse)
 async def login(
     body: LoginRequest,
+    response: Response,
     user_repo: IUserRepository = Depends(get_user_repository),
 ) -> dict[str, Any]:
     user = await user_repo.get_by_username(body.username)
@@ -189,13 +191,21 @@ async def login(
         "username": str(clean_user["username"]),
         "role": str(clean_user.get("role", "user")),
     })
+    set_session_cookie(response, token)
 
     return {
-        "token": token,
         "status": user_status,
         "message": "Inicio de sesión exitoso.",
         "user": clean_user,
     }
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> Response:
+    """Cierra la sesion del navegador eliminando la cookie HttpOnly (SEC-02)."""
+    clear_session_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.get("/me")

@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 from typing import Any, AsyncGenerator, Generator
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -37,9 +36,6 @@ from app.db.repositories import (
   UserRepository,
   UserSecretRepository,
 )
-
-security = HTTPBearer(auto_error=False)
-
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
   """Dependency provider for AsyncSession."""
@@ -169,32 +165,24 @@ def get_corporate_template_repository(
   return CorporateTemplateRepository(session)
 
 
-def _extract_token_from_request(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials | None,
-) -> str | None:
-    if credentials and credentials.credentials:
-        return credentials.credentials.strip()
-    auth_hdr = request.headers.get("authorization")
-    if auth_hdr and auth_hdr.startswith("Bearer "):
-        return auth_hdr.split(" ")[1].strip()
-    query_token = request.query_params.get("token")
-    if query_token:
-        return query_token.strip()
-    return None
+def _extract_session_token(request: Request) -> str | None:
+    """The session JWT is only accepted from the HttpOnly session cookie."""
+    from app.core.settings import get_settings
+
+    token = request.cookies.get(get_settings().session_cookie_name)
+    return token.strip() if token else None
 
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     user_repo: IUserRepository = Depends(get_user_repository),
 ) -> dict[str, Any]:
-    """Dependency to retrieve and authenticate current user via Bearer JWT token."""
-    raw_token = _extract_token_from_request(request, credentials)
+    """Dependency to retrieve and authenticate the current user from the session cookie."""
+    raw_token = _extract_session_token(request)
     if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No se proporcionó token de autorización.",
+            detail="No hay una sesión activa.",
         )
 
     payload = decode_access_token(raw_token)

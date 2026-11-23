@@ -17,6 +17,28 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT_DIR / ".env")
 
 
+# The master key and salt come from a secret file (Docker secrets, a file rendered by a
+# KMS / Vault agent) instead of a plain environment variable.
+_SECRET_FILE_VARS = ("SECRET_KEY", "PBKDF2_SALT")
+
+
+def _load_secret_files() -> None:
+  for name in _SECRET_FILE_VARS:
+    file_path = os.getenv(f"{name}_FILE")
+    if not file_path:
+      continue
+    try:
+      value = Path(file_path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+      raise RuntimeError(f"{name}_FILE apunta a un archivo ilegible: {file_path}") from exc
+    if not value:
+      raise RuntimeError(f"{name}_FILE apunta a un archivo vacio: {file_path}")
+    os.environ[name] = value
+
+
+_load_secret_files()
+
+
 def _get_user_data_dir() -> Path:
   """
   Returns the base storage directory for server-local cached data/models.
@@ -94,6 +116,8 @@ class Settings(BaseSettings):
   backend_url: str = Field(default="http://127.0.0.1:8000", validation_alias="BACKEND_URL")
   secret_key: str | None = Field(default=None, validation_alias="SECRET_KEY")
   pbkdf2_salt: str | None = Field(default=None, validation_alias="PBKDF2_SALT")
+  session_cookie_name: str = Field(default="funcassist_session", validation_alias="SESSION_COOKIE_NAME")
+  session_cookie_secure: bool = Field(default=True, validation_alias="SESSION_COOKIE_SECURE")
 
   jira_client_id: str = ""
   jira_client_secret: str = ""

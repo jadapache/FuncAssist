@@ -4,7 +4,9 @@ from fastapi.testclient import TestClient
 from app.main import app
 import app.db.database as db_module
 
-client = TestClient(app)
+# HTTPS base URL so the Secure session cookie is stored and sent back.
+client = TestClient(app, base_url="https://testserver")
+bob_client = TestClient(app, base_url="https://testserver")
 
 
 @pytest.fixture(autouse=True)
@@ -33,15 +35,14 @@ def test_auth_full_lifecycle():
     assert resp1.status_code == 200, resp1.text
     data1 = resp1.json()
     assert data1["status"] == "approved"
-    assert data1["token"] is not None
+    assert "funcassist_session" in resp1.cookies
+    assert "token" not in data1
     assert data1["user"]["role"] == "admin"
     assert data1["user"]["username"] == "adminuser"
     assert "password_hash" not in data1["user"]
 
-    admin_token = data1["token"]
-
     # 2. Second user registers -> becomes pending without token
-    resp2 = client.post(
+    resp2 = bob_client.post(
         "/api/auth/register",
         json={
             "username": "testerbob",
@@ -54,11 +55,11 @@ def test_auth_full_lifecycle():
     assert resp2.status_code == 200
     data2 = resp2.json()
     assert data2["status"] == "pending"
-    assert data2["token"] is None
+    assert "funcassist_session" not in resp2.cookies
     bob_id = data2["user"]["id"]
 
     # 3. Bob tries to login while pending -> 403 Forbidden
-    login_fail = client.post(
+    login_fail = bob_client.post(
         "/api/auth/login",
         json={"username": "testerbob", "password": "TesterPassword123!"},
     )
@@ -68,7 +69,6 @@ def test_auth_full_lifecycle():
     # 4. Admin lists access requests
     reqs_resp = client.get(
         "/api/auth/access-requests",
-        headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert reqs_resp.status_code == 200
     pending_list = reqs_resp.json()["requests"]
@@ -78,38 +78,41 @@ def test_auth_full_lifecycle():
     # 5. Admin approves Bob's request
     approve_resp = client.post(
         f"/api/auth/access-requests/{bob_id}/approve",
-        headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert approve_resp.status_code == 200
     assert approve_resp.json()["status"] == "approved"
 
     # 6. Bob can now login successfully
-    login_bob = client.post(
+    login_bob = bob_client.post(
         "/api/auth/login",
         json={"username": "testerbob", "password": "TesterPassword123!"},
     )
     assert login_bob.status_code == 200
     bob_data = login_bob.json()
-    assert bob_data["token"] is not None
-    bob_token = bob_data["token"]
+    assert bob_data["status"] == "approved"
+    assert "funcassist_session" in login_bob.cookies
 
     # 7. Bob checks /me
-    me_resp = client.get(
-        "/api/auth/me",
-        headers={"Authorization": f"Bearer {bob_token}"},
-    )
+    me_resp = bob_client.get("/api/auth/me")
     assert me_resp.status_code == 200
     assert me_resp.json()["user"]["username"] == "testerbob"
 
     # 8. Bob cannot approve requests (not admin)
-    forbidden_resp = client.get(
-        "/api/auth/access-requests",
-        headers={"Authorization": f"Bearer {bob_token}"},
-    )
+    forbidden_resp = bob_client.get("/api/auth/access-requests")
     assert forbidden_resp.status_code == 403
 
     # 9. Non-authenticated access to /me fails
-    unauth_resp = client.get("/api/auth/me")
+    unauth_resp = TestClient(app, base_url="https://testserver").get("/api/auth/me")
     assert unauth_resp.status_code == 401
+
+    # 10. Bearer headers are not accepted (cookie-only session)
+    bearer_resp = TestClient(app, base_url="https://testserver").get(
+        "/api/auth/me", headers={"Authorization": "Bearer whatever"}
+    )
+    assert bearer_resp.status_code == 401
+
+    # 11. Logout clears the session cookie
+    assert bob_client.post("/api/auth/logout").status_code == 204
+    assert bob_client.get("/api/auth/me").status_code == 401
 
 

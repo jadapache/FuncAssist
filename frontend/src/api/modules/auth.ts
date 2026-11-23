@@ -15,6 +15,9 @@ export const authApi = {
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<AuthResponse>(r)),
 
+  logout: () =>
+    fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' }).then(() => undefined),
+
   getMe: () =>
     fetch(`${API_BASE}/api/auth/me`, {
       method: 'GET',
