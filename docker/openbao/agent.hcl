@@ -28,3 +28,9 @@ template {
   destination = "/run/secrets/funcassist/pbkdf2_salt"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"secret/data/funcassist\" }}{{ .Data.data.postgres_password }}{{ end }}"
+  destination = "/run/secrets/funcassist/postgres_password"
+  perms       = "0444"
+}

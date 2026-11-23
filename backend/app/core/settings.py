@@ -149,6 +149,20 @@ class Settings(BaseSettings):
     If for_sqlalchemy is True, ensures the URL dialect is postgresql+psycopg://.
     """
     url = self.database_url or os.getenv("DATABASE_URL")
+    if not url and os.getenv("DATABASE_PASSWORD_FILE"):
+      password_file = os.getenv("DATABASE_PASSWORD_FILE")
+      try:
+        password = Path(password_file).read_text(encoding="utf-8").strip()
+      except OSError as exc:
+        raise RuntimeError(f"DATABASE_PASSWORD_FILE apunta a un archivo ilegible: {password_file}") from exc
+      if not password:
+        raise RuntimeError("DATABASE_PASSWORD_FILE apunta a un archivo vacio")
+      from urllib.parse import quote
+      host = os.getenv("DATABASE_HOST", "db")
+      port = os.getenv("DATABASE_PORT", "5432")
+      user = os.getenv("DATABASE_USER", "funcassist")
+      name = os.getenv("DATABASE_NAME", "funcassist")
+      url = f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{quote(name, safe='')}"
     if url and url.strip():
       clean_url = url.strip()
       if for_sqlalchemy:

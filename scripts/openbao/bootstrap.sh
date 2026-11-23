@@ -15,6 +15,7 @@ set -euo pipefail
 
 : "${SECRET_KEY:?SECRET_KEY is required}"
 : "${PBKDF2_SALT:?PBKDF2_SALT is required}"
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 
 APPROLE_DIR="openbao/approle"
 bao() { docker compose exec -T -e BAO_ADDR=http://127.0.0.1:8200 ${BAO_TOKEN:+-e BAO_TOKEN="$BAO_TOKEN"} openbao bao "$@"; }
@@ -34,7 +35,7 @@ export BAO_TOKEN
 
 echo ">> Storing application keys in kv-v2 at secret/funcassist"
 bao secrets enable -path=secret kv-v2 >/dev/null
-bao kv put secret/funcassist secret_key="$SECRET_KEY" pbkdf2_salt="$PBKDF2_SALT" >/dev/null
+bao kv put secret/funcassist secret_key="$SECRET_KEY" pbkdf2_salt="$PBKDF2_SALT" postgres_password="$POSTGRES_PASSWORD" >/dev/null
 
 echo ">> Creating read-only policy and AppRole for the FuncAssist agent"
 docker compose exec -T openbao sh -c 'cat > /tmp/funcassist-policy.hcl' < docker/openbao/funcassist-policy.hcl

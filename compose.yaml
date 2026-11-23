@@ -33,7 +33,11 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://localhost:6728}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       BACKEND_URL: http://backend:8000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-funcassist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-funcassist}
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${POSTGRES_USER:-funcassist}
+      DATABASE_NAME: ${POSTGRES_DB:-funcassist}
+      DATABASE_PASSWORD_FILE: /run/secrets/funcassist/postgres_password
       VALKEY_URL: redis://valkey:6379
       # Master key and salt are rendered from OpenBao by openbao-agent into a memory-backed volume.
       SECRET_KEY_FILE: /run/secrets/funcassist/secret_key
@@ -54,9 +58,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-funcassist}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/funcassist/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-funcassist}
-    volumes: [postgres_data:/var/lib/postgresql/data]
+    volumes: [postgres_data:/var/lib/postgresql/data, funcassist_secrets:/run/secrets/funcassist:ro]
+    depends_on:
+      openbao-agent: { condition: service_healthy }
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"], interval: 10s, timeout: 5s, retries: 5 }
   valkey:
     # Valkey (BSD-3-Clause) replaces Redis, which left the BSD license in 7.4.
