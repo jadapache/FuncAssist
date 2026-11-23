@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -37,6 +37,10 @@ class ChatRepository:
     artifacts = session_data.get("artifacts") or []
     active_art_id = session_data.get("activeArtifactId") or session_data.get("active_artifact_id")
     artifacts_json = json.dumps(artifacts, ensure_ascii=False) if artifacts else "[]"
+    # Partial updates: a caller that does not send artifacts/document (e.g. a chat turn that
+    # produced no document) must not wipe the ones already stored.
+    has_document = any(k in session_data for k in ("documentContent", "document_content"))
+    has_artifacts = "artifacts" in session_data
 
     stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
     result = await self.session.execute(stmt)
@@ -45,8 +49,10 @@ class ChatRepository:
     if session:
       session.title = title
       session.feature_slug = feature_slug
-      session.document_content = document_content
-      session.artifacts_json = artifacts_json
+      if has_document:
+        session.document_content = document_content
+      if has_artifacts:
+        session.artifacts_json = artifacts_json
       session.updated_at = datetime.now(timezone.utc)
       if active_art_id:
         session.active_artifact_id = active_art_id
@@ -110,6 +116,23 @@ class ChatRepository:
     res["messages"] = messages
     return res
 
+  async def get_session_artifacts(
+    self, session_id: str, user_id: Optional[str] = None
+  ) -> List[dict[str, Any]]:
+    """Artifacts stored on a session (without loading its messages); [] if none or missing."""
+    stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    session = (await self.session.execute(stmt)).scalar_one_or_none()
+    raw = getattr(session, "artifacts_json", None) if session is not None else None
+    if not raw:
+      return []
+    try:
+      artifacts = json.loads(raw)
+    except (TypeError, ValueError):
+      return []
+    return [a for a in artifacts if isinstance(a, dict)] if isinstance(artifacts, list) else []
+
   async def delete_session(self, session_id: str, user_id: Optional[str] = None) -> bool:
     stmt = delete(ChatSessionModel).where(ChatSessionModel.id == session_id)
     if user_id:
@@ -132,6 +155,28 @@ class ChatRepository:
     attachments = kwargs.get("attachments") or []
     sources_json = json.dumps(context_sources, ensure_ascii=False) if context_sources else None
     attachments_json = json.dumps(attachments, ensure_ascii=False) if attachments else "[]"
+
+    # Idempotent by id: the agentic endpoint and the client autosave persist the same messages
+    # with shared ids, so a second save updates instead of duplicating.
+    if kwargs.get("id"):
+      existing = await self.session.get(ChatMessageModel, msg_id)
+      if existing is not None:
+        if existing.session_id == session_id and existing.user_id == user_id:
+          changed = False
+          if content and existing.content != content:
+            existing.content = content
+            changed = True
+          if context_sources and existing.context_sources_json != sources_json:
+            existing.context_sources_json = sources_json
+            changed = True
+          if attachments and existing.attachments_json != attachments_json:
+            existing.attachments_json = attachments_json
+            changed = True
+          if changed:
+            await self.session.flush()
+          return existing.to_dict()
+        # Id taken by another session/user: never overwrite it, store as a new message.
+        msg_id = str(uuid.uuid4())
 
     msg = ChatMessageModel(
       id=msg_id,
@@ -185,6 +230,43 @@ class ChatRepository:
       seen_hashes.add(content_key)
       deduped.append(m.to_dict())
     return deduped
+
+  async def get_history_summary(
+    self, session_id: str, user_id: Optional[str] = None
+  ) -> Optional[tuple[str, str]]:
+    """Return (summary_key, summary) persisted for the conversation, if any."""
+    stmt = select(ChatSessionModel.history_summary_key, ChatSessionModel.history_summary).where(
+      ChatSessionModel.id == session_id
+    )
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    row = (await self.session.execute(stmt)).first()
+    if not row or not row[0] or not row[1]:
+      return None
+    return row[0], row[1]
+
+  async def save_history_summary(
+    self, session_id: str, summary_key: str, summary: str, user_id: Optional[str] = None
+  ) -> bool:
+    """Store the rolling summary on an existing session. Returns False if the session is missing."""
+    stmt = (
+      update(ChatSessionModel)
+      .where(ChatSessionModel.id == session_id)
+      .values(
+        history_summary=summary,
+        history_summary_key=summary_key,
+        history_summary_updated_at=datetime.now(timezone.utc),
+        # Not a conversation interaction: assign updated_at to itself so its onupdate
+        # default does not fire and the session keeps its position in the sidebar.
+        updated_at=ChatSessionModel.updated_at,
+      )
+      .execution_options(synchronize_session=False)
+    )
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    result = await self.session.execute(stmt)
+    await self.session.flush()
+    return bool(result.rowcount)
 
   async def clear_session(self, session_id: str) -> bool:
     stmt = delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id)

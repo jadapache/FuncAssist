@@ -5,6 +5,13 @@ import {
   type AgenticPromptResponse,
 } from '../../../api/client'
 import type { AgentEventEnvelope } from '../types/agentEvents'
+import {
+  SseFrameParser,
+  applyV2Event,
+  type SseFrame,
+  type StreamCallbacks,
+  type StreamState,
+} from './sseV2'
 
 export interface EphemeralAttachmentDoc {
   id: string
@@ -26,6 +33,9 @@ export interface AgenticPromptPayload {
   template_id?: string
   run_id?: string
   conversation_id?: string
+  /** Client-generated ids so server-side persistence and the autosave share the same rows. */
+  user_message_id?: string
+  assistant_message_id?: string
   provider?: string
   model?: string
 }
@@ -65,6 +75,9 @@ export const docAgentApi = {
         sources: payload.sources,
         document_ids: payload.document_ids,
         templateId: payload.template_id,
+        conversationId: payload.conversation_id,
+        userMessageId: payload.user_message_id,
+        assistantMessageId: payload.assistant_message_id,
       }),
     }).then((r) =>
       handleResponse<AgenticPromptResponse>(r).then((res) => ({
@@ -106,7 +119,7 @@ export const docAgentApi = {
     onEvent?: (event: AgentEventEnvelope) => void,
     signal?: AbortSignal,
   ): Promise<AgenticPromptResponse> => {
-    const res = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt-stream`, {
+    const res = await fetch(`${API_BASE}/api/doc-agent/agentic-prompt-stream?protocol=v2`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       signal,
@@ -124,6 +137,8 @@ export const docAgentApi = {
         templateId: payload.template_id,
         runId: payload.run_id,
         conversationId: payload.conversation_id,
+        userMessageId: payload.user_message_id,
+        assistantMessageId: payload.assistant_message_id,
         provider: payload.provider,
         model: payload.model,
       }),
@@ -144,24 +159,35 @@ export const docAgentApi = {
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder('utf-8')
-    const state = { accumulatedText: '', fullResponseData: null as AgenticPromptResponse | null }
-    let buffer = ''
+    const state: StreamState = { accumulatedText: '', fullResponseData: null, openStatusStep: null }
+    const callbacks: StreamCallbacks = { onChunk, onIntent, onEvent }
+    const parser = new SseFrameParser()
+
+    const handleFrame = (frame: SseFrame) => {
+      if (frame.event) {
+        let data: Record<string, unknown> = {}
+        try {
+          data = JSON.parse(frame.data) as Record<string, unknown>
+        } catch {
+          return
+        }
+        applyV2Event(frame.event, data, state, callbacks)
+        return
+      }
+      // Legacy v1 frame (`data:` only), e.g. from a server that predates protocol v2.
+      const parsed = parseEventLine(`data: ${frame.data}`)
+      if (parsed) handleParsedEvent(parsed, state, callbacks)
+    }
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const parsed = parseEventLine(line.trim())
-        if (parsed) {
-          handleParsedEvent(parsed, state, { onChunk, onIntent, onEvent })
-        }
+      for (const frame of parser.feed(decoder.decode(value, { stream: true }))) {
+        handleFrame(frame)
       }
     }
+    for (const frame of parser.feed(decoder.decode())) handleFrame(frame)
+    for (const frame of parser.flush()) handleFrame(frame)
 
     const fullResponseData = state.fullResponseData
 
@@ -233,7 +259,9 @@ function handleParsedEvent(
 ): void {
   callbacks.onEvent?.(parsed)
 
-  const isDelta = parsed.type === 'token' || parsed.type === 'message.delta'
+  // The v1 server sends every chunk twice (a `message.delta` envelope and a `token` packet);
+  // only `token` feeds the text so it is not appended twice.
+  const isDelta = parsed.type === 'token'
   const isStarted = parsed.type === 'intent' || parsed.type === 'run.started'
   const isCompleted = parsed.type === 'full' || parsed.type === 'run.completed'
   const isFailed = parsed.type === 'error' || parsed.type === 'run.failed'

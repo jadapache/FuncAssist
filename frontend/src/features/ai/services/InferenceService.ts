@@ -1,8 +1,12 @@
 import { api, type AISettings } from '../../../api/client'
 import {
   DEFAULT_WEBLLM_MODEL,
+  findClientWebLLMModel,
   isSupportedWebLLMModel,
 } from '../catalogs/clientCatalog'
+import { GPU_PRESSURE_KINDS, isBrowserLlmError } from '../errors/browserLlmErrors'
+import { LIGHTEST_WEBLLM_MODEL, isModelUnfit, markModelUnfit } from '../policies/deviceFit'
+import { emitBrowserLlmNotice } from './browserLlmNotices'
 import type {
   ArtifactGenerationRequest,
   ArtifactGenerationResult,
@@ -55,12 +59,14 @@ export class InferenceService {
     return provider === 'local' || provider === 'builtin' || provider === 'webllm'
   }
 
+  /** Configured model, unless it already failed to fit this device's GPU (then the lightest one). */
   private resolveWebLLMModel(settings: AISettings | null): string {
     const configured = settings?.model || ''
-    if (isSupportedWebLLMModel(configured)) {
-      return configured
+    const preferred = isSupportedWebLLMModel(configured) ? configured : DEFAULT_WEBLLM_MODEL
+    if (isModelUnfit(preferred) && isSupportedWebLLMModel(LIGHTEST_WEBLLM_MODEL)) {
+      return LIGHTEST_WEBLLM_MODEL
     }
-    return DEFAULT_WEBLLM_MODEL
+    return preferred
   }
 
   public async summarize(
@@ -163,15 +169,36 @@ export class InferenceService {
     options?: { maxTokens?: number; temperature?: number; autoContinue?: boolean; maxContinuations?: number },
   ): Promise<string> {
     const provider = await getWebLLMProvider()
-
-    if (provider.getActiveModelId() !== modelId) {
-      await provider.initModel(modelId)
+    const run = async (id: string): Promise<string> => {
+      if (provider.getActiveModelId() !== id) {
+        await provider.initModel(id)
+      }
+      if (onChunk) {
+        return provider.streamComplete(messages, onChunk, options)
+      }
+      return provider.complete(messages, options)
     }
 
-    if (onChunk) {
-      return provider.streamComplete(messages, onChunk, options)
+    try {
+      return await run(modelId)
+    } catch (err) {
+      // Out of GPU memory / GPU reset: remember it for this device and retry once with the
+      // lightest model, which needs about half the memory.
+      const canFallBack =
+        isBrowserLlmError(err) &&
+        GPU_PRESSURE_KINDS.has(err.kind) &&
+        modelId !== LIGHTEST_WEBLLM_MODEL &&
+        isSupportedWebLLMModel(LIGHTEST_WEBLLM_MODEL)
+      if (!canFallBack) throw err
+      markModelUnfit(modelId)
+      const fromName = findClientWebLLMModel(modelId)?.name ?? modelId
+      const toName = findClientWebLLMModel(LIGHTEST_WEBLLM_MODEL)?.name ?? LIGHTEST_WEBLLM_MODEL
+      emitBrowserLlmNotice({
+        title: 'Modelo más ligero',
+        message: `${fromName} no cupo en la memoria de la GPU de este equipo. Se reintentó con ${toName}; puedes cambiarlo en Configuración.`,
+      })
+      return run(LIGHTEST_WEBLLM_MODEL)
     }
-    return provider.complete(messages, options)
   }
 
   private async executeBackendPrompt(

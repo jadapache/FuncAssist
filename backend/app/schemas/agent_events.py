@@ -133,7 +133,9 @@ def current_utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class AgentEvent(BaseModel):
+class RunEventEnvelope(BaseModel):
+    """Protocol v1 envelope (`data:` lines with run.* types). Superseded by `AgentEvent` (v2)."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     version: int = 1
@@ -155,3 +157,43 @@ class AgentEvent(BaseModel):
         import json
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+
+
+# ---------------------------------------------------------------------------
+# Protocol v2: named SSE events (`event: <type>` + JSON `data:`), produced by the AI layer
+# (app.ai.runner / agent / section_generator) and served with `?protocol=v2`.
+# ---------------------------------------------------------------------------
+
+StreamEventType = Literal[
+    "status",
+    "delta",
+    "tool_call",
+    "tool_result",
+    "artifact_start",
+    "artifact_delta",
+    "artifact_end",
+    "plan",
+    "usage",
+    "error",
+    "done",
+]
+
+
+class AgentEvent(BaseModel):
+    """Protocol v2 event. `to_sse()` renders it as a named SSE event."""
+
+    type: StreamEventType
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+    def to_sse(self) -> str:
+        import json
+
+        payload = json.dumps(self.data, ensure_ascii=False, default=str)
+        return f"event: {self.type}\ndata: {payload}\n\n"
+
+
+def sse_event(event_type: str, data: Dict[str, Any]) -> str:
+    """Render a v2 event without building the model (hot path for deltas)."""
+    import json
+
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"

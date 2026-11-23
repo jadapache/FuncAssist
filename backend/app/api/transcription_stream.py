@@ -1,227 +1,97 @@
+"""SSE progress stream for transcription jobs (docs/TRANSCRIPTION_PROCESS.md §4, "SSE")."""
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
+from app.features.transcription import progress
+from app.features.transcription.jobs import job_manager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-  prefix="/transcription",
-  tags=["transcription"],
-  dependencies=[Depends(get_current_user)],
-)
+router = APIRouter(prefix="/transcription", tags=["transcription"], dependencies=[Depends(get_current_user)])
 
-# Global store: transcription_id -> Set of subscriber asyncio.Queue
-_PROGRESS_SUBSCRIBERS: Dict[str, set[asyncio.Queue]] = {}
-_ACTIVE_STREAMS: Dict[str, int] = {}
-_LATEST_PROGRESS: Dict[str, dict[str, Any]] = {}
+HEARTBEAT_S = 20.0
+SSE_HEADERS = {
+  "Cache-Control": "no-cache",
+  "Connection": "keep-alive",
+  "X-Accel-Buffering": "no",
+}
 
 
-def register_subscriber(transcription_id: str) -> asyncio.Queue:
-  """Create and register a dedicated progress queue for an SSE subscriber."""
-  if transcription_id not in _PROGRESS_SUBSCRIBERS:
-    _PROGRESS_SUBSCRIBERS[transcription_id] = set()
-  q: asyncio.Queue = asyncio.Queue(maxsize=50)
-  _PROGRESS_SUBSCRIBERS[transcription_id].add(q)
-  return q
+def format_event(snapshot: dict[str, Any], protocol: str) -> str:
+  data = json.dumps(snapshot, ensure_ascii=False, default=str)
+  if protocol == "v2":
+    return f"id: {snapshot.get('seq', 0)}\nevent: progress\ndata: {data}\n\n"
+  return f"data: {data}\n\n"
 
 
-def unregister_subscriber(transcription_id: str, q: asyncio.Queue) -> None:
-  """Unregister a subscriber queue."""
-  if transcription_id in _PROGRESS_SUBSCRIBERS:
-    _PROGRESS_SUBSCRIBERS[transcription_id].discard(q)
-    if not _PROGRESS_SUBSCRIBERS[transcription_id]:
-      del _PROGRESS_SUBSCRIBERS[transcription_id]
+def format_heartbeat(protocol: str) -> str:
+  if protocol == "v2":
+    return "event: heartbeat\ndata: {}\n\n"
+  return 'data: {"event": "heartbeat", "stage": "heartbeat"}\n\n'
 
 
-def get_or_create_progress_queue(transcription_id: str) -> asyncio.Queue:
-  """Get or create progress queue for a transcription (for test compatibility)."""
-  return register_subscriber(transcription_id)
-
-
-async def emit_progress(transcription_id: str, update: Dict[str, Any]) -> None:
-  """
-  Emit a progress update to all listening clients via SSE.
-  Broadcasts the message to all registered subscriber queues.
-  """
+async def progress_events(job_id: str, initial: dict[str, Any], protocol: str = "v1") -> AsyncGenerator[str, None]:
+  """Current state first, then every update until the job (and its summary) is finished."""
+  queue = progress.subscribe(job_id)
   try:
-    if "timestamp" not in update:
-      update["timestamp"] = datetime.now(timezone.utc).isoformat()
-    _LATEST_PROGRESS[transcription_id] = update
-
-    subscribers = _PROGRESS_SUBSCRIBERS.get(transcription_id, set()).copy()
-    for q in subscribers:
-      if q.full():
-        try:
-          q.get_nowait()
-        except asyncio.QueueEmpty:
-          pass
-      try:
-        q.put_nowait(update)
-      except Exception:
-        pass
-    logger.debug(f"Progress emitted: {transcription_id} - {update.get('stage')} {update.get('progress')}% to {len(subscribers)} subscribers")
-  except Exception as e:
-    logger.warning(f"Failed to emit progress for {transcription_id}: {e}")
-
-
-_MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
-
-
-def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
-  """Store reference to the main asyncio event loop."""
-  global _MAIN_LOOP
-  _MAIN_LOOP = loop
-
-
-def get_main_loop() -> Optional[asyncio.AbstractEventLoop]:
-  """Retrieve the active main asyncio event loop."""
-  global _MAIN_LOOP
-  if _MAIN_LOOP is not None and not _MAIN_LOOP.is_closed():
-    return _MAIN_LOOP
-  try:
-    loop = asyncio.get_running_loop()
-    _MAIN_LOOP = loop
-    return loop
-  except RuntimeError:
-    return _MAIN_LOOP
-
-
-def emit_progress_sync(transcription_id: str, update: Dict[str, Any]) -> None:
-  """Synchronous helper that schedules emit_progress in the running event loop if available."""
-  if "timestamp" not in update:
-    update["timestamp"] = datetime.now(timezone.utc).isoformat()
-  _LATEST_PROGRESS[transcription_id] = update
-
-  # If called on a thread with a running loop:
-  try:
-    loop = asyncio.get_running_loop()
-    set_main_loop(loop)
-    loop.create_task(emit_progress(transcription_id, update))
-    return
-  except RuntimeError:
-    pass
-
-  # If called from a worker thread (e.g. ThreadPoolExecutor / asyncio.to_thread):
-  loop = get_main_loop()
-  if loop is not None and not loop.is_closed():
-    try:
-      asyncio.run_coroutine_threadsafe(emit_progress(transcription_id, update), loop)
+    current = job_manager.snapshot(job_id) or progress.latest(job_id) or initial
+    yield format_event(current, protocol)
+    if progress.is_stream_finished(current):
       return
-    except Exception as exc:
-      logger.warning(f"Failed to dispatch emit_progress to main loop: {exc}")
-
-
-async def _cleanup_queue_after_delay(transcription_id: str, delay_seconds: int = 300) -> None:
-  """Clean up cached progress status after delay."""
-  await asyncio.sleep(delay_seconds)
-  if _ACTIVE_STREAMS.get(transcription_id, 0) == 0:
-    if transcription_id in _LATEST_PROGRESS:
-      stage = str(_LATEST_PROGRESS[transcription_id].get("stage") or "")
-      if stage in {"complete", "failed", "cancelled"}:
-        del _LATEST_PROGRESS[transcription_id]
-        logger.info(f"Cleaned up progress status cache: {transcription_id}")
-
-
-async def transcription_progress_stream(transcription_id: str) -> AsyncGenerator[str, None]:
-  """
-  SSE stream generator for transcription progress.
-  Pushes updates in real time and sends a heartbeat every 20 seconds.
-  """
-  set_main_loop(asyncio.get_running_loop())
-  queue = register_subscriber(transcription_id)
-  _ACTIVE_STREAMS[transcription_id] = _ACTIVE_STREAMS.get(transcription_id, 0) + 1
-  logger.info(f"SSE client connected for {transcription_id} (active: {_ACTIVE_STREAMS[transcription_id]})")
-
-  try:
-    # Send initial connection event
-    initial_event = {
-      "event": "connected",
-      "transcription_id": transcription_id,
-      "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    yield f"data: {json.dumps(initial_event)}\n\n"
-
-    # If we already have a latest progress status, send it immediately
-    latest = _LATEST_PROGRESS.get(transcription_id)
-    if not latest:
-      from app.features.transcription.service import transcription_service
-      prog = transcription_service.get_job_progress(transcription_id)
-      if prog:
-        latest = prog.model_dump()
-
-    if latest and queue.empty():
-      yield f"data: {json.dumps(latest)}\n\n"
-      latest_stage = str(latest.get("stage") or latest.get("status") or "")
-      if latest_stage in {"complete", "failed", "cancelled"} or latest.get("progress") == 100:
-        return
-    elif not latest:
-      error_event = {
-        "event": "error",
-        "stage": "failed",
-        "message": "Trabajo de transcripción no encontrado.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-      }
-      yield f"data: {json.dumps(error_event)}\n\n"
-      return
-
+    if not job_manager.is_running(job_id):
+      return  # stale persisted state: nothing will update it; the client falls back to /status
+    last_seq = int(current.get("seq") or 0)
     while True:
       try:
-        update = await asyncio.wait_for(queue.get(), timeout=20.0)
-        yield f"data: {json.dumps(update)}\n\n"
-
-        # If job has reached a terminal state, close stream gracefully after final message
-        stage = str(update.get("stage") or update.get("status") or "")
-        if stage in {"complete", "failed", "cancelled"} or update.get("progress") == 100:
-          await asyncio.sleep(0.5)
-          break
+        update = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_S)
       except asyncio.TimeoutError:
-        # Heartbeat ping
-        heartbeat = {
-          "event": "heartbeat",
-          "stage": "heartbeat",
-          "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        yield f"data: {json.dumps(heartbeat)}\n\n"
-
-  except asyncio.CancelledError:
-    logger.info(f"SSE stream cancelled by client: {transcription_id}")
-  except Exception as e:
-    logger.error(f"SSE stream error for {transcription_id}: {e}", exc_info=True)
-    error_event = {
-      "event": "error",
-      "stage": "failed",
-      "message": str(e),
-      "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    yield f"data: {json.dumps(error_event)}\n\n"
+        yield format_heartbeat(protocol)
+        if not job_manager.is_running(job_id):
+          final = progress.latest(job_id)
+          if final and int(final.get("seq") or 0) > last_seq:
+            yield format_event(final, protocol)
+          return
+        continue
+      seq = int(update.get("seq") or 0)
+      if seq and seq <= last_seq:
+        continue
+      last_seq = seq or last_seq
+      yield format_event(update, protocol)
+      if progress.is_stream_finished(update):
+        return
   finally:
-    unregister_subscriber(transcription_id, queue)
-    _ACTIVE_STREAMS[transcription_id] = max(0, _ACTIVE_STREAMS.get(transcription_id, 1) - 1)
-    logger.info(f"SSE client disconnected: {transcription_id} (active: {_ACTIVE_STREAMS[transcription_id]})")
-    asyncio.create_task(_cleanup_queue_after_delay(transcription_id, delay_seconds=180))
+    progress.unsubscribe(job_id, queue)
+
+
+def stream_response(job_id: str, initial: dict[str, Any], protocol: str) -> StreamingResponse:
+  return StreamingResponse(
+    progress_events(job_id, initial, "v2" if protocol == "v2" else "v1"),
+    media_type="text/event-stream",
+    headers=SSE_HEADERS,
+  )
 
 
 @router.get("/progress-stream/{transcription_id}")
-async def get_progress_stream(transcription_id: str):
-  """
-  Subscribe to real-time progress updates via Server-Sent Events (SSE).
-  """
-  return StreamingResponse(
-    transcription_progress_stream(transcription_id),
-    media_type="text/event-stream",
-    headers={
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  )
+async def get_progress_stream(
+  transcription_id: str,
+  protocol: Optional[str] = Query(default=None),
+  last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+  current_user: dict[str, Any] = Depends(get_current_user),
+) -> StreamingResponse:
+  """Real-time progress. `?protocol=v2` sends named events with ids; otherwise data-only frames (v1)."""
+  from app.api.transcription import load_owned_record
+  from app.features.transcription.service import job_status
+
+  record = await load_owned_record(transcription_id, current_user)
+  if last_event_id:
+    logger.debug("SSE reconnect for %s after event %s", transcription_id, last_event_id)
+  return stream_response(record["id"], job_status(record), protocol or "v1")

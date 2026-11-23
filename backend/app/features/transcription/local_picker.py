@@ -9,7 +9,8 @@ from typing import Any, Optional
 from app.features.transcription.storage import (
   SUPPORTED_FORMATS,
   SUPPORTED_VIDEO_EXTS,
-  _format_size_bytes,
+  format_size_bytes,
+  match_local_root,
   validate_file,
 )
 
@@ -64,8 +65,14 @@ def open_native_file_dialog_sync() -> Optional[str]:
 
 def inspect_local_file(file_path_str: str) -> dict[str, Any]:
   """Inspects an existing local file and returns metadata."""
-  p = Path(file_path_str.strip('\'"'))
-  if not p.exists() or not p.is_file():
+  match = match_local_root(file_path_str)
+  if match is None:
+    return {"ok": False, "exists": False, "error": "Ruta local no permitida."}
+  real_path, root_prefix = match
+  if not real_path.startswith(root_prefix):
+    return {"ok": False, "exists": False, "error": "Ruta local no permitida."}
+  p = Path(real_path)
+  if not p.is_file():
     return {
       "ok": False,
       "exists": False,
@@ -85,9 +92,9 @@ def inspect_local_file(file_path_str: str) -> dict[str, Any]:
   return {
     "ok": True,
     "exists": True,
-    "path": str(p.resolve()),
+    "path": str(p),
     "filename": p.name,
     "size_bytes": size,
-    "size_formatted": _format_size_bytes(size),
+    "size_formatted": format_size_bytes(size),
     "is_video": ext in SUPPORTED_VIDEO_EXTS,
   }

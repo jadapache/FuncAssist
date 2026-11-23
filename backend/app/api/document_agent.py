@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
+import time
+from dataclasses import dataclass
 import re
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 import json
 import logging
 import uuid
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user, get_chat_repository
+from app.api.deps import get_chat_repository, get_current_user, get_streaming_chat_repository
 from app.context.knowledge import extract_text
 from app.services.event_serializer import AgentRunEmitter, run_registry
 
@@ -30,13 +33,27 @@ from app.core.document_agent.schema import (
     AssetLocator,
     VerificationReport,
 )
-from app.ai.artifacts import extract_artifacts, artifacts_to_dict, build_fallback_artifact
+from app.ai.artifacts import (
+    ArtifactStreamSplitter,
+    artifacts_to_dict,
+    build_fallback_artifact,
+    extract_artifacts,
+)
+from app.ai.errors import AIError
+from app.ai.events import AgentEvent as AIAgentEvent, sse_event
+from app.ai.logging import log_ai_call
 from app.ai.runner import (
+    TRUNCATION_NOTICE,
     AgenticChatConfig,
+    error_log_fields,
     run_agentic_chat_stream,
     run_grounded_feature,
     run_grounded_feature_stream,
 )
+from app.ai.intent_classifier import classifier_enabled, classify_intent_with_model
+from app.ai.providers.factory import resolve_provider
+from app.ai.stream_control import StreamStopped, iterate_until_stopped
+from app.db.repositories.history_repository import ChatRepository
 from app.core.document_agent.validator import DocumentOperationValidator
 from app.core.template_storage import list_templates, get_template_file_path
 from app.features.mejoras.docx_builder import create_mejoras_docx
@@ -48,6 +65,7 @@ from app.services.rubric_evaluator import RubricEvaluator
 from app.services.template_renderer.docx_engine import DocxTemplateRenderer
 from app.services.template_renderer.xlsx_engine import XlsxTemplateRenderer
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/doc-agent",
     tags=["document-agent"],
@@ -55,36 +73,111 @@ router = APIRouter(
 )
 
 
+ARTIFACT_INTENTS = frozenset({"generic_plan", "generic_report", "template_mutation"})
+
+# Follow-ups that ask to (re)produce the document already open in the conversation. Matched only
+# when there is an active artifact, so they never turn an ordinary chat message into a document.
+_ARTIFACT_FOLLOW_UP_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bregener",                                              # regenera, regenerar, regenéralo
+        r"\bvuelve a (generar|hacer|crear|redactar|escribir)",
+        r"\b(gen[eé]ralo|gen[eé]rala|hazlo|hazla|cr[eé]alo|red[aá]ctalo)\s+(de nuevo|otra vez)",
+        r"\brehaz|\brehacer",
+        r"\b(est[aá]|qued[oó]|sali[oó]|vino|lleg[oó]|aparece)\s+(vac[ií][oa]|en blanco|incomplet[oa]|cortad[oa]|truncad[oa])",
+        r"\b(documento|artefacto|archivo|plan|informe)\s+(vac[ií]o|en blanco|incompleto|cortado|truncado)",
+        r"\b(no tiene|sin) contenido",
+        r"\bcompl[eé]t(alo|ala|alos|alas)\b",
+        r"\bcompleta\s+(el|la|las|los)\s+(documento|artefacto|plan|informe|reporte|plantilla|secci[oó]n|secciones)",
+        r"\btermina\s+(el|la)\s+(documento|artefacto|plan|informe|reporte|secci[oó]n)",
+        r"\bcorrige\s+(el|la)\s+(documento|artefacto|plan|informe|reporte|plantilla)",
+        r"\bcontin[uú]a\s+(con\s+)?(el|la)\s+(documento|artefacto|plan|informe|reporte|secci[oó]n)",
+        r"\bfalta(n)?\s+(secciones|contenido|el contenido|partes)",
+    )
+]
+
+
+def is_artifact_follow_up(prompt: str) -> bool:
+    """Whether the message asks to regenerate, complete or fix the current document."""
+    text = (prompt or "").strip()
+    return bool(text) and any(p.search(text) for p in _ARTIFACT_FOLLOW_UP_PATTERNS)
+
+
+def infer_active_artifact_intent(
+    artifacts: List[Dict[str, Any]] | None,
+    template_id: Optional[str] = None,
+    has_current_document: bool = False,
+) -> Optional[str]:
+    """Intent that produced the conversation's active (latest) artifact, or None without one."""
+    if artifacts:
+        latest = artifacts[-1]
+        stored = str(latest.get("intent") or "")
+        if stored in ARTIFACT_INTENTS:
+            return stored
+        if template_id:
+            return "template_mutation"
+        title = str(latest.get("title") or "").lower()
+        if "plan" in title:
+            return "generic_plan"
+        return "generic_report"
+    if has_current_document:
+        return "template_mutation" if template_id else "generic_report"
+    return None
+
+
 def classify_prompt_intent(
     prompt: str,
     mode: Optional[str] = None,
     template_id: Optional[str] = None,
+    active_artifact_intent: Optional[str] = None,
 ) -> str:
-    """Classifies user prompt intent into: generic_plan, generic_report, custom feature slug, template_mutation, or chat."""
+    """Classifies user prompt intent into: generic_plan, generic_report, custom feature slug, template_mutation, or chat.
+
+    `active_artifact_intent` is the intent of the conversation's current document, if any: a
+    follow-up such as "regenera" or "el documento está vacío" then keeps that intent, even when
+    phrased as a question, instead of falling into conversational chat.
+    """
+    return classify_prompt_intent_by_rules(prompt, mode, template_id, active_artifact_intent)[0]
+
+
+def classify_prompt_intent_by_rules(
+    prompt: str,
+    mode: Optional[str] = None,
+    template_id: Optional[str] = None,
+    active_artifact_intent: Optional[str] = None,
+) -> tuple[str, bool]:
+    """Rule-based intent plus whether a rule actually decided it.
+
+    Undecided (False): the message fell through every rule to the default "chat", or it is a
+    question while a document is active (it may ask to change that document).
+    """
     if mode and mode not in {"auto", "default"}:
         if mode in {"plan", "generic_plan"}:
-            return "generic_plan"
+            return "generic_plan", True
         if mode in {"report", "informe", "generic_report"}:
-            return "generic_report"
+            return "generic_report", True
         if mode in {"chat", "qa"}:
-            return "chat"
+            return "chat", True
         if mode in {"template", "template_mutation"}:
-            return "template_mutation"
-        return mode
+            return "template_mutation", True
+        return mode, True
 
     p_trimmed = prompt.strip()
     if p_trimmed.startswith("/"):
         first_token = p_trimmed.split()[0][1:].lower()
         if first_token in {"plan", "generic_plan"}:
-            return "generic_plan"
+            return "generic_plan", True
         if first_token in {"report", "informe", "generic_report"}:
-            return "generic_report"
+            return "generic_report", True
         if first_token in {"plantilla", "template", "template_mutation"}:
-            return "template_mutation"
+            return "template_mutation", True
         if first_token in {"pregunta", "question", "ask"}:
-            return "ask_product"
+            return "ask_product", True
         if first_token:
-            return first_token
+            return first_token, True
+
+    if active_artifact_intent in ARTIFACT_INTENTS and is_artifact_follow_up(p_trimmed):
+        return active_artifact_intent, True
 
     p_lower = p_trimmed.lower()
 
@@ -94,12 +187,12 @@ def classify_prompt_intent(
         or "?" in p_lower
     )
     if is_question:
-        return "chat"
+        return "chat", active_artifact_intent not in ARTIFACT_INTENTS
 
     # If the user has an active corporate template selected and isn't asking a general question,
     # default to mutating/populating that template artifact directly.
     if template_id and template_id.strip():
-        return "template_mutation"
+        return "template_mutation", True
 
     if (
         "plan de prueba" in p_lower
@@ -109,14 +202,14 @@ def classify_prompt_intent(
         or "crea un plan" in p_lower
         or "elabora un plan" in p_lower
     ):
-        return "generic_plan"
+        return "generic_plan", True
 
     if (
         "informe" in p_lower
         or "reporte" in p_lower
         or "resumen ejecutivo" in p_lower
     ):
-        return "generic_report"
+        return "generic_report", True
 
     template_keywords = [
         "completa la plantilla",
@@ -145,9 +238,24 @@ def classify_prompt_intent(
         "regenerar el documento",
     ]
     if any(kw in p_lower for kw in template_keywords):
-        return "template_mutation"
+        return "template_mutation", True
 
-    return "chat"
+    return "chat", False
+
+
+# Undecided messages are sent to the fast model only when they plausibly concern a document, so
+# small talk ("gracias", "hola") never pays the extra call.
+_DOCUMENT_HINT = re.compile(
+    r"\b(documento|doc|plan|informe|reporte|plantilla|matriz|acta|especificaci[oó]n|secci[oó]n|"
+    r"artefacto|formato|casos de prueba|requerimientos?|entregable|word|excel|docx|xlsx)\b",
+    re.IGNORECASE,
+)
+
+
+def needs_model_classification(prompt: str, decided: bool, active_artifact_intent: Optional[str]) -> bool:
+    if decided:
+        return False
+    return active_artifact_intent in ARTIFACT_INTENTS or bool(_DOCUMENT_HINT.search(prompt or ""))
 
 
 async def _load_active_template_info(template_id: str | None = None) -> tuple[str, str]:
@@ -203,6 +311,10 @@ class AgenticPromptRequest(CamelModel):
     template_id: Optional[str] = Field(None, alias="templateId")
     run_id: Optional[str] = Field(None, alias="runId")
     conversation_id: Optional[str] = Field(None, alias="conversationId")
+    # Ids generated by the client for the user turn and the reply, so server-side persistence and
+    # the client autosave refer to the same rows instead of creating duplicates.
+    user_message_id: Optional[str] = Field(None, alias="userMessageId", max_length=36)
+    assistant_message_id: Optional[str] = Field(None, alias="assistantMessageId", max_length=36)
     provider: Optional[str] = None
     model: Optional[str] = None
 
@@ -320,6 +432,39 @@ def validate_operation(payload: Dict[str, Any]):
     return {"valid": valid, "message": message}
 
 
+
+HISTORY_DB_LIMIT = 60
+
+
+async def _resolve_chat_history(
+    req: "AgenticPromptRequest",
+    chat_repo: ChatRepository,
+    user_id: str | None,
+) -> list[dict[str, Any]] | list[str] | None:
+    """Pick the most complete history source for the agentic chat.
+
+    1. Persisted messages of the conversation (authoritative, scoped to the user).
+    2. Structured `conversationHistory` sent by the client.
+    3. Legacy `chat_context` lines (`"role: content"`), parsed downstream.
+    """
+    if req.conversation_id:
+        try:
+            stored = await chat_repo.get_session_messages(req.conversation_id, limit=0, user_id=user_id)
+            turns = [
+                {"role": m.get("role"), "content": m.get("content")}
+                for m in stored[-HISTORY_DB_LIMIT:]
+                if m.get("role") in ("user", "assistant") and m.get("content")
+            ]
+            if turns:
+                return turns
+        except Exception as exc:  # history is best-effort; never block the answer
+            logger.warning("Could not load conversation history %s: %s", req.conversation_id, exc)
+    if req.conversation_history:
+        return req.conversation_history
+    if req.chat_context:
+        return req.chat_context if isinstance(req.chat_context, list) else [str(req.chat_context)]
+    return None
+
 @router.post("/agentic-prompt", response_model=AgenticPromptResponse)
 async def handle_agentic_prompt(
     req: AgenticPromptRequest,
@@ -335,8 +480,12 @@ async def handle_agentic_prompt(
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
     active_doc_state = req.doc_state
+    active_intent = await _resolve_active_artifact_intent(req, chat_repo, user_id)
+    # "regenera", "el documento está vacío"... go to the LLM to rebuild the document, never to
+    # the keyword handlers below (which would treat "no es" or "corrige" as a field correction).
+    follow_up = active_intent is not None and is_artifact_follow_up(prompt_str)
 
-    is_question = (
+    is_question = follow_up or (
         prompt_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
         or "?" in prompt_lower
     )
@@ -463,38 +612,165 @@ async def handle_agentic_prompt(
         )
 
     # Case 4: Intelligent Agentic Chat, Plan/Report Artifacts, or Template Generation
-    chat_ctx_str = None
-    if req.chat_context:
-        if isinstance(req.chat_context, list):
-            chat_ctx_str = "\n".join(req.chat_context)
-        else:
-            chat_ctx_str = str(req.chat_context)
+    prepared = await _prepare_chat_run(req, chat_repo, user_id, active_intent)
+    cfg = prepared.cfg
+    cfg.run_info["protocol"] = "json"
 
-    sources_to_use = req.sources or ["knowledge"]
-    intent = classify_prompt_intent(prompt_str, req.mode, template_id=req.template_id)
+    try:
+        accumulated: list[str] = []
+        async for chunk in run_agentic_chat_stream(cfg):
+            if isinstance(chunk, str):  # typed AgentEvents only matter to streaming clients
+                accumulated.append(chunk)
+    except Exception as err:
+        _log_request_failure(cfg, err, streamed=False)
+        raise HTTPException(status_code=502, detail=_format_stream_error(err)) from err
 
-    query_text = prompt_str
+    full_content = "".join(accumulated)
+    outcome = _finalize_answer(full_content, prepared)
+    await _persist_turn(
+        chat_repo,
+        req=req,
+        user_id=user_id,
+        conv_id=req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}",
+        user_text=prompt_str,
+        prepared=prepared,
+        outcome=outcome,
+        full_content=full_content,
+    )
+
+    return AgenticPromptResponse(
+        intent_detected=prepared.intent,
+        requires_document_mutation=outcome.is_template,
+        rag_knowledge_used=prepared.sources,
+        planned_operations=[],
+        operations=[],
+        validation_status={"valid": True, "details": ["Agentic generation successful."]},
+        assistant_message=outcome.assistant_message,
+        answer=full_content,
+        document_updates=full_content if outcome.is_template else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for the agentic chat endpoints
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_active_artifact_intent(
+    req: "AgenticPromptRequest", chat_repo: ChatRepository, user_id: str | None,
+) -> Optional[str]:
+    """Intent of the conversation's current document (from the stored session), if there is one."""
+    artifacts: List[Dict[str, Any]] = []
+    if req.conversation_id:
+        try:
+            artifacts = await chat_repo.get_session_artifacts(req.conversation_id, user_id=user_id)
+        except Exception as exc:
+            logger.warning("Could not load artifacts of conversation %s: %s", req.conversation_id, exc, exc_info=True)
+    return infer_active_artifact_intent(
+        artifacts, req.template_id, has_current_document=bool((req.current_document or "").strip()),
+    )
+
+
+@dataclass
+class _PreparedRun:
+    cfg: AgenticChatConfig
+    intent: str
+    query_text: str
+    sources: List[str]
+    template_ext: str
+
+
+@dataclass
+class _AnswerOutcome:
+    artifacts: List[Dict[str, Any]]
+    clean_answer: str
+    assistant_message: str
+    is_template: bool
+    is_generative: bool
+
+
+def _strip_command(prompt_str: str) -> str:
     if prompt_str.startswith("/plan"):
-        query_text = prompt_str[5:].strip() or "Generar plan de pruebas e implementación detallado"
-    elif prompt_str.startswith("/informe"):
-        query_text = prompt_str[8:].strip() or "Generar informe técnico y ejecutivo detallado"
-    elif prompt_str.startswith("/pregunta"):
-        query_text = prompt_str[9:].strip()
-    elif prompt_str.startswith("/plantilla"):
-        query_text = prompt_str[10:].strip()
+        return prompt_str[5:].strip() or "Generar plan de pruebas e implementación detallado"
+    if prompt_str.startswith("/informe"):
+        return prompt_str[8:].strip() or "Generar informe técnico y ejecutivo detallado"
+    if prompt_str.startswith("/pregunta"):
+        return prompt_str[9:].strip()
+    if prompt_str.startswith("/plantilla"):
+        return prompt_str[10:].strip()
+    return prompt_str
 
+
+async def _resolve_intent(
+    req: "AgenticPromptRequest", user_id: str | None, active_intent: Optional[str],
+) -> tuple[str, Dict[str, Any]]:
+    """Rules first; the fast model only for undecided, document-related messages.
+
+    Returns the intent and run info for the log: `intent_source` is "rules", "model" or
+    "model_cache", plus `intent_rules` (what the rules said) when the model changed it.
+    """
+    prompt_str = req.prompt_text
+    intent, decided = classify_prompt_intent_by_rules(
+        prompt_str, req.mode, template_id=req.template_id, active_artifact_intent=active_intent,
+    )
+    info: Dict[str, Any] = {"intent_source": "rules"}
+    if not classifier_enabled() or not needs_model_classification(prompt_str, decided, active_intent):
+        return intent, info
+
+    try:
+        fast = await asyncio.to_thread(
+            resolve_provider,
+            provider_name=req.provider,
+            user_id=user_id,
+            tier="fast",
+            main_model=req.model,
+        )
+    except ValueError as exc:
+        logger.info("Intent classifier skipped, no fast provider: %s", exc)
+        return intent, info
+
+    t0 = time.perf_counter()
+    decision = await classify_intent_with_model(
+        prompt_str,
+        provider=fast,
+        active_intent=active_intent,
+        has_template=bool((req.template_id or "").strip()),
+    )
+    info["intent_classifier_ms"] = round((time.perf_counter() - t0) * 1000.0, 1)
+    if decision is None:
+        return intent, info
+    info["intent_source"] = "model_cache" if decision.cached else "model"
+    if decision.intent != intent:
+        info["intent_rules"] = intent
+    return decision.intent, info
+
+
+async def _prepare_chat_run(
+    req: "AgenticPromptRequest",
+    chat_repo: ChatRepository,
+    user_id: str | None,
+    active_intent: Optional[str],
+) -> _PreparedRun:
+    """Validate the request and build the runner configuration (shared by both endpoints)."""
     from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS
+
     if req.provider and req.provider.lower() in FORBIDDEN_BACKEND_PROVIDERS:
         raise HTTPException(
             status_code=400,
             detail="Los modelos locales se ejecutan exclusivamente en el navegador mediante WebLLM.",
         )
     if req.model and req.model.lower().endswith(".gguf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Modelos GGUF no están admitidos en el backend.",
-        )
+        raise HTTPException(status_code=400, detail="Modelos GGUF no están admitidos en el backend.")
 
+    prompt_str = req.prompt_text
+    chat_ctx_str = None
+    if req.chat_context:
+        chat_ctx_str = "\n".join(req.chat_context) if isinstance(req.chat_context, list) else str(req.chat_context)
+    chat_history = await _resolve_chat_history(req, chat_repo, user_id)
+
+    sources_to_use = req.sources or ["knowledge"]
+    intent, intent_info = await _resolve_intent(req, user_id, active_intent)
+    query_text = _strip_command(prompt_str)
     template_content, template_ext = await _load_active_template_info(req.template_id)
     cfg = AgenticChatConfig(
         query=query_text,
@@ -503,6 +779,8 @@ async def handle_agentic_prompt(
         sources=sources_to_use,
         document_ids=req.document_ids or [],
         chat_context=chat_ctx_str,
+        history=chat_history,
+        conversation_id=req.conversation_id,
         template_content=template_content,
         template_extension=template_ext,
         images=req.images,
@@ -511,93 +789,163 @@ async def handle_agentic_prompt(
         provider=req.provider,
         model=req.model,
     )
+    cfg.run_info.update(intent_info)
+    if active_intent and intent == active_intent and is_artifact_follow_up(prompt_str):
+        cfg.run_info["artifact_follow_up"] = True
+    return _PreparedRun(cfg=cfg, intent=intent, query_text=query_text, sources=sources_to_use, template_ext=template_ext)
 
+
+def _finalize_answer(full_content: str, prepared: _PreparedRun) -> _AnswerOutcome:
+    """Extract artifacts and the chat message from the raw answer."""
+    intent = prepared.intent
+    parsed_arts, clean_ans = extract_artifacts(full_content)
+    art_dicts = artifacts_to_dict(parsed_arts)
+    is_generative = intent in ARTIFACT_INTENTS
+
+    if not art_dicts and is_generative and full_content.strip():
+        fallback_title = "Documento" if intent == "template_mutation" else ("Plan" if intent == "generic_plan" else "Informe")
+        fallback_art = build_fallback_artifact(full_content, default_title=fallback_title, default_extension=prepared.template_ext)
+        art_dicts = artifacts_to_dict([fallback_art])
+
+    is_template = intent == "template_mutation"
+    if parsed_arts:
+        asst_msg = clean_ans
+    elif is_template:
+        asst_msg = "He generado y estructurado el documento corporativo en el panel de artefactos."
+    elif is_generative:
+        asst_msg = "He elaborado el documento solicitado en el panel de artefactos."
+    else:
+        asst_msg = full_content
+    if prepared.cfg.run_info.get("truncated") and TRUNCATION_NOTICE not in asst_msg:
+        asst_msg = f"{asst_msg}\n\n_({TRUNCATION_NOTICE})_".strip()
+    for art in art_dicts:
+        art["intent"] = intent  # lets a later "regenera" keep the same intent
+    return _AnswerOutcome(
+        artifacts=art_dicts,
+        clean_answer=clean_ans,
+        assistant_message=asst_msg,
+        is_template=is_template,
+        is_generative=is_generative,
+    )
+
+
+def _merge_session_artifacts(existing: List[Dict[str, Any]], new: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Add new artifacts to the stored ones; a new artifact with the same title replaces the old one."""
+    merged = [dict(a) for a in existing]
+    for art in new:
+        key = str(art.get("title", "")).strip().lower()
+        idx = next((i for i, a in enumerate(merged) if str(a.get("title", "")).strip().lower() == key), None)
+        if idx is None:
+            merged.append(dict(art))
+        else:
+            previous = merged[idx]
+            updated = {**previous, **art}
+            if previous.get("id"):
+                updated["id"] = previous["id"]  # keep the client's identity for the artifact
+            merged[idx] = updated
+    return merged
+
+
+async def _persist_turn(
+    chat_repo: ChatRepository,
+    *,
+    req: "AgenticPromptRequest",
+    user_id: str | None,
+    conv_id: str,
+    user_text: str,
+    prepared: _PreparedRun,
+    outcome: _AnswerOutcome,
+    full_content: str,
+) -> None:
+    """Store the turn. Client-generated ids make this idempotent with the client autosave."""
     try:
-        accumulated: list[str] = []
-        async for chunk in run_agentic_chat_stream(cfg):
-            accumulated.append(chunk)
-
-        full_content = "".join(accumulated)
-        parsed_arts, clean_ans = extract_artifacts(full_content)
-        art_dicts = artifacts_to_dict(parsed_arts)
-        is_generative_intent = intent in ("template_mutation", "generic_plan", "generic_report")
-
-        if not art_dicts and is_generative_intent and full_content.strip():
-            fallback_title = "Documento" if intent == "template_mutation" else ("Plan" if intent == "generic_plan" else "Informe")
-            fallback_art = build_fallback_artifact(full_content, default_title=fallback_title, default_extension=template_ext)
-            art_dicts = artifacts_to_dict([fallback_art])
-
-        is_template = (intent == "template_mutation")
-
-        asst_msg = clean_ans if parsed_arts else (
-            "He generado y estructurado el documento corporativo en el visor de artefactos."
-            if is_template else (
-                "He elaborado el documento solicitado en el panel de artefactos."
-                if is_generative_intent else full_content
-            )
+        await chat_repo.save_message(
+            session_id=conv_id,
+            role="user",
+            content=user_text,
+            user_id=user_id,
+            id=req.user_message_id,
         )
-
-        conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
-        try:
-            await chat_repo.save_message(
-                session_id=conv_id,
-                role="user",
-                content=prompt_str,
-                user_id=user_id,
-            )
-            await chat_repo.save_message(
-                session_id=conv_id,
-                role="assistant",
-                content=asst_msg,
-                context_sources=[{"source": s} for s in sources_to_use],
-                user_id=user_id,
-            )
-            await chat_repo.save_session({
-                "id": conv_id,
-                "user_id": user_id,
-                "title": prompt_str[:35],
-                "feature_slug": req.feature or "general",
-                "document_content": full_content if is_template else "",
-                "artifacts": art_dicts,
-            })
-        except Exception:
-            pass
-
-        return AgenticPromptResponse(
-            intent_detected=intent,
-            requires_document_mutation=is_template,
-            rag_knowledge_used=sources_to_use,
-            planned_operations=[],
-            operations=[],
-            validation_status={"valid": True, "details": ["Agentic generation successful."]},
-            assistant_message=asst_msg,
-            answer=full_content,
-            document_updates=full_content if is_template else None,
+        await chat_repo.save_message(
+            session_id=conv_id,
+            role="assistant",
+            content=outcome.assistant_message,
+            context_sources=[{"source": s} for s in prepared.sources],
+            user_id=user_id,
+            id=req.assistant_message_id,
         )
-    except Exception as err:
-        err_msg = str(err)
-        lower_err = err_msg.lower()
-        if any(term in lower_err for term in ["api key", "unauthorized", "authentication", "auth", "401", "forbidden", "403", "invalid_api_key"]):
-            err_msg = f"Error de autenticación con el modelo LLM: La API key no es válida o expiró ({err_msg}). Por favor configúrala en Ajustes."
-        raise HTTPException(status_code=502, detail=err_msg)
+        session_data: Dict[str, Any] = {
+            "id": conv_id,
+            "user_id": user_id,
+            "title": user_text[:35],
+            "feature_slug": req.feature or "general",
+        }
+        # Only touch the stored document/artifacts when this turn produced them: a chat turn
+        # must not wipe the conversation's document.
+        if outcome.artifacts:
+            existing = await chat_repo.get_session_artifacts(conv_id, user_id=user_id)
+            session_data["artifacts"] = _merge_session_artifacts(existing, outcome.artifacts)
+        if outcome.is_template:
+            session_data["document_content"] = full_content
+        await chat_repo.save_session(session_data)
+    except Exception as exc:
+        logger.warning("Could not persist chat turn of conversation %s: %s", conv_id, exc, exc_info=True)
+
+
+def _log_request_failure(cfg: AgenticChatConfig, err: BaseException, *, streamed: bool, stage: str | None = None) -> None:
+    """Log a failed chat request unless the runner already logged it."""
+    info = cfg.run_info
+    if info.get("logged"):
+        return
+    log_ai_call({
+        "feature": cfg.feature,
+        "refused": False,
+        "intent": cfg.intent,
+        "route": info.get("route"),
+        "stage": stage or info.get("stage") or "endpoint",
+        "conversation_id": cfg.conversation_id,
+        "provider": info.get("provider") or cfg.provider,
+        "model": info.get("model") or cfg.model,
+        "streamed": streamed,
+        "protocol": info.get("protocol"),
+        "intent_source": info.get("intent_source"),
+        **error_log_fields(err),
+    })
+    info["logged"] = True
+
+
+def _error_code(err: BaseException) -> str:
+    return err.code if isinstance(err, AIError) else "run_exception"
+
+
+CANCEL_POLL_S = 0.5
 
 
 @router.post("/agentic-prompt-stream")
 async def handle_agentic_prompt_stream(
+    request: Request,
     req: AgenticPromptRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    chat_repo: ChatRepository = Depends(get_chat_repository),
+    chat_repo: ChatRepository = Depends(get_streaming_chat_repository),
+    protocol: str = "v1",
 ):
     """
     Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
-    Streams token events live as text is produced by the LLM.
+
+    `protocol=v1` (default, legacy): `data:` lines with run.* envelopes plus `token`/`full` packets.
+    `protocol=v2`: named events — status, plan, delta, artifact_start/artifact_delta/artifact_end,
+    tool_call, tool_result, usage, error and a final `done` carrying the full response.
     """
     user_id = current_user["id"]
     prompt_str = req.prompt_text
     prompt_lower = prompt_str.strip().lower()
+    v2 = protocol == "v2"
+
+    active_intent = await _resolve_active_artifact_intent(req, chat_repo, user_id)
+    follow_up = active_intent is not None and is_artifact_follow_up(prompt_str)
 
     # Conversational inquiries must always go to LLM runner, never mock fast-handlers
-    is_question = (
+    is_question = follow_up or (
         prompt_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
         or "?" in prompt_lower
     )
@@ -610,175 +958,187 @@ async def handle_agentic_prompt_stream(
     if is_image_intent or is_correction_intent or is_responsables_intent:
         res = await handle_agentic_prompt(req, current_user=current_user, chat_repo=chat_repo)
         async def fast_gen():
-            yield f"data: {json.dumps({'type': 'full', 'data': res.model_dump(by_alias=True)})}\n\n"
+            payload = res.model_dump(by_alias=True)
+            if v2:
+                yield sse_event("done", payload)
+            else:
+                yield f"data: {json.dumps({'type': 'full', 'data': payload})}\n\n"
         return StreamingResponse(fast_gen(), media_type="text/event-stream")
 
-    # Dynamic Agentic Chat / Plan / Report / Template Streaming
-    chat_ctx_str = None
-    if req.chat_context:
-        if isinstance(req.chat_context, list):
-            chat_ctx_str = "\n".join(req.chat_context)
-        else:
-            chat_ctx_str = str(req.chat_context)
-
-    sources_to_use = req.sources or ["knowledge"]
-    intent = classify_prompt_intent(prompt_str, req.mode, template_id=req.template_id)
-
-    query_text = prompt_str
-    if prompt_str.startswith("/plan"):
-        query_text = prompt_str[5:].strip() or "Generar plan de pruebas e implementación detallado"
-    elif prompt_str.startswith("/informe"):
-        query_text = prompt_str[8:].strip() or "Generar informe técnico y ejecutivo detallado"
-    elif prompt_str.startswith("/pregunta"):
-        query_text = prompt_str[9:].strip()
-    elif prompt_str.startswith("/plantilla"):
-        query_text = prompt_str[10:].strip()
-
-    from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS
-    if req.provider and req.provider.lower() in FORBIDDEN_BACKEND_PROVIDERS:
-        raise HTTPException(
-            status_code=400,
-            detail="Los modelos locales se ejecutan exclusivamente en el navegador mediante WebLLM.",
-        )
-    if req.model and req.model.lower().endswith(".gguf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Modelos GGUF no están admitidos en el backend.",
-        )
-
-    template_content, template_ext = await _load_active_template_info(req.template_id)
-    cfg = AgenticChatConfig(
-        query=query_text,
-        intent=intent,
-        feature=req.feature or "mejoras_doc",
-        sources=sources_to_use,
-        document_ids=req.document_ids or [],
-        chat_context=chat_ctx_str,
-        template_content=template_content,
-        template_extension=template_ext,
-        images=req.images,
-        attached_docs=req.attached_docs,
-        user_id=user_id,
-        provider=req.provider,
-        model=req.model,
-    )
+    prepared = await _prepare_chat_run(req, chat_repo, user_id, active_intent)
+    cfg = prepared.cfg
+    cfg.run_info["protocol"] = "v2" if v2 else "v1"
+    intent = prepared.intent
+    query_text = prepared.query_text
+    sources_to_use = prepared.sources
 
     run_id = req.run_id or f"run-{uuid.uuid4().hex[:12]}"
     conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
     emitter = AgentRunEmitter(run_id=run_id, conversation_id=conv_id)
     run_registry.register(emitter)
 
+    last_disconnect_check = 0.0
+
+    async def should_stop() -> Optional[str]:
+        nonlocal last_disconnect_check
+        if emitter.is_cancelled:
+            return "cancelled"
+        now = time.monotonic()
+        if now - last_disconnect_check >= CANCEL_POLL_S:
+            last_disconnect_check = now
+            if await request.is_disconnected():
+                emitter.request_cancellation(reason="Client disconnected")
+                return "disconnected"
+        return None
+
+    def v1_packets_for(event: AIAgentEvent) -> List[str]:
+        """Map typed runner events onto the legacy step events the v1 client understands."""
+        data = event.data
+        if event.type == "tool_call":
+            return [emitter.step_started(f"step-tool-{data.get('id', '')}", f"Usando herramienta: {data.get('name')}").to_sse_packet()]
+        if event.type == "tool_result":
+            return [emitter.step_completed(f"step-tool-{data.get('id', '')}", f"Herramienta {data.get('name')} finalizada").to_sse_packet()]
+        if event.type == "plan":
+            sections = data.get("sections") or []
+            return [
+                emitter.step_started(f"step-section-{i}", f"Sección: {title}").to_sse_packet()
+                for i, title in enumerate(sections)
+            ]
+        if event.type == "status" and data.get("stage") == "section":
+            index = data.get("section_index", 0)
+            label = f"Sección: {data.get('section_title', '')}"
+            if data.get("pending"):
+                return [emitter.step_failed(f"step-section-{index}", label, "Sección pendiente").to_sse_packet()]
+            return [emitter.step_completed(f"step-section-{index}", label).to_sse_packet()]
+        return []
+
     async def stream_generator():
-        accumulated_chunks = []
+        accumulated_chunks: List[str] = []
+        splitter = ArtifactStreamSplitter()
         try:
-            yield emitter.started(task_profile=intent, prompt=query_text).to_sse_packet()
-            yield emitter.step_started("step-classify", "Clasificando intención...").to_sse_packet()
-            yield f"data: {json.dumps({'type': 'intent', 'intent': intent})}\n\n"
-            yield emitter.step_completed("step-classify", f"Intención: {intent}").to_sse_packet()
-            yield emitter.step_started("step-generate", "Generando contenido...").to_sse_packet()
+            if v2:
+                yield sse_event("status", {
+                    "message": "Intención detectada",
+                    "stage": "classify",
+                    "intent": intent,
+                    "run_id": run_id,
+                    "conversation_id": conv_id,
+                })
+            else:
+                yield emitter.started(task_profile=intent, prompt=query_text).to_sse_packet()
+                yield emitter.step_started("step-classify", "Clasificando intención...").to_sse_packet()
+                yield f"data: {json.dumps({'type': 'intent', 'intent': intent})}\n\n"
+                yield emitter.step_completed("step-classify", f"Intención: {intent}").to_sse_packet()
+                yield emitter.step_started("step-generate", "Generando contenido...").to_sse_packet()
 
-            async for chunk in run_agentic_chat_stream(cfg):
-                if emitter.is_cancelled:
-                    yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
-                    return
+            async for chunk in iterate_until_stopped(run_agentic_chat_stream(cfg), should_stop, poll_s=CANCEL_POLL_S):
+                if isinstance(chunk, AIAgentEvent):
+                    if v2:
+                        yield chunk.to_sse()
+                    else:
+                        for packet in v1_packets_for(chunk):
+                            yield packet
+                    continue
                 accumulated_chunks.append(chunk)
-                yield emitter.message_delta(chunk).to_sse_packet()
-                yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
+                if v2:
+                    for event_type, data in splitter.feed(chunk):
+                        yield sse_event(event_type, data)
+                else:
+                    yield emitter.message_delta(chunk).to_sse_packet()
+                    yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
 
-            if emitter.is_cancelled:
-                yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
-                return
+            if v2:
+                for event_type, data in splitter.close():
+                    yield sse_event(event_type, data)
 
             full_content = "".join(accumulated_chunks)
             if not full_content.strip():
                 err_text = "El modelo LLM no generó contenido. Verifica tu conexión o clave de API en Configuración."
-                yield emitter.failed("EMPTY_RESPONSE", err_text).to_sse_packet()
-                yield f"data: {json.dumps({'type': 'error', 'message': err_text})}\n\n"
+                if v2:
+                    yield sse_event("error", {"code": "empty_response", "message": err_text})
+                else:
+                    yield emitter.failed("EMPTY_RESPONSE", err_text).to_sse_packet()
+                    yield f"data: {json.dumps({'type': 'error', 'message': err_text})}\n\n"
                 return
 
-            parsed_arts, clean_ans = extract_artifacts(full_content)
-            art_dicts = artifacts_to_dict(parsed_arts)
-            is_generative_intent = intent in ("template_mutation", "generic_plan", "generic_report")
+            outcome = _finalize_answer(full_content, prepared)
+            art_dicts = outcome.artifacts
 
-            if not art_dicts and is_generative_intent and full_content.strip():
-                fallback_title = "Documento" if intent == "template_mutation" else ("Plan" if intent == "generic_plan" else "Informe")
-                fallback_art = build_fallback_artifact(full_content, default_title=fallback_title, default_extension=template_ext)
-                art_dicts = artifacts_to_dict([fallback_art])
+            if not v2:
+                for idx, art in enumerate(art_dicts):
+                    yield emitter.artifact_created(
+                        artifact_id=art.get("id") or f"art-{idx + 1}",
+                        title=art.get("title", "Documento"),
+                        content=art.get("content", ""),
+                        extension=art.get("extension", "docx"),
+                    ).to_sse_packet()
+                yield emitter.step_completed("step-generate", "Generación completada").to_sse_packet()
 
-            is_template = (intent == "template_mutation")
+            rubric_score = None
+            if art_dicts:
+                if not v2:
+                    yield emitter.step_started("step-rubric", "Evaluando artefactos con rúbricas de calidad...").to_sse_packet()
+                rubric_score, _rubric_feedback = _evaluate_artifacts_rubric(art_dicts)
+                if not v2:
+                    yield emitter.step_completed("step-rubric", f"Calidad de artefacto: {rubric_score}/100").to_sse_packet()
 
-            for idx, art in enumerate(art_dicts):
-                yield emitter.artifact_created(
-                    artifact_id=art.get("id") or f"art-{idx + 1}",
-                    title=art.get("title", "Documento"),
-                    content=art.get("content", ""),
-                    extension=art.get("extension", "docx"),
+            if not v2:
+                yield emitter.completed(
+                    final_message=outcome.assistant_message,
+                    artifacts=art_dicts,
+                    sources=sources_to_use,
                 ).to_sse_packet()
 
-            yield emitter.step_completed("step-generate", "Generación completada").to_sse_packet()
-
-            if art_dicts:
-                yield emitter.step_started("step-rubric", "Evaluando artefactos con rúbricas de calidad...").to_sse_packet()
-                rubric_score, rubric_feedback = _evaluate_artifacts_rubric(art_dicts)
-                yield emitter.step_completed("step-rubric", f"Calidad de artefacto: {rubric_score}/100").to_sse_packet()
-
-            asst_msg = clean_ans if parsed_arts else (
-                "He generado y estructurado el documento corporativo en el panel de artefactos."
-                if is_template else (
-                    "He elaborado el documento solicitado en el panel de artefactos."
-                    if is_generative_intent else full_content
-                )
+            await _persist_turn(
+                chat_repo,
+                req=req,
+                user_id=user_id,
+                conv_id=conv_id,
+                user_text=query_text,
+                prepared=prepared,
+                outcome=outcome,
+                full_content=full_content,
             )
-
-            yield emitter.completed(
-                final_message=asst_msg,
-                artifacts=art_dicts,
-                sources=sources_to_use,
-            ).to_sse_packet()
-
-            # Auto-persist session & messages to PostgreSQL entity
-            try:
-                await chat_repo.save_message(
-                    session_id=conv_id,
-                    role="user",
-                    content=query_text,
-                    user_id=user_id,
-                )
-                await chat_repo.save_message(
-                    session_id=conv_id,
-                    role="assistant",
-                    content=asst_msg,
-                    context_sources=[{"source": s} for s in sources_to_use],
-                    user_id=user_id,
-                )
-                await chat_repo.save_session({
-                    "id": conv_id,
-                    "user_id": user_id,
-                    "title": query_text[:35],
-                    "feature_slug": req.feature or "general",
-                    "document_content": full_content if is_template else "",
-                    "artifacts": art_dicts,
-                })
-            except Exception:
-                pass
 
             final_response = {
                 "answer": full_content,
                 "intent_detected": intent,
-                "requires_document_mutation": is_template,
-                "document_updates": full_content if is_template else None,
-                "answer_clean": clean_ans or full_content,
-                "assistant_message": asst_msg,
+                "requires_document_mutation": outcome.is_template,
+                "document_updates": full_content if outcome.is_template else None,
+                "answer_clean": outcome.clean_answer or full_content,
+                "assistant_message": outcome.assistant_message,
                 "artifacts": art_dicts,
                 "run_id": run_id,
                 "conversation_id": conv_id,
+                "route": cfg.run_info.get("route"),
+                "truncated": bool(cfg.run_info.get("truncated")),
+                "rubric_score": rubric_score,
             }
-            yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            if v2:
+                yield sse_event("done", final_response)
+            else:
+                yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except StreamStopped as stop:
+            # The runner was cancelled inside its task and already logged the cancellation.
+            if stop.reason == "cancelled":
+                if v2:
+                    yield sse_event("error", {"code": "cancelled", "message": "Cancelado por el usuario"})
+                else:
+                    yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
+            # "disconnected": nobody is listening, nothing to send.
         except Exception as err:
+            _log_request_failure(cfg, err, streamed=True)
             err_msg = _format_stream_error(err)
-            yield emitter.failed("RUN_EXCEPTION", err_msg).to_sse_packet()
-            yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
+            if v2:
+                yield sse_event("error", {
+                    "code": _error_code(err),
+                    "message": err_msg,
+                    "retry_after": getattr(err, "retry_after", None),
+                })
+            else:
+                yield emitter.failed("RUN_EXCEPTION", err_msg).to_sse_packet()
+                yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
         finally:
             run_registry.unregister(run_id)
 
@@ -895,39 +1255,17 @@ def _generate_xlsx_bytes(req: ExportXlsxRequest) -> bytes:
 
 
 def _format_stream_error(err: Exception) -> str:
-    err_msg = str(err)
-    lower_err = err_msg.lower()
-    if any(term in lower_err for term in ["api key", "unauthorized", "authentication", "auth", "401", "forbidden", "403", "invalid_api_key"]):
-        return "Hubo un error de autenticación con el modelo, revisa la API key."
-    if "reduce max_tokens" in lower_err:
-        limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
-        req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
-        req_tokens = req_match.group(1) if req_match else "solicitada"
-        limit_tokens = limit_match.group(1) if limit_match else "establecido"
-        return f"La solicitud con {req_tokens} tokens supera el límite de {limit_tokens} tokens de salida para este modelo."
-    if "otpm" in lower_err or "output tokens per minute" in lower_err:
-        wait_match = re.search(r"try again in ([0-9.]+s?)", err_msg, re.IGNORECASE)
-        wait_time = wait_match.group(1) if wait_match else "unos segundos"
-        limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
-        req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
-        if limit_match and req_match:
-            return (
-                f"Límite de tokens de salida por minuto (OTPM) alcanzado en Groq ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
-                f"Espera {wait_time} o selecciona un modelo con mayor cuota como Llama 3.3 70B Versatile o Gemini Flash en Configuración."
-            )
-        return f"Límite de tokens de salida por minuto (OTPM) alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo."
-    if "ratelimiterror" in lower_err or "rate limit reached" in lower_err or "rate_limit_exceeded" in lower_err or "429" in lower_err:
-        wait_match = re.search(r"try again in ([0-9.]+s?)", err_msg, re.IGNORECASE)
-        wait_time = wait_match.group(1) if wait_match else "unos segundos"
-        limit_match = re.search(r"Limit\s+(\d+)", err_msg, re.IGNORECASE)
-        req_match = re.search(r"Requested\s+(\d+)", err_msg, re.IGNORECASE)
-        if limit_match and req_match:
-            return (
-                f"Límite de tasa de tokens por minuto (TPM) alcanzado en Groq ({req_match.group(1)} solicitados, límite {limit_match.group(1)}). "
-                f"Espera {wait_time} o selecciona un modelo con mayor cuota como Llama 3.3 70B Versatile o Gemini Flash en Configuración."
-            )
-        return f"Límite de peticiones por minuto alcanzado para este modelo. Por favor espera {wait_time} o selecciona otro modelo en Configuración."
-    return err_msg
+    """User-facing message for a failed run.
+
+    Provider errors arrive as typed `AIError`s (classified by exception type and HTTP status in the
+    provider layer) and already carry a user message; nothing is inferred from message substrings.
+    """
+    if isinstance(err, AIError):
+        return err.user_message
+    if isinstance(err, ValueError):
+        # Configuration problems (unknown provider, missing API key, invalid URL) carry readable text.
+        return str(err)
+    return f"Error inesperado al generar la respuesta: {err}"
 
 
 @router.post("/runs/{run_id}/cancel")

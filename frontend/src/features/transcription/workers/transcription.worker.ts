@@ -1,262 +1,253 @@
 /// <reference lib="webworker" />
 import { pipeline, env } from '@huggingface/transformers'
-import { EtaTracker, formatAudioTime } from '../utils/etaCalculator'
+import type {
+  AsrProgress,
+  AsrRequest,
+  AsrSegment,
+  WorkerInMessage,
+  WorkerOutMessage,
+} from '../providers/asrMessages'
+import { ASR_SAMPLE_RATE } from '../utils/audioConstants'
+import { estimateRemainingSeconds } from '../utils/etaCalculator'
+import { formatTimestamp } from '../utils/time'
+import { buildCompactAudio, detectSpeechRegions, remapTime } from '../utils/vad'
+import { planWindows, segmentsFromWindow, type WhisperChunk } from '../utils/windowMerge'
+import { DiarizationCancelled, diarizeSegments } from './diarizer'
 
-// Allow remote model loading via Hugging Face Hub (cached automatically in browser storage)
+// Models come from the Hugging Face Hub and are cached by the browser.
 env.allowLocalModels = false
 
-interface ProgressInfo {
+interface ModelProgressInfo {
   status?: string
   progress?: number
   file?: string
+  loaded?: number
+  total?: number
 }
 
-interface WorkerTranscriberResult {
+interface TranscriberOutput {
   text?: string
-  chunks?: Array<{
-    text?: string
-    timestamp?: [number | null, number | null]
-  }>
+  chunks?: WhisperChunk[]
 }
 
-type TranscriberFn = (
-  audioData: Float32Array,
-  options: Record<string, unknown>
-) => Promise<WorkerTranscriberResult>
+type Transcriber = (audio: Float32Array, options: Record<string, unknown>) => Promise<TranscriberOutput>
 
-let activeTranscriber: TranscriberFn | null = null
-let currentModelId = ''
-let currentDevice = ''
+const scope = self as unknown as DedicatedWorkerGlobalScope
+const post = (message: WorkerOutMessage) => scope.postMessage(message)
 
+let cachedTranscriber: Transcriber | null = null
+let cachedModelId = ''
+let cachedDevice = ''
+
+/** Loads (or reuses) the Whisper pipeline. `onDownload` receives the 0..1 download progress. */
 async function getTranscriber(
-  modelId: string = 'onnx-community/whisper-base',
-  onProgress?: (data: ProgressInfo) => void
-): Promise<{ transcriber: TranscriberFn; device: string }> {
-  // Return cached pipeline instance if already loaded with same model
-  if (activeTranscriber && currentModelId === modelId) {
-    return { transcriber: activeTranscriber, device: currentDevice }
+  modelId: string,
+  onDownload: (fraction: number) => void,
+): Promise<{ transcriber: Transcriber; device: string }> {
+  if (cachedTranscriber && cachedModelId === modelId) {
+    return { transcriber: cachedTranscriber, device: cachedDevice }
   }
 
-  // Detect WebGPU availability in worker
-  const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator && !!(navigator as unknown as { gpu?: unknown }).gpu
-  const preferredDevice = hasWebGPU ? 'webgpu' : 'wasm'
-
-  const webGpuDtype = {
-    encoder_model: 'fp32',
-    decoder_model_merged: 'q4',
-  }
-  const wasmDtype = 'q4'
-
-  try {
-    const transcriber = (await pipeline('automatic-speech-recognition', modelId, {
-      device: preferredDevice as unknown as undefined,
-      dtype: (preferredDevice === 'webgpu' ? webGpuDtype : wasmDtype) as unknown as undefined,
-      progress_callback: (info: ProgressInfo) => {
-        if (info.status === 'progress' && onProgress) {
-          onProgress(info)
-        }
-      },
-    })) as unknown as TranscriberFn
-
-    activeTranscriber = transcriber
-    currentModelId = modelId
-    currentDevice = preferredDevice === 'webgpu' ? 'WebGPU' : 'CPU Wasm'
-    return { transcriber, device: currentDevice }
-  } catch (err) {
-    console.warn('Pipeline initialization failed on preferred device, attempting fallback to wasm/q4:', err)
-    // If WebGPU failed or threw, fall back to wasm CPU execution with q4
-    if (preferredDevice === 'webgpu') {
-      const transcriber = (await pipeline('automatic-speech-recognition', modelId, {
-        device: 'wasm' as unknown as undefined,
-        dtype: wasmDtype as unknown as undefined,
-        progress_callback: onProgress,
-      })) as unknown as TranscriberFn
-
-      activeTranscriber = transcriber
-      currentModelId = modelId
-      currentDevice = 'CPU Wasm'
-      return { transcriber, device: currentDevice }
+  const files = new Map<string, { loaded: number; total: number }>()
+  let best = 0
+  const progressCallback = (info: ModelProgressInfo) => {
+    if (info.status !== 'progress') return
+    if (typeof info.loaded === 'number' && typeof info.total === 'number' && info.total > 0) {
+      files.set(info.file || 'model', { loaded: info.loaded, total: info.total })
+      let loaded = 0
+      let total = 0
+      for (const item of files.values()) {
+        loaded += item.loaded
+        total += item.total
+      }
+      if (total > 0) best = Math.max(best, loaded / total)
+    } else if (typeof info.progress === 'number') {
+      best = Math.max(best, info.progress / 100)
     }
-    throw err
+    onDownload(Math.min(1, best))
   }
+
+  const hasWebGPU =
+    typeof navigator !== 'undefined' && 'gpu' in navigator && Boolean((navigator as unknown as { gpu?: unknown }).gpu)
+  const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: unknown; label: string }> = hasWebGPU
+    ? [
+        { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, label: 'WebGPU' },
+        { device: 'wasm', dtype: 'q4', label: 'CPU Wasm' },
+      ]
+    : [{ device: 'wasm', dtype: 'q4', label: 'CPU Wasm' }]
+
+  let lastError: unknown = null
+  for (const attempt of attempts) {
+    try {
+      const transcriber = (await pipeline('automatic-speech-recognition', modelId, {
+        device: attempt.device as unknown as undefined,
+        dtype: attempt.dtype as unknown as undefined,
+        progress_callback: progressCallback as unknown as undefined,
+      })) as unknown as Transcriber
+      cachedTranscriber = transcriber
+      cachedModelId = modelId
+      cachedDevice = attempt.label
+      return { transcriber, device: attempt.label }
+    } catch (err) {
+      lastError = err
+      console.warn(`No se pudo iniciar Whisper con ${attempt.label}:`, err)
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('No se pudo cargar el modelo de transcripción.')
 }
 
-self.onmessage = async (event: MessageEvent) => {
-  const { type, payload } = event.data
+const cancelled = new Set<string>()
 
-  if (type !== 'transcribe') return
+const round2 = (value: number) => Math.round(value * 100) / 100
 
-  const {
-    id,
-    audioData,
-    language = 'es',
-    modelId = 'onnx-community/whisper-base',
-    duration = 0,
-  } = payload
+function progress(payload: AsrProgress) {
+  post({ type: 'progress', payload })
+}
+
+async function runJob(request: AsrRequest): Promise<void> {
+  const { id, audio, language, modelId, duration, diarize = false, numSpeakers = null } = request
+  const isCancelled = () => cancelled.has(id)
+  const acknowledgeCancel = () => post({ type: 'cancelled', payload: { id } })
 
   try {
-    self.postMessage({
-      type: 'progress',
-      payload: {
+    progress({ id, stage: 'model_download', stageProgress: 0, message: 'Preparando el motor Whisper…' })
+    const { transcriber, device } = await getTranscriber(modelId, (fraction) => {
+      progress({
         id,
-        progress: 10,
-        stage: 'transcribing',
-        message: 'Preparando motor Whisper...',
-      },
+        stage: 'model_download',
+        stageProgress: fraction,
+        message: `Descargando el modelo (${Math.round(fraction * 100)} %)…`,
+      })
+    })
+    if (isCancelled()) return acknowledgeCancel()
+    const modelInfo = `Whisper Web (${device})`
+
+    // Skip long silences: less work and no invented text over silence.
+    const regions = detectSpeechRegions(audio, ASR_SAMPLE_RATE)
+    if (regions.length === 0) {
+      post({
+        type: 'complete',
+        payload: { id, text: '', segments: [], duration, language, modelInfo, silenceTrimmedSec: duration, diarization: 'none' },
+      })
+      return
+    }
+    const { audio: speech, timeMap } = buildCompactAudio(audio, ASR_SAMPLE_RATE, regions)
+    const speechSec = speech.length / ASR_SAMPLE_RATE
+    const silenceTrimmedSec = Math.max(0, duration - speechSec)
+    const windows = planWindows(speechSec)
+    const startedAt = performance.now()
+    const segments: AsrSegment[] = []
+    // Same segments in the speech-only timeline, used to line them up with the diarization.
+    const compactSpans: Array<{ start: number; end: number }> = []
+
+    progress({
+      id,
+      stage: 'transcribing',
+      stageProgress: 0,
+      message: `Transcribiendo (${formatTimestamp(0)} de ${formatTimestamp(duration)})…`,
+      modelInfo,
     })
 
-    let maxDownloadPercent = 0
-    const fileBytesMap = new Map<string, { loaded: number; total: number }>()
-
-    const { transcriber, device } = await getTranscriber(modelId, (progressInfo: ProgressInfo) => {
-      if (progressInfo && typeof progressInfo.progress === 'number') {
-        const fileKey = progressInfo.file || 'model_part'
-        const loaded = (progressInfo as unknown as { loaded?: number }).loaded
-        const total = (progressInfo as unknown as { total?: number }).total
-
-        if (typeof loaded === 'number' && typeof total === 'number' && total > 0) {
-          fileBytesMap.set(fileKey, { loaded, total })
-          let sumLoaded = 0
-          let sumTotal = 0
-          for (const item of fileBytesMap.values()) {
-            sumLoaded += item.loaded
-            sumTotal += item.total
-          }
-          if (sumTotal > 0) {
-            const overallPct = Math.round((sumLoaded / sumTotal) * 100)
-            maxDownloadPercent = Math.max(maxDownloadPercent, overallPct)
-          }
-        } else {
-          maxDownloadPercent = Math.max(maxDownloadPercent, Math.round(progressInfo.progress))
-        }
-
-        const downloadPct = 10 + Math.round((maxDownloadPercent / 100) * 10)
-        self.postMessage({
-          type: 'progress',
-          payload: {
-            id,
-            progress: downloadPct,
-            stage: 'transcribing',
-            message: `Descargando componentes (${maxDownloadPercent}%)...`,
-          },
-        })
-      }
-    })
-
-    self.postMessage({
-      type: 'progress',
-      payload: {
-        id,
-        progress: 20,
-        stage: 'transcribing',
-        message: duration > 0 ? `Iniciando decodificación (${formatAudioTime(duration)})...` : 'Iniciando decodificación...',
-        model_info: `Whisper Web (${device})`,
-      },
-    })
-
-    const liveSegments: Array<{ start: number; end: number; speaker: string; text: string }> = []
-    let accumulatedText = ''
-    const etaTracker = new EtaTracker()
-    etaTracker.start()
-
-    // Process audio in 30-second windows so long files update progress, ETA, and live segments iteratively
-    const CHUNK_DURATION = 30
-    const SAMPLE_RATE = 16000
-    const CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_DURATION
-    const totalSamples = audioData.length
-    const numChunks = Math.max(1, Math.ceil(totalSamples / CHUNK_SAMPLES))
-
-    for (let i = 0; i < numChunks; i++) {
-      const startSample = i * CHUNK_SAMPLES
-      const endSample = Math.min(startSample + CHUNK_SAMPLES, totalSamples)
-      const subChunk = audioData.subarray(startSample, endSample)
-
-      if (subChunk.length === 0) continue
-
-      const offsetSec = i * CHUNK_DURATION
-      const chunkAudioDuration = subChunk.length / SAMPLE_RATE
-
-      const output = await transcriber(subChunk, {
+    for (const win of windows) {
+      if (isCancelled()) return acknowledgeCancel()
+      const slice = speech.subarray(
+        Math.round(win.start * ASR_SAMPLE_RATE),
+        Math.round(win.end * ASR_SAMPLE_RATE),
+      )
+      const output = await transcriber(slice, {
         language: language === 'auto' ? null : language,
         task: 'transcribe',
         return_timestamps: true,
       })
+      if (isCancelled()) return acknowledgeCancel()
 
-      const chunkText = (output?.text || '').trim()
-      if (chunkText) {
-        accumulatedText += (accumulatedText ? ' ' : '') + chunkText
+      const owned = segmentsFromWindow(win, output?.chunks ?? [], output?.text)
+      const mapped = owned.map((segment) => ({
+        start: round2(remapTime(segment.start, timeMap)),
+        end: round2(remapTime(segment.end, timeMap, true)),
+        text: segment.text,
+      }))
+      if (mapped.length > 0) {
+        segments.push(...mapped)
+        compactSpans.push(...owned.map((segment) => ({ start: segment.start, end: segment.end })))
+        post({ type: 'segments', payload: { id, segments: mapped } })
       }
 
-      const rawChunks = output?.chunks || []
-      if (rawChunks.length > 0) {
-        for (const item of rawChunks) {
-          const s = Array.isArray(item.timestamp) ? item.timestamp[0] ?? 0 : 0
-          const e = Array.isArray(item.timestamp) ? item.timestamp[1] ?? s + 5 : s + 5
-          const segText = (item.text || '').trim()
-          if (segText) {
-            liveSegments.push({
-              start: Math.round((offsetSec + s) * 100) / 100,
-              end: Math.round((offsetSec + e) * 100) / 100,
-              speaker: 'Participante 1',
-              text: segText,
-            })
-          }
-        }
-      } else if (chunkText) {
-        liveSegments.push({
-          start: Math.round(offsetSec * 100) / 100,
-          end: Math.round((offsetSec + chunkAudioDuration) * 100) / 100,
-          speaker: 'Participante 1',
-          text: chunkText,
-        })
-      }
-
-      const currentSec = Math.min(offsetSec + chunkAudioDuration, duration > 0 ? duration : offsetSec + chunkAudioDuration)
-      const pct = duration > 0
-        ? Math.min(90, 20 + Math.round((currentSec / duration) * 70))
-        : Math.min(90, 20 + Math.round(((i + 1) / numChunks) * 70))
-      const calculatedEta = duration > 0 ? etaTracker.update(currentSec, duration) : null
-
-      self.postMessage({
-        type: 'progress',
-        payload: {
-          id,
-          progress: pct,
-          stage: 'transcribing',
-          message: duration > 0
-            ? `Transcribiendo (${formatAudioTime(currentSec)} / ${formatAudioTime(duration)})`
-            : `Transcribiendo audio (${pct}%)...`,
-          eta: calculatedEta ?? undefined,
-          live_text: accumulatedText.trim(),
-          live_segments: liveSegments,
-          model_info: `Whisper Web (${device})`,
-        },
+      const processed = Math.min(speechSec, win.isLast ? speechSec : win.ownEnd)
+      const elapsedSec = (performance.now() - startedAt) / 1000
+      progress({
+        id,
+        stage: 'transcribing',
+        stageProgress: speechSec > 0 ? processed / speechSec : 1,
+        message: `Transcribiendo (${formatTimestamp(remapTime(processed, timeMap, true))} de ${formatTimestamp(duration)})…`,
+        etaSeconds: estimateRemainingSeconds(processed, speechSec, elapsedSec),
+        modelInfo,
       })
-
-      // Yield briefly to event loop to preserve worker responsiveness
+      // Let pending messages (cancel) through between windows.
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
 
-    self.postMessage({
+    let diarization: 'browser' | 'none' = 'none'
+    let diarizationWarning: string | undefined
+    if (diarize && segments.length > 0) {
+      try {
+        const result = await diarizeSegments({
+          audio: speech,
+          sampleRate: ASR_SAMPLE_RATE,
+          segments: compactSpans,
+          numSpeakers,
+          isCancelled,
+          onProgress: (fraction, message) =>
+            progress({ id, stage: 'diarizing', stageProgress: fraction, message, modelInfo }),
+        })
+        result.speakerIds.forEach((speakerId, index) => {
+          segments[index].speakerId = speakerId
+        })
+        diarization = 'browser'
+      } catch (error) {
+        if (error instanceof DiarizationCancelled || isCancelled()) return acknowledgeCancel()
+        // Speakers are optional: keep the transcript with one speaker rather than failing the job.
+        console.warn('No se pudieron identificar los interlocutores en el navegador:', error)
+        diarizationWarning =
+          'No se pudieron identificar los interlocutores en el navegador; la transcripción se guardó con un único interlocutor.'
+      }
+    }
+
+    post({
       type: 'complete',
       payload: {
         id,
-        text: accumulatedText.trim(),
-        segments: liveSegments,
-        duration: duration || (liveSegments[liveSegments.length - 1]?.end ?? 0),
+        text: segments.map((segment) => segment.text).join(' ').trim(),
+        segments,
+        duration,
         language,
-        model_info: `Whisper Web (${device})`,
+        modelInfo,
+        silenceTrimmedSec,
+        diarization,
+        diarizationWarning,
       },
     })
-  } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : 'Error durante la transcripción en el navegador.'
-    self.postMessage({
+  } catch (error) {
+    if (isCancelled()) {
+      acknowledgeCancel()
+      return
+    }
+    post({
       type: 'error',
-      payload: {
-        id,
-        error: errorMsg,
-      },
+      payload: { id, error: error instanceof Error ? error.message : 'Error durante la transcripción en el navegador.' },
     })
+  } finally {
+    cancelled.delete(id)
   }
 }
 
+scope.onmessage = (event: MessageEvent<WorkerInMessage>) => {
+  const message = event.data
+  if (message.type === 'cancel') {
+    cancelled.add(message.id)
+    return
+  }
+  if (message.type === 'transcribe') {
+    void runJob(message.payload)
+  }
+}

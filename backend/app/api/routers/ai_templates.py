@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
-from app.ai.logging import list_logs
+from app.ai.logging import list_logs, summarize_logs
 from app.ai.templates import (
     get_prompt,
     get_rubric,
@@ -242,4 +242,12 @@ async def reset_rubric_endpoint(feature: str) -> dict[str, Any]:
 async def ai_logs(limit: int = 20) -> dict[str, Any]:
     logs = await asyncio.to_thread(list_logs, limit=limit)
     return {"logs": logs}
+
+
+@router.get("/logs/stats")
+@handle_grounded_errors
+async def ai_logs_stats(limit: int = 100) -> dict[str, Any]:
+    """Summary dashboard: tokens, cost, p50/p95 latency and TTFT, fallback/cache/error rates, routes."""
+    logs = await asyncio.to_thread(list_logs, limit=limit)
+    return summarize_logs(logs)
 

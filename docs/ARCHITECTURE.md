@@ -120,7 +120,7 @@ async def ask_product(
 Todo el estado de negocio (conversaciones, artefactos, resultados de features, transcripciones, configuración) se persiste en el backend. El navegador solo guarda en `localStorage`:
 
 - el **token JWT** de sesión (`context/AuthContext.tsx`, `core/api/config.ts`);
-- la lista de **transcripciones en curso** (`features/transcription/utils/transcriptionStorage.ts`), para retomar su seguimiento tras recargar la página.
+- la referencia mínima de las **transcripciones en curso** (`{id, title, kind, startedAt}`, en `features/transcription/utils/transcriptionStorage.ts`); el estado real se pide a `GET /api/transcription/jobs/active` al iniciar sesión.
 
 ---
 
@@ -136,7 +136,7 @@ FuncAssist sigue un paradigma **Client-First** para la IA local:
 2. **Proveedores cloud**
    - OpenAI, Anthropic, Google Gemini y Groq se invocan desde el backend vía LiteLLM con claves cifradas.
    - **Ollama remoto** se trata como API externa por HTTPS. `ai/endpoint_security.py` (y los validadores del frontend) rechazan loopback (`127.0.0.1`, `localhost`, `::1`) e IPs privadas.
-   - La transcripción en servidor usa Whisper cloud (`features/transcription/whisper_cloud.py`), con diarización y resumen.
+   - La transcripción en servidor usa Groq u OpenAI (`features/transcription/whisper_cloud.py`) con fragmentación, recorte de silencios, limpieza de muletillas y diarización de OpenAI cuando hay clave. Detalle en [TRANSCRIPTION_PROCESS.md](./TRANSCRIPTION_PROCESS.md).
 
 3. **Catálogo de modelos**
    - `ai/frontier_sync.py` sincroniza en segundo plano precios, ventanas de contexto y límites de salida desde la base de LiteLLM (con fallback offline) hacia `ai_models_catalog`.

@@ -5,6 +5,8 @@ import { useToast } from '../../../context/ToastContext'
 import { normalizeOllamaUrl, validateAiSettingsPayload } from '../validators/settingsValidation'
 import { inferenceService } from '../../ai/services/InferenceService'
 import { DEFAULT_BROWSER_ASR_MODEL, DEFAULT_WEBLLM_MODEL, setDynamicClientCatalog } from '../../ai/catalogs/clientCatalog'
+import { pickDefaultCloudModel } from '../components/writing/defaultModels'
+import { MAX_FALLBACK_MODELS } from '../components/writing/TierModelsSelector'
 
 let webLLMProviderPromise: Promise<Awaited<typeof import('../../ai/providers/WebLLMProvider')>['webLLMProvider']> | null = null
 
@@ -23,6 +25,8 @@ export function useAiSettingsManager() {
 
   const [provider, setProvider] = useState<string>('local')
   const [model, setModel] = useState<string>(DEFAULT_WEBLLM_MODEL)
+  const [fastModel, setFastModel] = useState<string>('')
+  const [fallbackModels, setFallbackModels] = useState<string[]>([])
 
   const [isWritingOpen, setIsWritingOpen] = useState(true)
   const [isVoiceAudioOpen, setIsVoiceAudioOpen] = useState(true)
@@ -52,7 +56,7 @@ export function useAiSettingsManager() {
   const [testingConnection, setTestingConnection] = useState(false)
   const [configuredCreds, setConfiguredCreds] = useState<string[]>([])
 
-  const loadDynamicCatalog = useCallback(async (forceRefresh = false) => {
+  const loadDynamicCatalog = useCallback(async (forceRefresh = false): Promise<ModelCatalogItem[]> => {
     try {
       const res = await api.getModelCatalog(forceRefresh)
       setCatalogError(res.error || null)
@@ -60,9 +64,11 @@ export function useAiSettingsManager() {
       if (res.models) {
         setDynamicClientCatalog(res.models)
       }
+      return res.models || []
     } catch {
       setCatalogError('Error de conexión al cargar catálogo externo.')
       setCatalogModels([])
+      return []
     }
   }, [])
 
@@ -94,7 +100,7 @@ export function useAiSettingsManager() {
     const load = async () => {
       setLoadingAi(true)
       try {
-        await loadDynamicCatalog(false)
+        const catalog = await loadDynamicCatalog(false)
         const [settings, userPrefs, credsList] = await Promise.all([
           api.getAiSettings(),
           api.getUserPreferences().catch(() => null),
@@ -108,7 +114,9 @@ export function useAiSettingsManager() {
         setProvider(effectiveProv)
 
         const activeModel = userPrefs?.inference_model || settings.model
-        setModel(activeModel || (effectiveProv === 'local' ? DEFAULT_WEBLLM_MODEL : 'llama-3.3-70b-versatile'))
+        setModel(activeModel || (effectiveProv === 'local' ? DEFAULT_WEBLLM_MODEL : pickDefaultCloudModel(effectiveProv, catalog)))
+        setFastModel(settings.fast_model || '')
+        setFallbackModels(settings.fallback_models || [])
 
         const rawTransProv = userPrefs?.transcription_provider || settings.transcription_provider || 'local'
         const effectiveTransProv = rawTransProv === 'builtin' || rawTransProv === 'browser_asr' ? 'local' : rawTransProv
@@ -167,12 +175,22 @@ export function useAiSettingsManager() {
     }
 
     setSavingAi(true)
-    const payload: Record<string, string> = {
+    const payload: Record<string, string | string[]> = {
       provider,
       model: model.trim(),
       inference_provider: provider,
       inference_model: model.trim(),
       ollama_base_url: normalizeOllamaUrl(ollamaUrl),
+    }
+
+    // Fast and fallback models name models of the selected cloud provider; an empty fast model
+    // means "pick from the catalog". Browser and Ollama providers do not use them.
+    if (!['local', 'builtin', 'webllm', 'ollama', 'ollama_remote'].includes(provider)) {
+      payload.fast_model = fastModel.trim()
+      payload.fallback_models = fallbackModels
+        .map((m) => m.trim())
+        .filter((m) => m && m !== model.trim())
+        .slice(0, MAX_FALLBACK_MODELS)
     }
 
     if (groqKey.trim()) payload.groq_api_key = groqKey.trim()
@@ -297,13 +315,26 @@ export function useAiSettingsManager() {
     }
   }
 
+  // Fast and fallback models belong to one provider: switching provider clears them.
+  const changeProvider = useCallback((next: string) => {
+    if (next !== provider) {
+      setFastModel('')
+      setFallbackModels([])
+    }
+    setProvider(next)
+  }, [provider])
+
   return {
     ai,
     loadingAi,
     provider,
-    setProvider,
+    setProvider: changeProvider,
     model,
     setModel,
+    fastModel,
+    setFastModel,
+    fallbackModels,
+    setFallbackModels,
     isWritingOpen,
     setIsWritingOpen,
     showEndpointSection,

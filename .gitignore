@@ -149,3 +149,9 @@ backend/app/ai/models/*
 # Test and runtime outputs
 data/
 knowledge_data/
+
+# TLS certificates and keys for HTTPS (mounted into the frontend container, never committed)
+certs/
+
+# Claude Project Skills
+.claude/skills/*

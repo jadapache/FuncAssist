@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react'
 import { generateArtifactSubtitle, parseMultipleArtifacts, parseStreamForChatAndArtifacts } from '../../../utils/artifactSplitter'
 import type { EphemeralAttachmentDoc } from '../api/docAgentApi'
 import { useAgentRun } from './useAgentRun'
+import { isBrowserLlmError } from '../../ai/errors/browserLlmErrors'
 import type { AgentRunState } from '../types/agentEvents'
 import type { ChatPersistMessage, DocumentArtifact, ChatConversation, ChatAttachment } from './useChatPersistence'
 import type { Artifact } from '../../../types/artifacts'
@@ -336,6 +337,9 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
       }
 
       const targetConvId = targetConv.id
+      // One reply slot per turn: the backend persists the reply under this id and every outcome
+      // below (answer, artifact, stop notice, error) reuses it, so the autosave never duplicates it.
+      const assistantMsgId = crypto.randomUUID()
       setGeneratingConversationId(targetConvId)
       const currentMsgs = targetConv?.messages ?? []
       const updatedMsgs = [...currentMsgs, userMessage]
@@ -369,6 +373,8 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
             chat_context: currentMsgs.slice(-4).map((m) => `${m.role}: ${m.content}`),
             sources,
             conversation_id: targetConvId,
+            user_message_id: userMessage.id,
+            assistant_message_id: assistantMsgId,
           },
           (accumulatedText) => {
             latestAccumulatedText = accumulatedText
@@ -438,7 +444,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           const rawChat = res.assistant_message || res.answer || candidateContent
           const cleanChat = rawChat.replace(/<\/?chat>/gi, '').trim()
           const assistantMessage: ChatPersistMessage = {
-            id: crypto.randomUUID(),
+            id: assistantMsgId,
             role: 'assistant',
             content: cleanChat,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -573,7 +579,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         )
 
         const assistantMessage: ChatPersistMessage = {
-          id: crypto.randomUUID(),
+          id: assistantMsgId,
           role: 'assistant',
           content: bubbleContent,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -601,7 +607,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         if (isAbortError) {
           if (!latestAccumulatedText.trim()) {
             const stoppedNoticeMessage: ChatPersistMessage = {
-              id: crypto.randomUUID(),
+              id: assistantMsgId,
               role: 'assistant',
               content: 'Detuviste esta respuesta',
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -616,10 +622,9 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
           return
         }
 
-        const isGpuError =
-          /device\s*(was\s*)?lost|gpu|dxgi|device_hung|0x887a0006|already\s*been\s*disposed|insufficient\s*memory|vram|memoria.*gr[aá]fica/i.test(
-            errMsg,
-          )
+        // In-browser model failures arrive already classified (no WebGPU / HTTP origin, out of
+        // memory, GPU timeout, prompt too long…) with their own message: show it as is.
+        const isGpuError = isBrowserLlmError(err)
 
         const isAuthError =
           /api\s*key|autenticaci[oó]n|authentication|unauthorized|401|forbidden|403|invalid_api_key/i.test(errMsg)
@@ -638,8 +643,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
 
         let displayMsg = errMsg
         if (isGpuError) {
-          displayMsg =
-            'La GPU se quedó sin memoria (VRAM) o se desconectó al ejecutar el modelo en el navegador. Te recomendamos seleccionar un modelo más ligero (ej. Llama 3.2 1B) en Configuración o utilizar un proveedor externo (Ollama o API en la nube).'
+          displayMsg = errMsg
         } else if (isAuthError) {
           displayMsg = 'Error: La API key guardada no es válida. Por favor actualízala en Configuración.'
         } else if (isRateLimitError) {
@@ -651,7 +655,7 @@ export function useAgenticGeneration(opts: UseAgenticGenerationOptions): Generat
         }
 
         const failureMessage: ChatPersistMessage = {
-          id: crypto.randomUUID(),
+          id: assistantMsgId,
           role: 'assistant',
           content: displayMsg,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),

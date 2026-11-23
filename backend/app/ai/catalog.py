@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -220,6 +221,156 @@ def has_catalog_model(model_id: str, provider: str, task_type: str) -> bool:
         and item.task_type.lower() == t_lower
         for item in load_local_catalog()
     )
+
+
+# Ordered preferences per provider and tier. Each entry is a regex searched in the model id;
+# the first pattern with a match wins, and among its matches the newest version is chosen.
+_TIER_PATTERNS: dict[str, dict[str, tuple[str, ...]]] = {
+    "groq": {
+        "main": (r"gpt-oss-120b", r"llama-3\.3-70b", r"llama-4-maverick", r"kimi-k2"),
+        "fast": (r"gpt-oss-20b", r"llama-3\.1-8b", r"llama-4-scout", r"qwen3-32b"),
+    },
+    "claude": {
+        "main": (r"sonnet", r"opus"),
+        "fast": (r"haiku",),
+    },
+    "openai": {
+        "main": (r"^gpt-4o$", r"^gpt-4\.1$", r"^gpt-5$"),
+        "fast": (r"^gpt-4o-mini$", r"^gpt-4\.1-mini$", r"^gpt-5-mini$"),
+    },
+    "gemini": {
+        "main": (r"flash$", r"pro$"),
+        "fast": (r"flash-lite$", r"flash$"),
+    },
+    "deepseek": {
+        "main": (r"^deepseek-chat$",),
+        "fast": (r"^deepseek-chat$",),
+    },
+}
+# Variants that are never a sensible default for chat even if their name matches a pattern.
+_EXCLUDED_VARIANTS = re.compile(
+    r"preview|exp|audio|realtime|search|tts|transcribe|image|embedding|guard|vision|computer-use|deep-research|codex",
+    re.IGNORECASE,
+)
+_DATE_SUFFIX = re.compile(r"\d{8}|\d{4}-\d{2}-\d{2}")
+
+
+def _version_key(model_id: str) -> tuple[bool, tuple[int, ...], int]:
+    """Sort key: undated aliases first, then the highest version numbers, then the shortest id."""
+    dated = bool(_DATE_SUFFIX.search(model_id))
+    numbers = tuple(int(n) for n in re.findall(r"\d+", _DATE_SUFFIX.sub("", model_id)))
+    return (not dated, numbers, -len(model_id))
+
+
+def catalog_chat_models(provider: str) -> list[str]:
+    """Chat model ids of a provider present in the persisted catalog."""
+    p_key = (provider or "").strip().lower()
+    return [
+        m.raw_id or m.id
+        for m in load_local_catalog()
+        if m.provider.lower() == p_key and m.task_type.lower() == "chat_writing"
+    ]
+
+
+def catalog_transcription_models(provider: str) -> list[str]:
+    """Transcription model ids of a cloud provider present in the persisted catalog."""
+    p_key = (provider or "").strip().lower()
+    return [
+        m.raw_id or m.id
+        for m in load_local_catalog()
+        if m.provider.lower() == p_key and m.task_type.lower() == "transcription"
+    ]
+
+
+# The catalog does not record response formats. Whisper-family models return timestamped segments
+# (`verbose_json`); `gpt-*-transcribe`, realtime and live variants return text only.
+_SEGMENT_MODEL = re.compile(r"whisper", re.IGNORECASE)
+_TEXT_ONLY_VARIANT = re.compile(r"realtime|live|diariz", re.IGNORECASE)
+# Preferred default among segment models: full large-v3 first, then turbo, then any other.
+_TRANSCRIPTION_PREFERENCE = (r"large-v3$", r"large-v3-turbo", r"whisper-1$", r"whisper")
+
+
+def supports_transcript_segments(model_id: str) -> bool:
+    return bool(_SEGMENT_MODEL.search(model_id)) and not _TEXT_ONLY_VARIANT.search(model_id)
+
+
+def segment_transcription_models(provider: str) -> list[str]:
+    """Catalog transcription models of `provider` that return timestamped segments."""
+    return [m for m in catalog_transcription_models(provider) if supports_transcript_segments(m)]
+
+
+def pick_transcription_model(provider: str, configured: str | None = None) -> str | None:
+    """`configured` when the catalog lists it with segments; otherwise the preferred catalog model.
+
+    Returns None when the provider has no segment-capable model in the catalog.
+    """
+    try:
+        available = segment_transcription_models(provider)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Catalog lookup failed while picking transcription model for %s: %s", provider, exc)
+        return None
+    if configured and configured in available:
+        return configured
+    for pattern in _TRANSCRIPTION_PREFERENCE:
+        matches = [m for m in available if re.search(pattern, m, re.IGNORECASE)]
+        if matches:
+            return sorted(matches, key=_version_key, reverse=True)[0]
+    return None
+
+
+_DIARIZATION_MODEL = re.compile(r"diariz", re.IGNORECASE)
+
+
+def pick_diarization_model(provider: str, configured: str | None = None) -> tuple[str | None, bool]:
+    """Diarization model for `provider` from the catalog.
+
+    Returns `(model, catalog_known)`. `catalog_known` is False when the catalog has no transcription
+    models for the provider at all (empty or unreachable), so the caller may trust `configured`.
+    With a known catalog, `configured` is kept only if listed; otherwise the newest diarization
+    model is returned, or None when the catalog has none.
+    """
+    try:
+        available = catalog_transcription_models(provider)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Catalog lookup failed while picking diarization model for %s: %s", provider, exc)
+        return None, False
+    if not available:
+        return None, False
+    diarizers = [m for m in available if _DIARIZATION_MODEL.search(m)]
+    if configured and configured in diarizers:
+        return configured, True
+    if not diarizers:
+        return None, True
+    return sorted(diarizers, key=_version_key, reverse=True)[0], True
+
+
+def pick_model(provider: str, tier: str = "main", registry_default: str | None = None) -> str | None:
+    """Choose a default model for `provider` and `tier` from the persisted catalog.
+
+    Returns the preferred match by tier pattern. When the catalog has no models at all for the
+    provider (catalog unavailable or provider not synced), `registry_default` is returned as the
+    last resort; when the catalog has models but none matches, returns None so the caller can fall
+    back to the user's main model instead of a hardcoded name that may no longer exist.
+    """
+    p_key = (provider or "").strip().lower()
+    try:
+        available = catalog_chat_models(p_key)
+    except Exception as exc:
+        logger.warning("Catalog lookup failed while picking %s model for %s: %s", tier, p_key, exc)
+        available = []
+    if not available:
+        return registry_default or None
+
+    candidates = [m for m in available if not _EXCLUDED_VARIANTS.search(m)]
+    for pattern in _TIER_PATTERNS.get(p_key, {}).get(tier, ()):
+        regex = re.compile(pattern, re.IGNORECASE)
+        matches = [m for m in candidates if regex.search(m)]
+        if matches:
+            return max(matches, key=_version_key)
+
+    if registry_default and registry_default in available:
+        return registry_default
+    return None
 
 
 def _filter_catalog_models(models: list[AIModelInfo], provider: str, task_type: str) -> list[AIModelInfo]:

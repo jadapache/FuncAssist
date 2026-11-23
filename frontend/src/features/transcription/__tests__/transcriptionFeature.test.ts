@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   generateTranscriptionSlug,
-  loadStoredActiveJobs,
-  saveActiveJobsToStorage,
+  loadStoredJobRefs,
+  saveJobRefs,
   LOCAL_STORAGE_ACTIVE_JOBS,
 } from '../utils/transcriptionStorage'
-import { encodeFloat32ToWavBlob } from '../utils/audioExtractor'
-import { condenseTranscriptForBrowser } from '../hooks/useTranscriptionActions'
-import type { TranscriptionProgress } from '../api/transcriptionApi'
+import { condenseTranscriptForBrowser, formatTranscriptForExport, formatTranscriptForPrompt } from '../utils/transcriptFormat'
+import { createJob } from '../context/transcriptionJobs'
+import type { TranscriptionResult } from '../api/transcriptionApi'
 
 describe('Transcription Feature - Frontend Utilities', () => {
   beforeEach(() => {
@@ -31,51 +31,72 @@ describe('Transcription Feature - Frontend Utilities', () => {
     })
   })
 
-  describe('Active Jobs LocalStorage Persistence', () => {
-    it('saves only non-terminal jobs and ignores terminal ones', () => {
-      const sampleJobs: Record<string, TranscriptionProgress> = {
-        job_active: {
-          id: 'job_active',
-          media_id: 'media_1',
-          status: 'transcribing',
-          progress: 45,
-          message: 'Transcribiendo...',
-        },
-        job_done: {
-          id: 'job_done',
-          media_id: 'media_2',
-          status: 'complete',
-          progress: 100,
-          message: 'Completado',
-        },
-      }
+  describe('Active job references in localStorage', () => {
+    it('stores only id, title, kind and start time of running jobs', () => {
+      const running = { ...createJob({ id: 'job_active', kind: 'server', title: 'Kickoff', stage: 'transcribing' }, 1000), progress: 45 }
+      const done = createJob({ id: 'job_done', kind: 'server', title: 'Done', stage: 'complete' }, 2000)
+      const browser = createJob({ id: 'job_browser', kind: 'browser', title: 'Local', stage: 'transcribing' }, 3000)
 
-      saveActiveJobsToStorage(sampleJobs)
-      const restored = loadStoredActiveJobs()
+      saveJobRefs([running, done, browser])
+      const stored = JSON.parse(localStorage.getItem(LOCAL_STORAGE_ACTIVE_JOBS) || '[]')
+      expect(stored).toEqual([
+        { id: 'job_active', title: 'Kickoff', kind: 'server', startedAt: 1000 },
+        { id: 'job_browser', title: 'Local', kind: 'browser', startedAt: 3000 },
+      ])
+      expect(loadStoredJobRefs().map((ref) => ref.id)).toEqual(['job_active', 'job_browser'])
+    })
 
-      expect(restored.job_active).toBeDefined()
-      expect(restored.job_active.status).toBe('transcribing')
-      expect(restored.job_done).toBeUndefined()
+    it('reads the previous format (progress objects by id), skipping finished jobs', () => {
+      localStorage.setItem(
+        LOCAL_STORAGE_ACTIVE_JOBS,
+        JSON.stringify({
+          a: { id: 'a', media_id: 'a', status: 'transcribing', progress: 40, title: 'Uno' },
+          b: { id: 'b', media_id: 'b', status: 'complete', progress: 100 },
+        }),
+      )
+      const refs = loadStoredJobRefs()
+      expect(refs).toHaveLength(1)
+      expect(refs[0]).toMatchObject({ id: 'a', title: 'Uno', kind: 'server' })
+    })
+
+    it('clears the key when nothing is running', () => {
+      localStorage.setItem(LOCAL_STORAGE_ACTIVE_JOBS, '[]')
+      saveJobRefs([])
+      expect(localStorage.getItem(LOCAL_STORAGE_ACTIVE_JOBS)).toBeNull()
     })
 
     it('handles corrupted localStorage gracefully', () => {
       localStorage.setItem(LOCAL_STORAGE_ACTIVE_JOBS, 'invalid json {')
-      const result = loadStoredActiveJobs()
-      expect(result).toEqual({})
+      expect(loadStoredJobRefs()).toEqual([])
     })
   })
 
-  describe('Audio WAV Encoding', () => {
-    it('encodes Float32Array into valid RIFF WAV Blob', async () => {
-      const samples = new Float32Array([0.0, 0.5, -0.5, 0.99, -0.99])
-      const blob = encodeFloat32ToWavBlob(samples, 16000)
+  describe('Transcript formatting', () => {
+    const record: Pick<TranscriptionResult, 'segments' | 'text' | 'turn_gap_s'> = {
+      text: 'Hola. Seguimos.',
+      turn_gap_s: 8,
+      segments: [
+        { id: 's1', start: 0, end: 2, speaker: 'Ana', speaker_id: 'S1', text: 'Hola.', text_raw: 'Eh, hola.' },
+        { id: 's2', start: 3, end: 5, speaker: 'Ana', speaker_id: 'S1', text: 'Seguimos.', marked: true },
+        { id: 's3', start: 6, end: 8, speaker: 'Luis', speaker_id: 'S2', text: 'De acuerdo.' },
+      ],
+    }
 
-      expect(blob.type).toBe('audio/wav')
-      expect(blob.size).toBe(44 + samples.length * 2)
+    it('groups turns for prompts using the clean text', () => {
+      expect(formatTranscriptForPrompt(record)).toBe('[00:00] Ana: Hola. Seguimos.\n[00:06] Luis: De acuerdo.')
+    })
 
-      const buffer = await blob.arrayBuffer()
-      const header = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 4)))
-      expect(header).toBe('RIFF')
+    it('uses the verbatim text in raw mode', () => {
+      expect(formatTranscriptForPrompt(record, 'raw')).toContain('Eh, hola. Seguimos.')
+    })
+
+    it('exports one line per segment and highlights marked ones', () => {
+      const text = formatTranscriptForExport(record, 'clean', true)
+      expect(text.split('\n\n')).toEqual([
+        '[00:00] Ana: Hola.',
+        '**[IMPORTANTE] [00:03] Ana: Seguimos.**',
+        '[00:06] Luis: De acuerdo.',
+      ])
     })
   })
 

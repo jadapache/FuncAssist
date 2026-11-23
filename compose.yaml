@@ -9,7 +9,11 @@ services:
         - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:${APP_VERSION:-latest}
         - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:latest
     restart: unless-stopped
-    ports: ["${APP_PORT:-6728}:80"]
+    # HTTPS is enabled when TLS_CERT_DIR contains tls.crt and tls.key (see docs/DEPLOY_HTTPS.md).
+    ports: ["${APP_PORT:-6728}:80", "${APP_HTTPS_PORT:-6729}:443"]
+    environment:
+      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-6729}
+    volumes: ["${TLS_CERT_DIR:-./certs}:/etc/nginx/certs:ro"]
     depends_on:
       backend: { condition: service_healthy }
     healthcheck: { test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"], interval: 30s, timeout: 5s, retries: 3 }
@@ -34,6 +38,8 @@ services:
       PBKDF2_SALT: ${PBKDF2_SALT:?PBKDF2_SALT is required}
       DATA_DIR: /app/data
       KNOWLEDGE_DATA_DIR: /app/knowledge_data
+      APP_VERSION: ${APP_VERSION:-latest}
+      APP_BUILD_ID: ${APP_BUILD_ID:-}
     volumes: [funcassist_data:/app/data, funcassist_knowledge:/app/knowledge_data]
     depends_on:
       db: { condition: service_healthy }

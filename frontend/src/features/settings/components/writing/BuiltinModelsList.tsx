@@ -22,6 +22,8 @@ import type {
   WebLLMModelDefinition,
 } from '../../../ai/types/webLlm'
 import { formatProgressStage } from '../../../../utils/formatProgressStage'
+import { GPU_PRESSURE_KINDS, isBrowserLlmError } from '../../../ai/errors/browserLlmErrors'
+import { clearModelUnfit, isModelUnfit, markModelUnfit } from '../../../ai/policies/deviceFit'
 
 let webLLMProviderPromise: Promise<Awaited<typeof import('../../../ai/providers/WebLLMProvider')>['webLLMProvider']> | null = null
 
@@ -48,6 +50,7 @@ export const BuiltinModelsList = ({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [progressState, setProgressState] = useState<Record<string, WebLLMInitProgress>>({})
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({})
 
   const modelsRef = useRef<readonly WebLLMModelDefinition[]>([])
   modelsRef.current = modelsList
@@ -91,6 +94,7 @@ export const BuiltinModelsList = ({
       [modelDef.id]: { progress: 0, text: 'Iniciando descarga en caché del navegador...', timeElapsed: 0 },
     }))
 
+    setLoadErrors((prev) => ({ ...prev, [modelDef.id]: '' }))
     try {
       const provider = await getWebLLMProvider()
       await provider.initModel(modelDef.id, (report) => {
@@ -99,10 +103,15 @@ export const BuiltinModelsList = ({
           [modelDef.id]: report,
         }))
       })
+      // It loaded on this GPU: give it another chance even if it failed before.
+      clearModelUnfit(modelDef.id)
       await refreshCacheStatus()
       setModel(modelDef.id)
     } catch (err) {
       console.error(`Error inicializando modelo ${modelDef.id}:`, err)
+      if (isBrowserLlmError(err) && GPU_PRESSURE_KINDS.has(err.kind)) markModelUnfit(modelDef.id)
+      const message = err instanceof Error ? err.message : 'No se pudo cargar el modelo en el navegador.'
+      setLoadErrors((prev) => ({ ...prev, [modelDef.id]: message }))
     } finally {
       setDownloadingId(null)
     }
@@ -146,7 +155,21 @@ export const BuiltinModelsList = ({
         </button>
       </div>
 
-      {hardware && !hardware.hasWebGPU && (
+      {hardware && !hardware.secureContext && (
+        <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2.5 text-xs text-amber-800">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold block">La aplicación no está abierta por HTTPS</span>
+            <span>
+              Entraste por una dirección http:// de la red ({window.location.host}). En ese caso el navegador desactiva
+              WebGPU y los modelos en el navegador no pueden ejecutarse. Pide a TI la dirección HTTPS de la aplicación o
+              elige una API externa (Groq, OpenAI, Gemini, Claude u Ollama Remoto).
+            </span>
+          </div>
+        </div>
+      )}
+
+      {hardware && hardware.secureContext && !hardware.hasWebGPU && (
         <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2.5 text-xs text-amber-800">
           <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
           <div>
@@ -214,11 +237,22 @@ export const BuiltinModelsList = ({
                       Recomendado para tu equipo
                     </span>
                   )}
+                  {isModelUnfit(m.id) && (
+                    <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 border border-amber-200">
+                      No cupo en la GPU de este equipo
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
                   {m.description}
                 </p>
+
+                {hardware?.hasWebGPU && evaluation && !evaluation.isRecommended && !evaluation.reason.startsWith('Compatible') && (
+                  <p className="text-[11px] text-amber-700">{evaluation.reason}</p>
+                )}
+
+                {loadErrors[m.id] && <p className="text-[11px] text-red-600">{loadErrors[m.id]}</p>}
 
                 <p className="text-xs text-slate-400 font-medium pt-0.5 flex flex-wrap items-center gap-2">
                   <span>Descarga: {m.downloadSize}</span>

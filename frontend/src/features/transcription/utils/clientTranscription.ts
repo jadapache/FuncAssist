@@ -1,170 +1,120 @@
-import { extractAudioTrackFromMedia } from './audioExtractor'
 import {
   transcriptionApi,
   type TranscriptionResult,
-  type TranscriptionSummary,
+  type TranscriptionSegment,
+  type TranscriptionStage,
 } from '../api/transcriptionApi'
-import {
-  browserAsrProvider,
-} from '../providers/BrowserAsrProvider'
-import {
-  DEFAULT_BROWSER_ASR_MODEL,
-  isSupportedBrowserAsrModel,
-} from '../../ai/catalogs/clientCatalog'
-import { inferenceService } from '../../ai/services/InferenceService'
+import { releaseOtherGpuConsumers } from '../../../core/gpu/gpuResources'
+import { ASR_GPU_CONSUMER, browserAsrProvider, type AsrSegment } from '../providers/BrowserAsrProvider'
+import { DEFAULT_BROWSER_ASR_MODEL, isSupportedBrowserAsrModel } from '../../ai/catalogs/clientCatalog'
+import { throwIfAborted } from './abort'
+import { decodeMediaFile } from './audioDecode'
 
-export interface ClientTranscriptionSegment {
-  start: number
-  end: number
-  speaker: string
-  text: string
-}
-
-export interface ClientProgressUpdate {
-  progress: number
-  stage: 'preprocessing' | 'transcribing' | 'summarizing'
+export interface BrowserStageUpdate {
+  stage: TranscriptionStage
+  stageProgress: number
   message: string
-  eta?: string | null
-  live_text?: string
-  live_segments?: ClientTranscriptionSegment[]
-  model_info?: string
+  etaSeconds?: number | null
+  modelInfo?: string
 }
 
-export interface ClientTranscriptionOptions {
+export interface BrowserTranscriptionOptions {
   id: string
   file: File
   title: string
   description?: string
   language?: string
   modelId?: string
-  onProgress: (data: ClientProgressUpdate) => void
-  onRegisterWorker?: (worker: Worker) => void
-  isCancelled: () => boolean
+  signal: AbortSignal
+  /** Identify speakers in the browser (pyannote + WeSpeaker in the worker). */
+  diarize?: boolean
+  numSpeakers?: number | null
+  onStage: (update: BrowserStageUpdate) => void
+  onSegments: (segments: TranscriptionSegment[]) => void
+  /** Non-fatal problems, e.g. speakers could not be identified. */
+  onWarning?: (message: string) => void
 }
 
-export interface ClientTranscriptionResult {
-  transcription: TranscriptionResult
-  summary?: TranscriptionSummary
-}
-
-export function resolveClientOnnxModel(configuredModel?: string): string {
-  if (!configuredModel) return DEFAULT_BROWSER_ASR_MODEL
-  if (isSupportedBrowserAsrModel(configuredModel)) return configuredModel
+export function resolveClientOnnxModel(configuredModel?: string | null): string {
+  if (configuredModel && isSupportedBrowserAsrModel(configuredModel)) return configuredModel
   return DEFAULT_BROWSER_ASR_MODEL
 }
 
-async function generateBrowserSummary(title: string, text: string): Promise<TranscriptionSummary | undefined> {
-  try {
-    const summaryResult = await inferenceService.summarize({
-      text,
-      instructions: `Genera un resumen ejecutivo estructurado para la reunión titulada "${title}".`,
-      maxTokens: 1024,
-      temperature: 0.3,
-    })
-    return {
-      summary_text: summaryResult.summary,
-      topics: [title],
-    }
-  } catch {
-    return undefined
+/** Live segments have no speaker yet; diarized results carry S1, S2… from the worker. */
+function toSegment(segment: AsrSegment): TranscriptionSegment {
+  const speakerId = segment.speakerId || 'S1'
+  const number = Number.parseInt(speakerId.slice(1), 10) || 1
+  return {
+    start: segment.start,
+    end: segment.end,
+    speaker: `Participante ${number}`,
+    speaker_id: speakerId,
+    text: segment.text,
   }
 }
 
-export async function runClientTranscription(
-  options: ClientTranscriptionOptions,
-): Promise<ClientTranscriptionResult> {
+/**
+ * Decode → Whisper (and optionally speaker identification) in the worker → save. The backend
+ * applies the rule-based cleanup when it stores the verbatim result. The summary is generated
+ * afterwards by the caller.
+ */
+export async function runBrowserTranscription(options: BrowserTranscriptionOptions): Promise<TranscriptionResult> {
   const {
     id,
     file,
     title,
     description = '',
     language = 'es',
-    modelId = DEFAULT_BROWSER_ASR_MODEL,
-    onProgress,
-    onRegisterWorker,
-    isCancelled,
+    modelId,
+    signal,
+    diarize = false,
+    numSpeakers = null,
+    onStage,
+    onSegments,
+    onWarning,
   } = options
 
-  onProgress({
-    progress: 1,
-    stage: 'preprocessing',
-    message: 'Extrayendo audio...',
-    model_info: 'Whisper Web (Client)',
+  onStage({ stage: 'decoding', stageProgress: 0, message: 'Preparando el audio…' })
+  const { samples, duration } = await decodeMediaFile(file, {
+    signal,
+    onProgress: (fraction, message) => onStage({ stage: 'decoding', stageProgress: fraction, message }),
   })
+  throwIfAborted(signal)
 
-  const { audioData, duration } = await extractAudioTrackFromMedia(
-    file,
-    16000,
-    (progressPct, message) => {
-      if (isCancelled()) return
-      onProgress({ progress: progressPct, stage: 'preprocessing', message })
-    },
-  )
-
-  if (isCancelled()) {
-    throw new Error('Transcripción cancelada por el usuario.')
-  }
-
-  const effectiveModelId = resolveClientOnnxModel(modelId)
-  const workerResult = await browserAsrProvider.transcribe(
+  // Whisper may run on the GPU: unload an idle in-browser LLM first so both do not compete for VRAM.
+  await releaseOtherGpuConsumers(ASR_GPU_CONSUMER)
+  const result = await browserAsrProvider.transcribe(
+    { id, audio: samples, language, modelId: resolveClientOnnxModel(modelId), duration, diarize, numSpeakers },
     {
-      id,
-      audioData,
-      language,
-      modelId: effectiveModelId,
-      duration,
+      onProgress: (update) =>
+        onStage({
+          stage: update.stage,
+          stageProgress: update.stageProgress,
+          message: update.message,
+          etaSeconds: update.etaSeconds,
+          modelInfo: update.modelInfo,
+        }),
+      onSegments: (segments) => onSegments(segments.map(toSegment)),
     },
-    (update) => {
-      onProgress({
-        progress: update.progress,
-        stage: 'transcribing',
-        message: update.message,
-        eta: update.eta,
-        live_text: update.live_text,
-        live_segments: update.live_segments,
-        model_info: update.model_info,
-      })
-    },
-    isCancelled,
-    onRegisterWorker,
+    signal,
   )
+  throwIfAborted(signal)
+  if (result.diarizationWarning) onWarning?.(result.diarizationWarning)
 
-  if (isCancelled()) {
-    throw new Error('Transcripción cancelada por el usuario.')
-  }
-
-  onProgress({
-    progress: 92,
-    stage: 'summarizing',
-    message: 'Registrando transcripción en el sistema...',
-    model_info: workerResult.model_info,
-  })
-
-  const submitResponse = await transcriptionApi.submitClientTranscription({
+  onStage({ stage: 'saving', stageProgress: 0, message: 'Guardando la transcripción…', modelInfo: result.modelInfo })
+  const response = await transcriptionApi.submitClientTranscription({
     id,
     title,
     description,
-    text: workerResult.text,
-    segments: workerResult.segments,
-    duration_seconds: workerResult.duration,
-    language: workerResult.language,
+    text: result.text,
+    segments: result.segments.map(toSegment),
+    duration_seconds: result.duration,
+    language: result.language,
     generate_summary_now: false,
+    diarization: result.diarization,
   })
-
-  if (!submitResponse.ok || !submitResponse.transcription) {
-    throw new Error('Error al registrar la transcripción en la plataforma.')
+  if (!response?.ok || !response.transcription) {
+    throw new Error('No se pudo registrar la transcripción en la plataforma.')
   }
-
-  const generatedSummary = await generateBrowserSummary(title, workerResult.text)
-  if (generatedSummary) {
-    await transcriptionApi.updateTranscriptionSummary(id, generatedSummary).catch(() => null)
-  }
-
-  return {
-    transcription: {
-      ...submitResponse.transcription,
-      summary: generatedSummary || submitResponse.transcription.summary,
-    },
-    summary: generatedSummary,
-  }
+  return response.transcription
 }

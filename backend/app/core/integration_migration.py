@@ -39,7 +39,7 @@ def migrate_integrations_schema_if_needed() -> None:
       has_advisory_lock = False
       if dialect_name == "postgresql":
         try:
-          session.execute(text(f"SELECT pg_advisory_lock({INTEGRATIONS_MIGRATION_LOCK_ID});"))
+          session.execute(text(f"SELECT pg_advisory_xact_lock({INTEGRATIONS_MIGRATION_LOCK_ID});"))
           has_advisory_lock = True
         except Exception as lock_exc:
           logger.debug("Advisory lock acquisition skipped or failed: %s", lock_exc)
@@ -75,12 +75,10 @@ def migrate_integrations_schema_if_needed() -> None:
         session.commit()
         logger.info("Integrations schema verified/migrated successfully.")
       finally:
+        # The transaction lock is released by this transaction's commit/rollback. A session lock leaked
+        # here: after commit, the unlock could run on another pooled connection and never release it.
         if has_advisory_lock:
-          try:
-            session.execute(text(f"SELECT pg_advisory_unlock({INTEGRATIONS_MIGRATION_LOCK_ID});"))
-            session.commit()
-          except Exception as unlock_exc:
-            logger.debug("Advisory unlock failed: %s", unlock_exc)
+          session.rollback()  # no-op after commit; releases the lock on early-exit paths
 
   except Exception as exc:
     logger.error("Critical error during integrations schema migration: %s", exc)

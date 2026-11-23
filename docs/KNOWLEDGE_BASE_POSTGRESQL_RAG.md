@@ -103,5 +103,5 @@ Prefijo: `/api/knowledge`
 
 Para ejecutar las pruebas del motor PostgreSQL RAG:
 ```bash
-.\backend\.venv\Scripts\python.exe -m pytest backend/tests/unit/test_knowledge_postgres.py -v
+.\backend\.venv\Scripts\python.exe -m pytest backend/tests/test_knowledge.py -v
 ```

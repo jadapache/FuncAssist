@@ -7,6 +7,8 @@ import {
   Trash2,
 } from 'lucide-react'
 import type { TranscriptionResult } from '../api/transcriptionApi'
+import { formatDuration } from '../utils/time'
+import { normalizeStage } from '../utils/transcriptionStages'
 
 interface RecentTranscriptionItemProps {
   transcription: TranscriptionResult
@@ -15,29 +17,18 @@ interface RecentTranscriptionItemProps {
   onRequestDelete: (transcription: TranscriptionResult) => void
 }
 
-function formatSeconds(seconds: number): string {
-  if (!seconds || isNaN(seconds) || seconds <= 0) return '0 s'
-  return `${Math.round(seconds)} s`
-}
-
 function formatFileSize(transcription: TranscriptionResult): string {
   if (transcription.metadata?.file_size_formatted && transcription.metadata.file_size_formatted !== 'Audio') {
     return transcription.metadata.file_size_formatted
   }
   const bytes = transcription.metadata?.size_bytes
-  if (typeof bytes === 'number' && bytes > 35) {
+  if (typeof bytes === 'number' && bytes > 0) {
     if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
     if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
     if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${bytes} B`
   }
-  // Approximate audio size based on duration (~128 kbps = ~16 KB/sec)
-  if (transcription.duration_seconds && transcription.duration_seconds > 0) {
-    const approx = Math.round(transcription.duration_seconds * 16000)
-    if (approx >= 1024 * 1024) return `${(approx / (1024 * 1024)).toFixed(1)} MB`
-    return `${Math.round(approx / 1024)} KB`
-  }
-  return '1.5 MB'
+  return '—'
 }
 
 function formatDateTime(isoString: string): string {
@@ -55,6 +46,20 @@ function formatDateTime(isoString: string): string {
   }
 }
 
+const STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  failed: { label: 'Error', className: 'bg-red-100 text-red-800' },
+  interrupted: { label: 'Interrumpida', className: 'bg-amber-100 text-amber-800' },
+  cancelled: { label: 'Cancelada', className: 'bg-slate-100 text-slate-600' },
+}
+
+function StatusBadge({ status }: { status?: string }) {
+  const badge = status ? STATUS_BADGES[normalizeStage(status)] : undefined
+  if (!badge) return null
+  return (
+    <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${badge.className}`}>{badge.label}</span>
+  )
+}
+
 export const RecentTranscriptionItem: React.FC<RecentTranscriptionItemProps> = ({
   transcription,
   viewMode = 'grid',
@@ -64,9 +69,8 @@ export const RecentTranscriptionItem: React.FC<RecentTranscriptionItemProps> = (
   const title = transcription.metadata?.title || 'Transcripción de Reunión'
   const description = transcription.metadata?.description || 'Sin descripción adicional.'
   const sizeStr = formatFileSize(transcription)
-  const durationStr = formatSeconds(transcription.duration_seconds)
+  const durationStr = formatDuration(transcription.duration_seconds)
   const dateTimeStr = formatDateTime(transcription.created_at)
-
   if (viewMode === 'list') {
     return (
       <div
@@ -82,6 +86,7 @@ export const RecentTranscriptionItem: React.FC<RecentTranscriptionItemProps> = (
             <h4 className="text-sm font-bold text-slate-900 group-hover:text-[#002777] transition truncate" title={title}>
               {title}
             </h4>
+            <StatusBadge status={transcription.status} />
             <p className="text-xs text-slate-500 line-clamp-1" title={description}>
               {description}
             </p>
@@ -138,6 +143,7 @@ export const RecentTranscriptionItem: React.FC<RecentTranscriptionItemProps> = (
               <h4 className="text-sm font-bold text-slate-900 group-hover:text-[#002777] transition truncate" title={title}>
                 {title}
               </h4>
+              <StatusBadge status={transcription.status} />
               <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed" title={description}>
                 {description}
               </p>

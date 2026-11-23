@@ -1,7 +1,9 @@
+import { isSecureOrigin } from '../../../core/browser/secureContext'
 import {
   CLIENT_WEBLLM_MODELS,
   findClientWebLLMModel,
 } from '../catalogs/clientCatalog'
+import { isModelUnfit } from './deviceFit'
 import type {
   HardwareProfile,
   ModelEvaluation,
@@ -34,6 +36,7 @@ function resolveHardwareTier(memoryGB: number, hasWebGPU: boolean): 'low' | 'med
 function buildFallbackHardwareProfile(nav: NavigatorWithMemory | null, name: string): HardwareProfile {
   return {
     hasWebGPU: false,
+    secureContext: isSecureOrigin(),
     hasShaderF16: false,
     adapterName: name,
     deviceMemoryGB: nav?.deviceMemory ?? 4,
@@ -45,6 +48,10 @@ function buildFallbackHardwareProfile(nav: NavigatorWithMemory | null, name: str
 
 export async function detectHardwareProfile(): Promise<HardwareProfile> {
   const nav = typeof navigator !== 'undefined' ? (navigator as NavigatorWithMemory) : null
+  if (!isSecureOrigin()) {
+    // http://<IP>: the browser does not expose WebGPU at all, whatever the hardware.
+    return buildFallbackHardwareProfile(nav, 'Conexión sin HTTPS')
+  }
   if (!nav || !('gpu' in nav) || !nav.gpu) {
     return buildFallbackHardwareProfile(nav, 'No WebGPU Support')
   }
@@ -71,6 +78,7 @@ export async function detectHardwareProfile(): Promise<HardwareProfile> {
 
     return {
       hasWebGPU: true,
+      secureContext: true,
       hasShaderF16,
       adapterName,
       deviceMemoryGB: nav.deviceMemory ?? 4,
@@ -88,12 +96,39 @@ export function evaluateModel(
   profile: HardwareProfile,
   preference: ModelPreference,
 ): ModelEvaluation {
+  if (!profile.secureContext) {
+    return {
+      model,
+      isCompatible: false,
+      isRecommended: false,
+      reason: 'La aplicación está abierta por http:// sin HTTPS: el navegador desactiva WebGPU.',
+    }
+  }
+
   if (!profile.hasWebGPU) {
     return {
       model,
       isCompatible: false,
       isRecommended: false,
       reason: 'El navegador o dispositivo no cuenta con aceleración WebGPU activa.',
+    }
+  }
+
+  if (isModelUnfit(model.id)) {
+    return {
+      model,
+      isCompatible: true,
+      isRecommended: false,
+      reason: 'No cupo en la memoria de la GPU de este equipo la última vez; se usó un modelo más ligero.',
+    }
+  }
+
+  if (model.vramRequiredMB > 2000 && profile.tier !== 'high') {
+    return {
+      model,
+      isCompatible: true,
+      isRecommended: false,
+      reason: `Necesita una GPU con más memoria (${model.vramFormatted}); en este equipo puede agotarla.`,
     }
   }
 

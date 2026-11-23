@@ -5,11 +5,37 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+from app.ai.catalog import pick_model
 from app.ai.endpoint_security import validate_remote_endpoint_url
 from app.ai.providers.base import AIProvider
 from app.ai.providers.implementations import LiteLLMProvider
 from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS, find_provider_spec
 from app.core.storage import load_app_settings, load_user_ai_settings
+
+
+_PROVIDER_CACHE: dict[tuple[Any, ...], AIProvider] = {}
+MAX_FALLBACK_MODELS = 3
+
+
+def _normalize_fallbacks(raw: Any) -> list[str]:
+  """Accept a list or comma-separated string; keep unique non-empty names, capped."""
+  if isinstance(raw, str):
+    raw = raw.split(",")
+  if not isinstance(raw, (list, tuple)):
+    return []
+  cleaned = [str(m).strip() for m in raw if isinstance(m, str) and str(m).strip()]
+  return list(dict.fromkeys(cleaned))[:MAX_FALLBACK_MODELS]
+
+
+def clear_provider_cache(user_id: str | None = None) -> None:
+  """Invalidate cached providers (all or for a specific user)."""
+  global _PROVIDER_CACHE
+  if user_id is None:
+    _PROVIDER_CACHE.clear()
+  else:
+    keys_to_del = [k for k in _PROVIDER_CACHE if k[0] == user_id]
+    for k in keys_to_del:
+      _PROVIDER_CACHE.pop(k, None)
 
 
 def get_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
@@ -29,6 +55,8 @@ def get_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
     "transcription_groq_api_key": ai.get("transcription_groq_api_key") or ai.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
     "transcription_openai_api_key": ai.get("transcription_openai_api_key") or ai.get("openai_api_key") or os.getenv("OPENAI_API_KEY", ""),
     "ollama_base_url": ai.get("ollama_base_url") or os.getenv("OLLAMA_BASE_URL") or None,
+    "fallback_models": _normalize_fallbacks(ai.get("fallback_models") or os.getenv("AI_FALLBACK_MODELS") or []),
+    "fast_model": ai.get("fast_model") or os.getenv("AI_FAST_MODEL") or None,
   }
 
 
@@ -38,9 +66,22 @@ def resolve_provider(
   api_key: str | None = None,
   base_url: str | None = None,
   user_id: str | None = None,
+  tier: str = "main",
+  main_model: str | None = None,
 ) -> AIProvider:
+  """Build (or reuse) the provider for a request.
+
+  Model resolution, most specific first:
+  - main tier: `model_name` → configured model → catalog pick for the tier → registry default.
+  - fast tier: `model_name` → configured fast model → catalog pick for the tier → the main model.
+    `main_model` lets the caller name the main model actually in use (e.g. a per-request override);
+    the fast provider retries once with it if its own model no longer exists.
+  User settings (model, fast model, fallbacks) apply only when the request targets the configured
+  provider: they name that provider's models.
+  """
   config = get_ai_settings(user_id=user_id)
-  target_name = (provider_name or config.get("provider") or "").lower()
+  configured_provider = (config.get("provider") or "").lower()
+  target_name = (provider_name or configured_provider).lower()
 
   if target_name in FORBIDDEN_BACKEND_PROVIDERS:
     raise ValueError(
@@ -48,18 +89,32 @@ def resolve_provider(
       "La inferencia local se ejecuta exclusivamente en el navegador mediante WebLLM."
     )
 
-  chosen_model = model_name or config.get("model") or ""
-  if chosen_model.lower().endswith(".gguf"):
+  spec = find_provider_spec(target_name)
+  same_provider = bool(spec) and find_provider_spec(configured_provider) is spec
+  user_model = model_name or (config.get("model") if same_provider else None) or ""
+  if user_model.lower().endswith(".gguf"):
     raise ValueError("Modelos GGUF no están admitidos en el backend.")
 
-  spec = find_provider_spec(target_name)
   if not spec:
     raise ValueError(
       f"No valid AI provider found for '{target_name}'. "
       "Configure provider in Settings (groq | gemini | claude | openai | ollama_remote | openrouter | deepseek)."
     )
 
-  chosen_model = chosen_model or spec.default_model
+  resolved_main = main_model or user_model or pick_model(spec.id, "main", spec.default_model) or spec.default_model
+  not_found_fallback: str | None = None
+  if tier == "fast":
+    configured_fast = config.get("fast_model") if same_provider else None
+    chosen_model = model_name or configured_fast or pick_model(spec.id, "fast", spec.fast_model) or resolved_main
+    if chosen_model != resolved_main:
+      not_found_fallback = resolved_main
+  else:
+    chosen_model = resolved_main
+
+  # Fallbacks belong to the main tier only: the fast tier is already the cheap path,
+  # and the user's list refers to their main provider's models.
+  fallbacks = (config.get("fallback_models") or []) if tier == "main" and same_provider else []
+  fb_key = (tuple(fallbacks), not_found_fallback)
 
   if spec.id == "ollama_remote" or "ollama" in spec.aliases:
     target_base_url = (base_url or config.get("ollama_base_url") or "").rstrip("/")
@@ -68,7 +123,18 @@ def resolve_provider(
     ok, err = validate_remote_endpoint_url(target_base_url)
     if not ok:
       raise ValueError(f"URL de Ollama remoto no permitida: {err}")
-    return LiteLLMProvider(spec, base_url=target_base_url, default_model=chosen_model)
+    cache_key = (user_id, target_name, chosen_model, "", target_base_url, fb_key)
+    if cache_key in _PROVIDER_CACHE:
+      return _PROVIDER_CACHE[cache_key]
+    provider = LiteLLMProvider(
+      spec,
+      base_url=target_base_url,
+      default_model=chosen_model,
+      fallback_models=fallbacks,
+      not_found_fallback=not_found_fallback,
+    )
+    _PROVIDER_CACHE[cache_key] = provider
+    return provider
 
   key = (
     api_key
@@ -80,4 +146,16 @@ def resolve_provider(
     env_hint = f" ({spec.env_key})" if spec.env_key else ""
     raise ValueError(f"{spec.name} is selected but API key{env_hint} is missing.")
 
-  return LiteLLMProvider(spec, api_key=key, default_model=chosen_model)
+  cache_key = (user_id, target_name, chosen_model, key, base_url, fb_key)
+  if cache_key in _PROVIDER_CACHE:
+    return _PROVIDER_CACHE[cache_key]
+
+  provider = LiteLLMProvider(
+    spec,
+    api_key=key,
+    default_model=chosen_model,
+    fallback_models=fallbacks,
+    not_found_fallback=not_found_fallback,
+  )
+  _PROVIDER_CACHE[cache_key] = provider
+  return provider

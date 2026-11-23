@@ -30,6 +30,10 @@ class ProviderSpec:
   aliases: tuple[str, ...] = ()
   default_max_tokens: int | None = None
   extra_kwargs: dict[str, Any] = field(default_factory=dict)
+  fallback_models: list[str] = field(default_factory=list)
+  fast_model: str = ""
+  supports_prompt_cache: bool = False
+  supports_tools: bool = True
 
 
 PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
@@ -38,7 +42,10 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     name="Groq Cloud",
     litellm_prefix="groq",
     config_key="groq_api_key",
-    default_model="llama-3.3-70b-versatile",
+    # Last-resort names only: the effective defaults are picked from the synced catalog
+    # (app.ai.catalog.pick_model) so retired models are never used.
+    default_model="openai/gpt-oss-120b",
+    fast_model="openai/gpt-oss-20b",
     default_max_tokens=4096,
   ),
   "gemini": ProviderSpec(
@@ -47,25 +54,31 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     litellm_prefix="gemini",
     config_key="gemini_api_key",
     default_model="gemini-2.5-flash",
+    fast_model="gemini-2.5-flash",
     aliases=("google",),
     default_max_tokens=8192,
+    supports_prompt_cache=True,
   ),
   "claude": ProviderSpec(
     id="claude",
     name="Anthropic Claude",
     litellm_prefix="anthropic",
     config_key="claude_api_key",
-    default_model="claude-3-5-haiku-latest",
+    default_model="claude-sonnet-4-5",
+    fast_model="claude-haiku-4-5",
     aliases=("anthropic",),
     default_max_tokens=8192,
+    supports_prompt_cache=True,
   ),
   "openai": ProviderSpec(
     id="openai",
     name="OpenAI",
     litellm_prefix="",
     config_key="openai_api_key",
-    default_model="gpt-4o-mini",
+    default_model="gpt-4o",
+    fast_model="gpt-4o-mini",
     default_max_tokens=16384,
+    supports_prompt_cache=True,
   ),
   "ollama_remote": ProviderSpec(
     id="ollama_remote",
@@ -73,6 +86,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     litellm_prefix="ollama_chat",
     default_base_url=None,
     default_model="qwen2.5:2b",
+    fast_model="qwen2.5:2b",
     is_local=False,
     aliases=("ollama",),
   ),
@@ -82,6 +96,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     litellm_prefix="openrouter",
     config_key="openrouter_api_key",
     default_model="meta-llama/llama-3.3-70b-instruct",
+    fast_model="meta-llama/llama-3.1-8b-instruct",
   ),
   "deepseek": ProviderSpec(
     id="deepseek",
@@ -89,6 +104,8 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     litellm_prefix="deepseek",
     config_key="deepseek_api_key",
     default_model="deepseek-chat",
+    fast_model="deepseek-chat",
+    supports_prompt_cache=True,
   ),
 }
 

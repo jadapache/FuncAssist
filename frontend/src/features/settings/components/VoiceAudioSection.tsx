@@ -9,6 +9,7 @@ import {
 import type { AISettings, ModelCatalogItem } from '../../../api/client'
 import { LocalVoiceModelsList } from './voice/LocalVoiceModelsList'
 import { CloudVoiceModelSelector } from './voice/CloudVoiceModelSelector'
+import { TranscriptionProcessingSettings } from './voice/TranscriptionProcessingSettings'
 import { DEFAULT_BROWSER_ASR_MODEL } from '../../ai/catalogs/clientCatalog'
 
 export type VoiceAudioSectionProps = {
@@ -137,6 +138,8 @@ export const VoiceAudioSection = ({
               setShowTranscriptionKey={setShowTranscriptionKey}
             />
           )}
+
+          <TranscriptionProcessingSettings ai={ai} />
 
           <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button

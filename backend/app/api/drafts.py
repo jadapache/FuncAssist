@@ -51,29 +51,36 @@ async def save_draft(
     # 1. Save session and artifacts to PostgreSQL
     await chat_repo.save_session(payload)
 
-    # 2. Save individual messages to PostgreSQL chat_messages
-    existing_messages = await chat_repo.get_session_messages(session_id=payload.get("id") or "default", limit=500, user_id=user_id)
-    existing_ids = {m.get("id") for m in existing_messages if m.get("id")}
+    # 2. Save individual messages to PostgreSQL chat_messages.
+    # Messages with an id are upserted by id (save_message is idempotent), so repeated autosaves
+    # and the agentic endpoint's own persistence never duplicate them, and legitimately repeated
+    # texts ("sí", "ok") are kept. Only id-less messages fall back to content de-duplication.
+    session_id = payload.get("id") or "default"
+    existing_messages = await chat_repo.get_session_messages(session_id=session_id, limit=0, user_id=user_id)
     existing_contents = {(m.get("role"), (m.get("content") or "").strip()) for m in existing_messages}
+    existing_by_id = {m.get("id"): (m.get("content") or "").strip() for m in existing_messages if m.get("id")}
 
     for msg in body.messages:
-      content = msg.get("content", "").strip()
+      content = (msg.get("content") or "").strip()
+      if not content:
+        continue
       msg_id = msg.get("id")
       role = msg.get("role", "user")
       key = (role, content)
-      if content and (not msg_id or msg_id not in existing_ids) and key not in existing_contents:
-        await chat_repo.save_message(
-          session_id=payload.get("id") or "default",
-          role=role,
-          content=content,
-          context_sources=msg.get("context_sources"),
-          attachments=msg.get("attachments"),
-          user_id=user_id,
-          id=msg_id,
-        )
-        if msg_id:
-          existing_ids.add(msg_id)
-        existing_contents.add(key)
+      if not msg_id and key in existing_contents:
+        continue
+      if msg_id and existing_by_id.get(msg_id) == content:
+        continue  # already stored unchanged: skip the round-trip
+      await chat_repo.save_message(
+        session_id=session_id,
+        role=role,
+        content=content,
+        context_sources=msg.get("context_sources"),
+        attachments=msg.get("attachments"),
+        user_id=user_id,
+        id=msg_id,
+      )
+      existing_contents.add(key)
 
     # 3. Persist file-based draft backup
     saved = save_draft_session(payload)

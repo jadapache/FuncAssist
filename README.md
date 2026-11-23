@@ -214,6 +214,8 @@ npm run dev
 docker build -t qa-mgmt:latest .
 docker run -p 8000:8000 -e VITE_API_BASE=http://localhost:8000 qa-mgmt:latest
 ```
+
+Con `docker compose`, el frontend sirve HTTPS automáticamente si encuentra `certs/tls.crt` y `certs/tls.key`. En una red corporativa (usuarios entrando por la IP o el nombre del servidor) HTTPS es necesario para los modelos en el navegador: ver [docs/DEPLOY_HTTPS.md](./docs/DEPLOY_HTTPS.md).
 ---
 
 ---

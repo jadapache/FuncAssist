@@ -21,19 +21,16 @@ export type {
 // Hooks & Context
 export { useTranscription, TranscriptionProvider } from './hooks/useTranscription'
 export type { TranscriptionContextValue } from './hooks/useTranscription'
-export { useTranscriptionProgress } from './hooks/useTranscriptionProgress'
-export type { TranscriptionProgressData } from './hooks/useTranscriptionProgress'
+export type { TranscriptionJob } from './context/transcriptionJobs'
 
 // Components (public-facing — used by pages or App.tsx)
 export { TranscriptionStudio } from './components/TranscriptionStudio'
 export { UploadArea } from './components/UploadArea'
-export { ActiveTranscriptionItem } from './components/ActiveTranscriptionItem'
 export { RecentTranscriptionItem } from './components/RecentTranscriptionItem'
 export {
   FloatingJobToast as FloatingTranscriptionToast,
   type FloatingJobToastProps as FloatingTranscriptionToastProps,
 } from '../../components/common/FloatingJobToast'
-export { SummaryModal } from './components/SummaryModal'
 export { GenerateModal } from './components/GenerateModal'
 
 // Page
