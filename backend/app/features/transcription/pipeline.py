@@ -315,9 +315,18 @@ class TranscriptionPipeline:
 
     semaphore = asyncio.Semaphore(config.chunk_concurrency(self.target.provider))
 
+    failed = asyncio.Event()
+
     async def _worker(chunk: ChunkPlan) -> None:
       async with semaphore:
-        results[chunk.index] = await self._run_chunk(client, chunk, audio_wav, results, known)
+        # A chunk released by a failing sibling must not reach the provider before the group cancels it.
+        if failed.is_set():
+          return
+        try:
+          results[chunk.index] = await self._run_chunk(client, chunk, audio_wav, results, known)
+        except BaseException:
+          failed.set()
+          raise
 
     try:
       async with asyncio.TaskGroup() as group:
