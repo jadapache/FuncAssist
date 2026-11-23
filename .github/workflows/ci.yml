@@ -28,7 +28,7 @@ jobs:
       - name: Audit backend dependencies (known CVEs)
         run: |
           pip install pip-audit==2.10.1
-          pip-audit --strict -r backend/requirements.txt --disable-pip --no-deps
+          pip-audit --strict --skip-editable
       - name: Run backend tests
         working-directory: backend
         run: python -m pytest tests -v
