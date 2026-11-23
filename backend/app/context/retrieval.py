@@ -1,4 +1,4 @@
-"""Retrieval over knowledge chunks — PostgreSQL full-text/vector search with Python BM25 fallback."""
+"""Retrieval over knowledge chunks — PostgreSQL vector, full-text and trigram search."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from app.context.knowledge import (
   get_chunks_for_documents,
   load_chunks,
   search_chunks_fts,
+  search_chunks_trigram,
   search_chunks_vector,
 )
 from app.context.models import ContextChunk, SourceType
@@ -35,64 +36,22 @@ def search_knowledge(
   if fts_results:
     return [_to_chunk(item, score=item.get("score")) for item in fts_results]
 
-  # 2. Fall back to Python BM25 / keyword over full corpus
-  chunks = load_chunks()
-  if tags:
-    tag_set = {tag.lower() for tag in tags}
-    chunks = [
-      chunk
-      for chunk in chunks
-      if tag_set.intersection({str(tag).lower() for tag in chunk.get("tags") or []})
-    ]
-
-  if not chunks:
-    return []
-
-  corpus = [str(chunk.get("text") or "") for chunk in chunks]
+  # 3. Fall back to trigram / ILIKE search in PostgreSQL (acronyms, IDs, English terms)
   if not query.strip():
-    return [_to_chunk(item, score=None) for item in chunks[:top_k]]
-
-  scores = _bm25_scores(query, corpus)
-  if scores is None:
-    scores = _keyword_scores(query, corpus)
-
-  ranked = sorted(enumerate(scores), key=lambda pair: pair[1], reverse=True)
-  results: list[ContextChunk] = []
-  for index, score in ranked[:top_k]:
-    if score <= 0:
-      continue
-    results.append(_to_chunk(chunks[index], score=float(score)))
-  return results
+    return [_to_chunk(item, score=None) for item in _filter_by_tags(load_chunks(), tags)[:top_k]]
+  trigram_results = search_chunks_trigram(query, top_k=top_k, tags=tags)
+  return [_to_chunk(item, score=item.get("score")) for item in trigram_results]
 
 
-def _bm25_scores(query: str, corpus: list[str]) -> list[float] | None:
-  try:
-    from rank_bm25 import BM25Okapi
-  except ImportError:
-    return None
-
-  tokenized_corpus = [_tokenize(text) for text in corpus]
-  bm25 = BM25Okapi(tokenized_corpus)
-  return list(bm25.get_scores(_tokenize(query)))
-
-
-def _keyword_scores(query: str, corpus: list[str]) -> list[float]:
-  tokens = _tokenize(query)
-  if not tokens:
-    return [0.0 for _ in corpus]
-  scores: list[float] = []
-  for text in corpus:
-    hay = text.lower()
-    score = 0.0
-    for token in tokens:
-      if token in hay:
-        score += 1.0 + hay.count(token) * 0.1
-    scores.append(score)
-  return scores
-
-
-def _tokenize(text: str) -> list[str]:
-  return [token for token in text.lower().replace("\n", " ").split(" ") if token]
+def _filter_by_tags(chunks: list[dict[str, Any]], tags: list[str] | None) -> list[dict[str, Any]]:
+  if not tags:
+    return chunks
+  tag_set = {tag.lower() for tag in tags}
+  return [
+    chunk
+    for chunk in chunks
+    if tag_set.intersection({str(tag).lower() for tag in chunk.get("tags") or []})
+  ]
 
 
 def _to_chunk(item: dict[str, Any], score: float | None) -> ContextChunk:

@@ -7,7 +7,6 @@ cryptography==50.0.2
 PyJWT==2.15.1
 python-multipart==0.0.32
 keyring==25.7.0
-rank-bm25==0.2.2
 pypdf==6.21.4
 python-docx==1.2.0
 litellm @ https://files.pythonhosted.org/packages/d3/51/825f430f07bf864ade5f58462816437bbfaa22c229f5bb474073352bffc4/litellm-1.110.2-cp310-abi3-manylinux_2_28_x86_64.whl#sha256=9d94d1c7d524b6fd10c14f9c8c6c4f0ac31705f9964ac59dcfd8337c046d8917

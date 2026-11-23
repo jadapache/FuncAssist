@@ -8,6 +8,7 @@ Public API:
   - get_chunks_for_documents(doc_ids) -> list[dict]
   - search_chunks_fts(query, top_k, tags) -> list[dict]
   - search_chunks_vector(query_vector, top_k, tags) -> list[dict]
+  - search_chunks_trigram(query, top_k, tags) -> list[dict]
   - ensure_knowledge_dirs() -> None
   - get_db_status() -> dict
 
@@ -55,6 +56,7 @@ def get_knowledge_documents_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 _PGVECTOR_AVAILABLE: bool | None = None
+_PGTRGM_AVAILABLE: bool = False
 
 
 def is_postgres_configured() -> bool:
@@ -95,7 +97,7 @@ def _register_vector_adapter(conn) -> None:
 
 
 def _init_extensions(conn) -> None:
-  global _PGVECTOR_AVAILABLE
+  global _PGVECTOR_AVAILABLE, _PGTRGM_AVAILABLE
   cur = conn.cursor()
   try:
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
@@ -111,6 +113,15 @@ def _init_extensions(conn) -> None:
     conn.commit()
   except Exception:
     conn.rollback()
+
+  try:
+    cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+    conn.commit()
+    _PGTRGM_AVAILABLE = True
+  except Exception as exc:
+    conn.rollback()
+    _PGTRGM_AVAILABLE = False
+    logger.info("pg_trgm extension not available; trigram search falls back to ILIKE: %s", exc)
 
   if _PGVECTOR_AVAILABLE:
     _register_vector_adapter(conn)
@@ -190,6 +201,16 @@ def _init_indexes(conn) -> None:
     except Exception as exc:
       conn.rollback()
       logger.warning("Could not create vector hnsw index: %s", exc)
+
+  if _PGTRGM_AVAILABLE:
+    try:
+      cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunks_text_trgm ON chunks USING gin (text gin_trgm_ops);"
+      )
+      conn.commit()
+    except Exception as exc:
+      conn.rollback()
+      logger.warning("Could not create trigram index: %s", exc)
 
 
 def _init_metadata(conn) -> None:
@@ -633,6 +654,80 @@ def search_chunks_vector(
       rows = cur.fetchall()
     except Exception as exc:
       logger.warning("Vector search query failed: %s", exc)
+      return []
+
+    if tags:
+      tag_set = {t.lower() for t in tags}
+      filtered = []
+      for row in rows:
+        rt = row["tags"]
+        row_tags = rt if isinstance(rt, list) else json.loads(rt or "[]")
+        if tag_set.intersection({str(t).lower() for t in row_tags}):
+          filtered.append(row)
+      rows = filtered[:top_k]
+
+    result = []
+    for row in rows:
+      raw_tags = row["tags"]
+      tags_list = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
+      up_at = row["uploaded_at"]
+      uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
+      result.append({
+        "id": row["chunk_id"],
+        "document_id": row["document_id"],
+        "filename": row["filename"],
+        "tags": tags_list,
+        "index": row["chunk_index"],
+        "text": row["text"],
+        "uploaded_at": uploaded_at_str,
+        "score": float(row["score"]),
+      })
+    return result
+
+
+def search_chunks_trigram(
+  query: str,
+  *,
+  top_k: int = 8,
+  tags: list[str] | None = None,
+) -> list[dict[str, Any]]:
+  """Fuzzy lexical search for terms the Spanish tsvector misses (acronyms, IDs, English words).
+
+  Uses pg_trgm word similarity when available, otherwise a case-insensitive ILIKE match.
+  """
+  if not is_postgres_configured() or not query.strip():
+    return []
+
+  limit = top_k * 3 if tags else top_k
+  with _db() as conn:
+    cur = conn.cursor()
+    try:
+      if _PGTRGM_AVAILABLE:
+        cur.execute(
+          """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
+                    word_similarity(%(query)s, text) AS score
+             FROM chunks
+             WHERE %(query)s <%% text
+             ORDER BY score DESC
+             LIMIT %(limit)s""",
+          {"query": query, "limit": limit},
+        )
+      else:
+        terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2] or [query.strip().lower()]
+        patterns = [f"%{t.replace('%', '').replace('_', '')}%" for t in terms]
+        cur.execute(
+          """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
+                    (SELECT COUNT(*) FROM unnest(%(patterns)s::text[]) AS p WHERE text ILIKE p)::float
+                      / %(n)s AS score
+             FROM chunks
+             WHERE text ILIKE ANY(%(patterns)s)
+             ORDER BY score DESC
+             LIMIT %(limit)s""",
+          {"patterns": patterns, "n": len(patterns), "limit": limit},
+        )
+      rows = cur.fetchall()
+    except Exception as exc:
+      logger.warning("Trigram search query failed: %s", exc)
       return []
 
     if tags:
