@@ -170,28 +170,34 @@ async def save_upload(upload: UploadFile, transcription_id: str, title: str, des
   return _media_entry(transcription_id, filename, stored, dest, size, digest.hexdigest(), resolved_title, description.strip())
 
 
-def resolve_allowed_local_path(raw: str | Path) -> Optional[Path]:
-  """Resolve a user-supplied local path; return it only if it lies inside TRANSCRIPTION_LOCAL_ROOTS."""
+def match_local_root(raw: str | Path) -> Optional[tuple[str, str]]:
+  """Resolve a user-supplied local path to `(real_path, root_prefix)` for the TRANSCRIPTION_LOCAL_ROOTS
+  entry containing it, or None. Callers must still guard with `real_path.startswith(root_prefix)`
+  right before touching the file, so the check sits next to the file access."""
   text = str(raw).strip().strip("'\"")
   if not text:
     return None
   resolved = os.path.realpath(text)
   for root in config.local_roots():
-    base = os.path.realpath(root)
-    if resolved == base or resolved.startswith(base.rstrip(os.sep) + os.sep):
-      return Path(resolved)
+    prefix = os.path.realpath(root).rstrip(os.sep) + os.sep
+    if resolved.startswith(prefix):
+      return resolved, prefix
   return None
 
 
 def is_allowed_local_path(path: str | Path) -> bool:
-  return resolve_allowed_local_path(path) is not None
+  return match_local_root(path) is not None
 
 
 def local_media_entry(transcription_id: str, local_path: str, title: str, description: str = "") -> dict[str, Any]:
   """Desktop mode only: reference a file inside TRANSCRIPTION_LOCAL_ROOTS without copying it."""
-  path = resolve_allowed_local_path(local_path) if config.desktop_mode() else None
-  if path is None:
+  match = match_local_root(local_path) if config.desktop_mode() else None
+  if match is None:
     raise TranscriptionJobError("bad_request", "Ruta local no permitida.")
+  real_path, root_prefix = match
+  if not real_path.startswith(root_prefix):
+    raise TranscriptionJobError("bad_request", "Ruta local no permitida.")
+  path = Path(real_path)
   if not path.is_file():
     raise TranscriptionJobError("bad_request", f"El archivo local no existe o no es accesible: {local_path}")
   size = path.stat().st_size

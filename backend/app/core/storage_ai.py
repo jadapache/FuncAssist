@@ -63,12 +63,12 @@ def load_user_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
   ai_config.update(creds)
 
   global_ai = load_app_settings().get("ai") or {}
-  # Only inherit non-secret settings (model defaults, ollama url), never private keys
-  non_secret_global = {
+  # Only inherit shareable settings (model defaults, ollama url), never private keys
+  inherited_global = {
     k: v for k, v in global_ai.items()
     if not k.endswith("_api_key") and k != "api_key"
   }
-  merged = dict(non_secret_global)
+  merged = dict(inherited_global)
   merged.update({k: v for k, v in ai_config.items() if v is not None})
   return merged
 
