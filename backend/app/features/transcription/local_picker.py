@@ -9,7 +9,7 @@ from typing import Any, Optional
 from app.features.transcription.storage import (
   SUPPORTED_FORMATS,
   SUPPORTED_VIDEO_EXTS,
-  _format_size_bytes,
+  format_size_bytes,
   validate_file,
 )
 
@@ -88,6 +88,6 @@ def inspect_local_file(file_path_str: str) -> dict[str, Any]:
     "path": str(p.resolve()),
     "filename": p.name,
     "size_bytes": size,
-    "size_formatted": _format_size_bytes(size),
+    "size_formatted": format_size_bytes(size),
     "is_video": ext in SUPPORTED_VIDEO_EXTS,
   }

@@ -1,187 +1,240 @@
+"""Cloud speech-to-text clients (Groq / OpenAI Whisper and OpenAI diarization).
+
+Provider and model are resolved once per job from the user's settings. Requests are retried with
+backoff only for transient failures (429, 5xx, timeouts, connection errors), honouring `retry-after`.
+"""
+
 from __future__ import annotations
 
-import io
+import asyncio
+import base64
 import logging
 import os
+import random
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional, Sequence
+
 import httpx
 
 from app.ai.providers.factory import get_ai_settings
+from app.features.transcription import config
+from app.features.transcription.errors import TranscriptionJobError, error_from_status, is_transient
 
 logger = logging.getLogger(__name__)
 
+ENDPOINTS = {
+  "groq": "https://api.groq.com/openai/v1/audio/transcriptions",
+  "openai": "https://api.openai.com/v1/audio/transcriptions",
+}
+# Models that return timestamped segments (`verbose_json`). gpt-4o-(mini-)transcribe only return text.
+SEGMENT_MODELS = {
+  "groq": ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"],
+  "openai": ["whisper-1"],
+}
+DEFAULT_MODEL = {"groq": "whisper-large-v3", "openai": "whisper-1"}
+# USD per audio minute, used for cost estimates in metrics only.
+PRICE_PER_MINUTE = {"groq": 0.00185, "openai": 0.006, "openai-diarize": 0.006}
 
-class WhisperCloudService:
-  def __init__(self, provider: str = "groq", api_key: Optional[str] = None, user_id: Optional[str] = None):
-    self.provider = provider.lower() if provider else "groq"
-    self.api_key = api_key
-    self.user_id = user_id
 
-  def _resolve_credentials(self) -> tuple[str, str, str]:
-    config = get_ai_settings(user_id=self.user_id)
-    prov = (self.provider or config.get("transcription_provider") or "auto").lower()
-    configured_model = config.get("transcription_model")
+@dataclass(frozen=True)
+class SpeechTarget:
+  provider: str
+  api_key: str
+  model: str
+  diarize: bool = False
 
-    groq_key = (
-      self.api_key
-      or config.get("transcription_groq_api_key")
-      or config.get("groq_api_key")
-      or os.getenv("GROQ_API_KEY", "")
-    )
-    openai_key = (
-      self.api_key
-      or config.get("transcription_openai_api_key")
-      or config.get("openai_api_key")
-      or os.getenv("OPENAI_API_KEY", "")
-    )
+  @property
+  def label(self) -> str:
+    name = "Groq" if self.provider == "groq" else "OpenAI"
+    kind = "diarización" if self.diarize else "Whisper"
+    return f"{name} {kind} ({self.model})"
 
-    if prov in {"groq", "auto"}:
-      if groq_key:
-        model = configured_model if configured_model and "whisper" in configured_model else "whisper-large-v3"
-        return "groq", groq_key, model
+  def estimate_cost(self, audio_seconds: float) -> float:
+    key = "openai-diarize" if self.diarize else self.provider
+    return round(audio_seconds / 60.0 * PRICE_PER_MINUTE.get(key, 0.006), 5)
 
-    if prov in {"openai", "auto"}:
-      if openai_key:
-        model = configured_model if configured_model and "whisper" in configured_model else "whisper-1"
-        return "openai", openai_key, model
 
-    # Fallback checking any available key
-    if groq_key:
-      return "groq", groq_key, configured_model or "whisper-large-v3"
+def _keys(cfg: dict[str, Any]) -> dict[str, str]:
+  return {
+    "groq": cfg.get("transcription_groq_api_key") or cfg.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
+    "openai": cfg.get("transcription_openai_api_key") or cfg.get("openai_api_key") or os.getenv("OPENAI_API_KEY", ""),
+  }
 
-    if openai_key:
-      return "openai", openai_key, configured_model or "whisper-1"
 
-    raise ValueError(
-      "No se encontró una clave de API válida para transcripción en la nube. "
-      "Configura tu Groq API Key o OpenAI API Key en Ajustes."
-    )
+def resolve_speech_target(user_id: Optional[str]) -> SpeechTarget:
+  """Provider/model for plain transcription, respecting `transcription_provider`."""
+  cfg = get_ai_settings(user_id=user_id)
+  keys = _keys(cfg)
+  configured = (cfg.get("transcription_provider") or "auto").lower()
+  order = ["openai", "groq"] if configured == "openai" else ["groq", "openai"]
+  for provider in order:
+    if not keys[provider]:
+      continue
+    if configured in {"groq", "openai"} and provider != configured:
+      logger.warning("Transcription provider %s has no API key; using %s instead", configured, provider)
+    model = (cfg.get("transcription_model") or "").strip()
+    if model not in SEGMENT_MODELS[provider]:
+      if model:
+        logger.info("Transcription model %r is not usable with %s segments; using %s", model, provider, DEFAULT_MODEL[provider])
+      model = DEFAULT_MODEL[provider]
+    return SpeechTarget(provider=provider, api_key=keys[provider], model=model)
+  raise TranscriptionJobError("no_credentials")
 
-  async def transcribe(
+
+def resolve_diarization_target(user_id: Optional[str], requested: bool) -> Optional[SpeechTarget]:
+  """OpenAI diarization when requested, enabled in settings and an OpenAI key exists."""
+  if not requested:
+    return None
+  cfg = get_ai_settings(user_id=user_id)
+  if (cfg.get("transcription_diarization") or "auto").lower() == "off":
+    return None
+  key = _keys(cfg)["openai"]
+  if not key:
+    return None
+  return SpeechTarget(provider="openai", api_key=key, model=config.diarize_model(), diarize=True)
+
+
+def available_providers(user_id: Optional[str]) -> dict[str, bool]:
+  keys = _keys(get_ai_settings(user_id=user_id))
+  return {"groq": bool(keys["groq"]), "openai": bool(keys["openai"])}
+
+
+def _retry_after(response: httpx.Response) -> Optional[float]:
+  value = response.headers.get("retry-after")
+  try:
+    return float(value) if value else None
+  except ValueError:
+    return None
+
+
+def _error_detail(response: httpx.Response) -> str:
+  try:
+    body = response.json()
+    if isinstance(body, dict):
+      err = body.get("error")
+      if isinstance(err, dict):
+        return str(err.get("message") or response.text)
+      if err:
+        return str(err)
+  except ValueError:
+    pass
+  return response.text[:500]
+
+
+class SpeechClient:
+  """One HTTP client per job; `retries` counts every retry performed (for metrics)."""
+
+  def __init__(self, target: SpeechTarget) -> None:
+    self.target = target
+    self.retries = 0
+    self._client = httpx.AsyncClient(timeout=httpx.Timeout(config.request_timeout_s(), connect=20.0))
+
+  async def aclose(self) -> None:
+    await self._client.aclose()
+
+  async def __aenter__(self) -> "SpeechClient":
+    return self
+
+  async def __aexit__(self, *exc: object) -> None:
+    await self.aclose()
+
+  async def _post(self, path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    attempts = config.num_retries() + 1
+    for attempt in range(attempts):
+      try:
+        with path.open("rb") as fh:
+          response = await self._client.post(
+            ENDPOINTS[self.target.provider],
+            headers={"Authorization": f"Bearer {self.target.api_key}"},
+            data=data,
+            files={"file": (path.name, fh, "audio/mpeg" if path.suffix == ".mp3" else "application/octet-stream")},
+          )
+        if response.status_code == 200:
+          return response.json()
+        raise error_from_status(response.status_code, _error_detail(response), _retry_after(response))
+      except (TranscriptionJobError, httpx.HTTPError) as exc:
+        if attempt + 1 >= attempts or not is_transient(exc):
+          raise
+        self.retries += 1
+        retry_after = getattr(exc, "retry_after", None)
+        delay = min(60.0, retry_after if retry_after else (2 ** attempt) * 2 + random.uniform(0, 1))
+        logger.warning(
+          "Transient %s error (%s); retry %d/%d in %.1fs",
+          self.target.provider, exc, attempt + 1, attempts - 1, delay,
+        )
+        await asyncio.sleep(delay)
+    raise TranscriptionJobError("internal", detail="retry loop exhausted")  # pragma: no cover
+
+  async def transcribe(self, path: Path, *, language: Optional[str], prompt: str = "") -> dict[str, Any]:
+    """Whisper `verbose_json`: segments carry no_speech_prob / avg_logprob / compression_ratio."""
+    data: dict[str, Any] = {"model": self.target.model, "response_format": "verbose_json", "temperature": "0"}
+    if language:
+      data["language"] = language
+    if prompt:
+      data["prompt"] = prompt
+    body = await self._post(path, data)
+    segments = []
+    for seg in body.get("segments") or []:
+      text = (seg.get("text") or "").strip()
+      if not text:
+        continue
+      segments.append({
+        "start": float(seg.get("start", 0.0)),
+        "end": float(seg.get("end", 0.0)),
+        "text_raw": text,
+        "_metrics": {
+          "no_speech_prob": seg.get("no_speech_prob"),
+          "avg_logprob": seg.get("avg_logprob"),
+          "compression_ratio": seg.get("compression_ratio"),
+        },
+      })
+    if not segments and (body.get("text") or "").strip():
+      segments.append({"start": 0.0, "end": float(body.get("duration") or 0.0), "text_raw": body["text"].strip(), "_metrics": {}})
+    return {"language": body.get("language") or language, "segments": segments, "text": body.get("text") or ""}
+
+  async def diarize(
     self,
-    audio_path: Path,
-    language: Optional[str] = None,
-    response_format: str = "verbose_json",
-  ) -> Dict[str, Any]:
-    provider, key, model = self._resolve_credentials()
-
-    if not audio_path.exists():
-      raise FileNotFoundError(f"El archivo de audio '{audio_path}' no existe.")
-
-    # Select endpoint
-    if provider == "groq":
-      url = "https://api.groq.com/openai/v1/audio/transcriptions"
-    else:
-      url = "https://api.openai.com/v1/audio/transcriptions"
-
-    headers = {
-      "Authorization": f"Bearer {key}",
-    }
-
-    data: Dict[str, Any] = {
-      "model": model,
-      "response_format": response_format,
+    path: Path,
+    *,
+    language: Optional[str],
+    known_speakers: Sequence[tuple[str, Path]] = (),
+  ) -> dict[str, Any]:
+    """OpenAI `diarized_json`. `known_speakers` = [(label, clip path)] keeps labels across chunks."""
+    data: dict[str, Any] = {
+      "model": self.target.model,
+      "response_format": "diarized_json",
+      "chunking_strategy": "auto",
     }
     if language:
       data["language"] = language
-
-    effective_audio_path = audio_path
-    temp_compressed_path: Optional[Path] = None
-
-    # If file size is large (>20MB) or uncompressed WAV, compress with ffmpeg to compact 48k mono MP3
-    file_size = audio_path.stat().st_size
-    if file_size > 20 * 1024 * 1024 or audio_path.suffix.lower() in {".wav", ".mkv", ".mp4", ".avi", ".webm", ".mov", ".flac"}:
-      import subprocess
-      from app.features.transcription.ffmpeg_utils import get_ffmpeg_binary
-      ffmpeg_cmd = get_ffmpeg_binary()
-      if ffmpeg_cmd:
-        comp_candidate = audio_path.parent / f"compressed_{audio_path.stem}.mp3"
-        try:
-          cmd = [
-            ffmpeg_cmd,
-            "-y",
-            "-i", str(audio_path),
-            "-vn",
-            "-acodec", "libmp3lame",
-            "-b:a", "48k",
-            "-ar", "16000",
-            "-ac", "1",
-            str(comp_candidate),
-          ]
-          subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          if comp_candidate.exists() and comp_candidate.stat().st_size > 0:
-            effective_audio_path = comp_candidate
-            temp_compressed_path = comp_candidate
-            logger.info(f"Compressed audio for cloud upload: {file_size} -> {comp_candidate.stat().st_size} bytes")
-        except Exception as e:
-          logger.warning(f"Could not compress audio with ffmpeg: {e}")
-
-    filename = effective_audio_path.name
-    content_type = "audio/mpeg" if filename.endswith(".mp3") else "audio/wav"
-
-    try:
-      async with httpx.AsyncClient(timeout=300.0) as client:
-        with open(effective_audio_path, "rb") as f:
-          files = {
-            "file": (filename, f, content_type),
-          }
-          response = await client.post(url, headers=headers, data=data, files=files)
-
-        if response.status_code != 200:
-          err_detail = response.text
-          try:
-            err_json = response.json()
-            err_detail = err_json.get("error", {}).get("message", err_detail)
-          except Exception:
-            pass
-          raise RuntimeError(f"Error del servicio de transcripción {provider} ({response.status_code}): {err_detail}")
-
-        res_data = response.json()
-    finally:
-      if temp_compressed_path and temp_compressed_path.exists():
-        try:
-          temp_compressed_path.unlink()
-        except Exception:
-          pass
-
-    # Parse response
-    detected_lang = res_data.get("language", language or "es")
-    full_text = res_data.get("text", "").strip()
-    raw_segments = res_data.get("segments", [])
-    duration = float(res_data.get("duration", 0.0))
-
-    formatted_segments: List[Dict[str, Any]] = []
-
-    if raw_segments:
-      for idx, seg in enumerate(raw_segments):
-        formatted_segments.append({
-          "start": float(seg.get("start", 0.0)),
-          "end": float(seg.get("end", 0.0)),
-          "text": seg.get("text", "").strip(),
-          "speaker": f"Participante {(idx % 2) + 1}",
-        })
-    else:
-      # If verbose_json was not returned or had no segments, create a single segment
-      formatted_segments.append({
-        "start": 0.0,
-        "end": duration,
-        "text": full_text,
-        "speaker": "Participante 1",
+    if known_speakers:
+      data["known_speaker_names[]"] = [name for name, _ in known_speakers]
+      data["known_speaker_references[]"] = [_data_url(clip) for _, clip in known_speakers]
+    body = await self._post(path, data)
+    segments = []
+    for seg in body.get("segments") or []:
+      text = (seg.get("text") or "").strip()
+      if not text:
+        continue
+      segments.append({
+        "start": float(seg.get("start", 0.0)),
+        "end": float(seg.get("end", 0.0)),
+        "text_raw": text,
+        "speaker_label": str(seg.get("speaker") or "A"),
+        "_metrics": {},
       })
+    return {"language": body.get("language") or language, "segments": segments, "text": body.get("text") or ""}
 
-    return {
-      "language": detected_lang,
-      "text": full_text,
-      "segments": formatted_segments,
-      "duration": duration,
-      "provider": provider,
-      "model": model,
-    }
 
-  def estimate_cost(self, duration_seconds: float) -> float:
-    # OpenAI Whisper: ~$0.006 per minute. Groq Whisper: ~$0.0018 per minute.
-    minutes = duration_seconds / 60.0
-    if self.provider == "groq":
-      return minutes * 0.0018
-    return minutes * 0.006
+def _data_url(path: Path) -> str:
+  mime = "audio/mpeg" if path.suffix == ".mp3" else "audio/wav"
+  return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
+async def transcribe_short_audio(path: Path, user_id: Optional[str], language: Optional[str] = "es") -> str:
+  """Voice dictation: one request, no chunking. Raises TranscriptionJobError."""
+  target = resolve_speech_target(user_id)
+  async with SpeechClient(target) as client:
+    result = await client.transcribe(path, language=language)
+  return " ".join(s["text_raw"] for s in result["segments"]).strip() or (result.get("text") or "").strip()

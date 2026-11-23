@@ -7,12 +7,18 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
+from app.ai.map_reduce import map_reduce_condense_context
+from app.ai.policies import resolve_intent_max_tokens
 from app.ai.providers.base import AIMessage
 from app.ai.providers.factory import resolve_provider
 from app.ai.templates import get_prompt, get_rubric, rubric_to_text
+from app.features.transcription import config
+from app.features.transcription.cleanup import group_turns
 from app.schemas.transcription import TranscriptionSummary
 
 logger = logging.getLogger(__name__)
+
+_GENERIC_SPEAKER = re.compile(r"(participante|speaker|hablante|interlocutor)\s*\d+", re.IGNORECASE)
 
 
 def format_timestamp(seconds: float) -> str:
@@ -21,51 +27,10 @@ def format_timestamp(seconds: float) -> str:
   return f"{mins:02d}:{secs:02d}"
 
 
-def format_transcript_lines(segments: List[Dict[str, Any]]) -> List[str]:
-  if not segments:
-    return []
-
-  lines: list[str] = []
-  current_speaker: str | None = None
-  current_start: float = 0.0
-  current_last_end: float = 0.0
-  current_texts: list[str] = []
-  current_chars: int = 0
-
-  def flush() -> None:
-    nonlocal current_chars
-    if current_texts and current_speaker is not None:
-      start_str = format_timestamp(current_start)
-      merged = " ".join(current_texts).strip()
-      if merged:
-        lines.append(f"[{start_str}] {current_speaker}: {merged}")
-    current_texts.clear()
-    current_chars = 0
-
-  for seg in segments:
-    spk = seg.get("speaker") or "Participante"
-    txt = (seg.get("text") or "").strip()
-    if not txt:
-      continue
-    start = float(seg.get("start", 0.0))
-    end = float(seg.get("end", start + 2.0))
-
-    silence_gap = (start - current_last_end) if current_texts else 0.0
-    speaker_changed = (spk != current_speaker)
-    turn_too_long = (current_chars + len(txt) > 600)
-    gap_detected = (silence_gap > 5.0)
-
-    if speaker_changed or turn_too_long or gap_detected:
-      flush()
-      current_speaker = spk
-      current_start = start
-
-    current_texts.append(txt)
-    current_chars += len(txt) + 1
-    current_last_end = end
-
-  flush()
-  return lines
+def format_transcript_lines(segments: List[Dict[str, Any]], gap_s: Optional[float] = None) -> List[str]:
+  """One line per speaker turn (clean text). Pauses below the turn gap never split a turn."""
+  turns = group_turns(segments, config.turn_gap_s() if gap_s is None else gap_s)
+  return [f"[{format_timestamp(t['start'])}] {t['speaker']}: {t['text']}" for t in turns]
 
 
 def format_transcript_for_llm(segments: List[Dict[str, Any]]) -> str:
@@ -236,6 +201,32 @@ def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
   )
 
 
+async def _fit_transcript(lines: List[str], max_chars: int, title: str, user_id: Optional[str]) -> str:
+  """Whole transcript when it fits; otherwise map-reduce with the fast tier (no middle is dropped).
+
+  Head/tail condensation is only the last resort when the map-reduce step fails.
+  """
+  joined = "\n".join(lines)
+  if len(joined) <= max_chars:
+    return joined
+  try:
+    fast = resolve_provider(user_id=user_id, tier="fast")
+    condensed = await map_reduce_condense_context(
+      joined,
+      max_chars,
+      fast,
+      feature_goal=(
+        f"resumen de la reunión '{title}': decisiones, acuerdos, requerimientos, compromisos, "
+        "responsables, fechas y participantes con nombre"
+      ),
+    )
+    if condensed and len(condensed) <= max_chars:
+      return condensed
+  except Exception as exc:
+    logger.warning("Map-reduce condensation of transcript failed; using head/tail condensation: %s", exc, exc_info=True)
+  return condense_transcript_lines(lines, max_chars)
+
+
 async def summarize_transcript(
   segments: List[Dict[str, Any]],
   title: str = "Reunión",
@@ -269,7 +260,7 @@ async def summarize_transcript(
 
   max_chars = resolve_transcript_character_budget(provider.id)
   transcript_lines = format_transcript_lines(segments)
-  formatted_transcript = condense_transcript_lines(transcript_lines, max_chars)
+  formatted_transcript = await _fit_transcript(transcript_lines, max_chars, title, user_id)
 
   prompt_cfg = await get_prompt(target_feature)
   try:
@@ -293,10 +284,12 @@ async def summarize_transcript(
 
   template_title = prompt_cfg.get("title", target_feature)
   try:
-    res = await provider.complete(messages, max_tokens=2000)
+    res = await provider.complete(messages, max_tokens=resolve_intent_max_tokens("transcript_summary"))
     summary = parse_summary_markdown_or_json(res.text)
     summary.template_id = target_feature
     summary.template_name = template_title
+    # Generic labels ("Participante 2") are not people: only named speakers are participants.
+    summary.participants = [p for p in summary.participants if not _GENERIC_SPEAKER.fullmatch(str(p).strip())]
     return summary
   except Exception as exc:
     logger.error("LLM Summarization failed: %s", exc)

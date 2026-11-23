@@ -1,33 +1,36 @@
+"""On-disk layout of transcriptions: `USER_DATA_DIR/transcriptions/<id>/`.
+
+    media.<ext>        uploaded file (removed once audio.wav exists)
+    audio.wav          16 kHz mono PCM extracted by the pipeline
+    chunks/            chunk_NNN.mp3 + chunk_NNN.json (per-chunk results, used to resume)
+    plan.json          speech regions / chunk plan of the last run
+
+Database access lives in `records.py`; this module never touches the database.
+"""
+
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import os
-import re
 import shutil
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from app.core.settings import (
-  APP_TRANSCRIPTIONS_DIR,
-  USER_TRANSCRIPTIONS_DIR,
-  ensure_local_dirs,
-)
+from fastapi import UploadFile
+
+from app.core.settings import APP_TRANSCRIPTIONS_DIR, USER_TRANSCRIPTIONS_DIR, ensure_local_dirs
+from app.features.transcription import config
+from app.features.transcription.errors import TranscriptionJobError
 
 logger = logging.getLogger(__name__)
 
 TRANSCRIPTIONS_DIR = USER_TRANSCRIPTIONS_DIR
 
-SUPPORTED_AUDIO_EXTS = {
-  ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma", ".aac", ".opus", ".oga", ".weba"
-}
-SUPPORTED_VIDEO_EXTS = {
-  ".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".flv", ".ts"
-}
+SUPPORTED_AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma", ".aac", ".opus", ".oga", ".weba"}
+SUPPORTED_VIDEO_EXTS = {".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".flv", ".ts"}
 SUPPORTED_FORMATS = SUPPORTED_AUDIO_EXTS | SUPPORTED_VIDEO_EXTS
+UPLOAD_BLOCK = 1024 * 1024
 
 
 def ensure_transcription_dirs() -> None:
@@ -37,56 +40,23 @@ def ensure_transcription_dirs() -> None:
 
 
 def get_transcription_dir(transcription_id: str) -> Path:
-  return TRANSCRIPTIONS_DIR / transcription_id
+  safe = Path(transcription_id).name  # never escape the transcriptions directory
+  return TRANSCRIPTIONS_DIR / safe
 
 
-def get_media_path_for_transcription(transcription_id: str) -> Optional[Path]:
-  """Find the media file in the transcription subfolder, prioritizing audio.wav or local file reference."""
-  folder = get_transcription_dir(transcription_id)
-  if folder.exists():
-    audio_wav = folder / "audio.wav"
-    if audio_wav.exists():
-      return audio_wav
-    for ext in SUPPORTED_FORMATS:
-      candidate = folder / f"media{ext}"
-      if candidate.exists():
-        return candidate
-    # Check if there is any media.* file
-    for item in folder.glob("media.*"):
-      if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS:
-        return item
-
-  # Check if there is a local file source reference in transcription record
-  record = get_transcription_record(transcription_id)
-  if record:
-    src = (
-      record.get("metadata", {}).get("source_path")
-      or (record.get("media", {}) or {}).get("path")
-      or record.get("path")
-    )
-    if src:
-      p = Path(src)
-      if p.exists() and p.is_file():
-        return p
-  return None
-
-
-def get_audio_path_for_transcription(transcription_id: str) -> Optional[Path]:
-  """Return audio.wav or the first available media file."""
-  return get_media_path_for_transcription(transcription_id)
+def chunks_dir(transcription_id: str) -> Path:
+  return get_transcription_dir(transcription_id) / "chunks"
 
 
 def get_file_hash(data: bytes) -> str:
-  sha = hashlib.sha256()
-  sha.update(data)
-  return sha.hexdigest()
+  return hashlib.sha256(data).hexdigest()
 
 
-def _format_size_bytes(bytes_val: int) -> str:
-  if bytes_val >= 1024 * 1024 * 1024:
-    return f"{bytes_val / (1024 * 1024 * 1024):.1f} GB"
-  if bytes_val >= 1024 * 1024:
-    return f"{bytes_val / (1024 * 1024):.1f} MB"
+def format_size_bytes(bytes_val: int) -> str:
+  if bytes_val >= 1024 ** 3:
+    return f"{bytes_val / 1024 ** 3:.1f} GB"
+  if bytes_val >= 1024 ** 2:
+    return f"{bytes_val / 1024 ** 2:.1f} MB"
   if bytes_val >= 1024:
     return f"{bytes_val / 1024:.1f} KB"
   return f"{bytes_val} B"
@@ -102,524 +72,159 @@ def validate_file(filename: str, size: int) -> tuple[bool, Optional[str]]:
   return True, None
 
 
-def allocate_transcription_folder(
-  transcription_id: str,
-  file_bytes: bytes,
-  original_filename: str,
-  title: str,
-  description: str = "",
-) -> dict[str, Any]:
-  """
-  Create the GUID subfolder and write the original media file into it.
-  Saves the initial record in the database immediately to preserve user-assigned title.
-  """
-  ensure_transcription_dirs()
-  valid, err = validate_file(original_filename, len(file_bytes))
-  if not valid:
-    raise ValueError(err)
-
+def find_media_file(transcription_id: str, record: Optional[dict[str, Any]] = None) -> Optional[Path]:
+  """audio.wav, else the uploaded media.<ext>, else a registered local source path (desktop mode)."""
   folder = get_transcription_dir(transcription_id)
-  folder.mkdir(parents=True, exist_ok=True)
-
-  ext = Path(original_filename).suffix.lower()
-  media_dest = folder / f"media{ext}"
-  media_dest.write_bytes(file_bytes)
-
-  is_video = ext in SUPPORTED_VIDEO_EXTS
-  file_hash = get_file_hash(file_bytes)
-  now = datetime.now(timezone.utc).isoformat()
-  resolved_title = title.strip() or original_filename
-
-  entry = {
-    "id": transcription_id,
-    "transcription_id": transcription_id,
-    "original_filename": original_filename,
-    "filename": original_filename,
-    "stored_filename": f"media{ext}",
-    "path": str(media_dest),
-    "size_bytes": len(file_bytes),
-    "file_size_formatted": _format_size_bytes(len(file_bytes)),
-    "is_video": is_video,
-    "hash": file_hash,
-    "title": resolved_title,
-    "description": description.strip(),
-    "created_at": now,
-  }
-
-  # Write initial record to guarantee user-assigned title is preserved
-  initial_record = {
-    "id": transcription_id,
-    "media_id": transcription_id,
-    "metadata": {
-      "title": resolved_title,
-      "description": description.strip(),
-      "size_bytes": len(file_bytes),
-      "file_size_formatted": _format_size_bytes(len(file_bytes)),
-    },
-    "title": resolved_title,
-    "description": description.strip(),
-    "original_filename": original_filename,
-    "filename": original_filename,
-    "created_at": now,
-    "status": "uploaded",
-    "language": "es",
-    "duration_seconds": 0.0,
-    "segments": [],
-    "text": "",
-    "summary": None,
-    "media": entry,
-  }
-  save_transcription_record(initial_record)
-
-  return entry
+  if folder.exists():
+    audio_wav = folder / "audio.wav"
+    if audio_wav.exists():
+      return audio_wav
+    for item in sorted(folder.glob("media.*")):
+      if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS:
+        return item
+  if record and config.desktop_mode():
+    src = (record.get("metadata") or {}).get("source_path")
+    if src:
+      path = Path(src)
+      if path.is_file() and is_allowed_local_path(path):
+        return path
+  return None
 
 
-def get_media_destination(filename: str, media_id: Optional[str] = None) -> tuple[str, Path, str]:
-  """
-  Returns (transcription_id, file_path, stored_filename) for streaming upload.
-  """
-  ensure_transcription_dirs()
-  tid = media_id or str(uuid.uuid4())
-  folder = get_transcription_dir(tid)
-  folder.mkdir(parents=True, exist_ok=True)
+def has_media(transcription_id: str, record: Optional[dict[str, Any]] = None) -> bool:
+  return find_media_file(transcription_id, record) is not None
+
+
+def _media_entry(transcription_id: str, filename: str, stored: str, path: Path, size: int, digest: str, title: str, description: str) -> dict[str, Any]:
   ext = Path(filename).suffix.lower()
-  stored_filename = f"media{ext}"
-  file_path = folder / stored_filename
-  return tid, file_path, stored_filename
-
-
-def register_saved_media_file(
-  media_id: str,
-  filename: str,
-  stored_filename: str,
-  file_path: Path,
-  file_size: int,
-  file_hash: str,
-  title: str,
-  description: str = "",
-) -> dict[str, Any]:
-  """
-  Registers a media file streamed directly to disk in its GUID subfolder.
-  Saves initial transcription.json to preserve user title.
-  """
-  ensure_transcription_dirs()
-  ext = Path(filename).suffix.lower()
-  now = datetime.now(timezone.utc).isoformat()
-  is_video = ext in SUPPORTED_VIDEO_EXTS
-  resolved_title = title.strip() or filename
-
-  entry = {
-    "id": media_id,
-    "transcription_id": media_id,
-    "original_filename": filename,
-    "filename": filename,
-    "stored_filename": stored_filename,
-    "path": str(file_path),
-    "size_bytes": file_size,
-    "file_size_formatted": _format_size_bytes(file_size),
-    "hash": file_hash,
-    "is_video": is_video,
-    "title": resolved_title,
-    "description": description.strip(),
-    "created_at": now,
-  }
-
-  initial_record = {
-    "id": media_id,
-    "media_id": media_id,
-    "metadata": {
-      "title": resolved_title,
-      "description": description.strip(),
-      "size_bytes": file_size,
-      "file_size_formatted": _format_size_bytes(file_size),
-    },
-    "title": resolved_title,
-    "description": description.strip(),
-    "original_filename": filename,
-    "filename": filename,
-    "created_at": now,
-    "status": "uploaded",
-    "language": "es",
-    "duration_seconds": 0.0,
-    "segments": [],
-    "text": "",
-    "summary": None,
-    "media": entry,
-  }
-  save_transcription_record(initial_record)
-
-  return entry
-
-
-def register_local_media_path(
-  transcription_id: str,
-  local_path: Path | str,
-  title: str,
-  description: str = "",
-) -> dict[str, Any]:
-  """
-  Zero-copy registration of an existing local media file on disk.
-  Creates the transcription folder and references the original path directly.
-  """
-  ensure_transcription_dirs()
-  p = Path(local_path)
-  if not p.exists() or not p.is_file():
-    raise ValueError(f"El archivo local no existe o no es accesible: {local_path}")
-
-  size = p.stat().st_size
-  valid, err = validate_file(p.name, size)
-  if not valid:
-    raise ValueError(err)
-
-  folder = get_transcription_dir(transcription_id)
-  folder.mkdir(parents=True, exist_ok=True)
-
-  ext = p.suffix.lower()
-  is_video = ext in SUPPORTED_VIDEO_EXTS
-  now = datetime.now(timezone.utc).isoformat()
-  resolved_title = title.strip() or p.name
-
-  entry = {
-    "id": transcription_id,
-    "transcription_id": transcription_id,
-    "original_filename": p.name,
-    "filename": p.name,
-    "stored_filename": p.name,
-    "path": str(p.resolve()),
-    "size_bytes": size,
-    "file_size_formatted": _format_size_bytes(size),
-    "hash": "",
-    "is_video": is_video,
-    "title": resolved_title,
-    "description": description.strip(),
-    "created_at": now,
-  }
-
-  initial_record = {
-    "id": transcription_id,
-    "media_id": transcription_id,
-    "metadata": {
-      "title": resolved_title,
-      "description": description.strip(),
-      "size_bytes": size,
-      "file_size_formatted": _format_size_bytes(size),
-      "source_path": str(p.resolve()),
-    },
-    "title": resolved_title,
-    "description": description.strip(),
-    "original_filename": p.name,
-    "filename": p.name,
-    "created_at": now,
-    "status": "uploaded",
-    "language": "es",
-    "duration_seconds": 0.0,
-    "segments": [],
-    "text": "",
-    "summary": None,
-    "media": entry,
-  }
-  save_transcription_record(initial_record)
-
-  return entry
-
-
-def save_media_file(
-  file_bytes: bytes,
-  filename: str,
-  title: str,
-  description: str = "",
-) -> dict[str, Any]:
-  """
-  Backward-compatible helper: saves file in a new GUID folder.
-  """
-  tid = str(uuid.uuid4())
-  return allocate_transcription_folder(
-    transcription_id=tid,
-    file_bytes=file_bytes,
-    original_filename=filename,
-    title=title,
-    description=description,
-  )
-
-
-def get_media_entry(media_id: str) -> Optional[dict[str, Any]]:
-  """
-  Retrieves media metadata for a transcription.
-  """
-  folder = get_transcription_dir(media_id)
-  media_path = get_media_path_for_transcription(media_id)
-  if not media_path or not media_path.exists():
-    return None
-
-  record = get_transcription_record(media_id)
-  if record and record.get("media"):
-    m = record["media"]
-    resolved_title = record.get("metadata", {}).get("title") or record.get("title") or m.get("title") or media_path.stem
-    return {
-      "id": media_id,
-      "transcription_id": media_id,
-      "original_filename": m.get("original_filename", media_path.name),
-      "filename": m.get("original_filename", media_path.name),
-      "stored_filename": m.get("stored_filename", media_path.name),
-      "path": str(media_path),
-      "size_bytes": m.get("size_bytes", media_path.stat().st_size),
-      "file_size_formatted": m.get("file_size_formatted", _format_size_bytes(media_path.stat().st_size)),
-      "is_video": m.get("is_video", media_path.suffix.lower() in SUPPORTED_VIDEO_EXTS),
-      "hash": m.get("hash", ""),
-      "title": resolved_title,
-      "description": record.get("metadata", {}).get("description") or record.get("description", ""),
-      "created_at": record.get("created_at", ""),
-    }
-
-  # Build from on-disk file
-  size = media_path.stat().st_size
-  ext = media_path.suffix.lower()
   return {
-    "id": media_id,
-    "transcription_id": media_id,
-    "original_filename": media_path.name,
-    "filename": media_path.name,
-    "stored_filename": media_path.name,
-    "path": str(media_path),
+    "id": transcription_id,
+    "transcription_id": transcription_id,
+    "original_filename": filename,
+    "filename": filename,
+    "stored_filename": stored,
+    "path": str(path),
     "size_bytes": size,
-    "file_size_formatted": _format_size_bytes(size),
+    "file_size_formatted": format_size_bytes(size),
+    "hash": digest,
     "is_video": ext in SUPPORTED_VIDEO_EXTS,
-    "hash": "",
-    "title": media_path.stem,
-    "description": "",
+    "title": title,
+    "description": description,
     "created_at": datetime.now(timezone.utc).isoformat(),
   }
 
 
-def get_media_path(media_id: str) -> Optional[Path]:
-  return get_media_path_for_transcription(media_id)
-
-
-def update_media_entry_after_audio_extraction(media_id: str, audio_path: Path) -> Optional[dict[str, Any]]:
-  """
-  Hook called after audio extraction to .wav.
-  Removes any non-wav original media file from the GUID subfolder and updates the stored_filename.
-  """
-  folder = get_transcription_dir(media_id)
-  if folder.exists():
-    for ext in SUPPORTED_FORMATS:
-      if ext != ".wav":
-        orig = folder / f"media{ext}"
-        if orig.exists():
-          try:
-            orig.unlink()
-          except Exception as exc:
-            logger.warning(f"Could not delete original non-wav file {orig}: {exc}")
-
-  record = get_transcription_record(media_id)
-  if record:
-    record["stored_filename"] = audio_path.name
-    record["path"] = str(audio_path)
-    if "media" in record and isinstance(record["media"], dict):
-      record["media"]["stored_filename"] = audio_path.name
-      record["media"]["path"] = str(audio_path)
-      record["media"]["is_video"] = False
-      if audio_path.exists():
-        size = audio_path.stat().st_size
-        record["media"]["size_bytes"] = size
-        record["media"]["file_size_formatted"] = _format_size_bytes(size)
-    save_transcription_record(record)
-  return get_media_entry(media_id)
-
-
-# In-memory tracking for active transcription jobs
-_ACTIVE_JOBS_CACHE: dict[str, dict[str, Any]] = {}
-
-
-def save_active_job_progress(progress_dict: dict[str, Any]) -> None:
-  job_id = progress_dict.get("id")
-  if not job_id:
-    return
-  status = progress_dict.get("status")
-  if status in ("complete", "cancelled"):
-    _ACTIVE_JOBS_CACHE.pop(job_id, None)
-    return
-  _ACTIVE_JOBS_CACHE[job_id] = progress_dict
-
-
-def load_active_job_progress(job_id: str) -> Optional[dict[str, Any]]:
-  return _ACTIVE_JOBS_CACHE.get(job_id)
-
-
-def delete_active_job_progress(job_id: Optional[str]) -> None:
-  if job_id:
-    _ACTIVE_JOBS_CACHE.pop(job_id, None)
-
-
-def save_transcription_record(record: dict[str, Any]) -> dict[str, Any]:
-  transcription_id = record.get("id") or str(uuid.uuid4())
-  record["id"] = transcription_id
-
-  import asyncio
-  from app.db.database import get_db
-  from app.db.repositories.transcription_repository import TranscriptionRepository
-
-  async def _save():
-    async with get_db() as db:
-      repo = TranscriptionRepository(db)
-      res = await repo.upsert(record)
-      await db.commit()
-      return res
-
-  try:
-    loop = asyncio.get_running_loop()
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-      db_saved = pool.submit(asyncio.run, _save()).result()
-  except RuntimeError:
-    db_saved = asyncio.run(_save())
-
-  return _enrich_record_metadata(db_saved)
-
-
-def _enrich_record_metadata(record: dict[str, Any]) -> dict[str, Any]:
-  meta = record.setdefault("metadata", {})
-  if not meta.get("size_bytes") or not meta.get("file_size_formatted") or meta.get("size_bytes", 0) <= 35:
-    media_block = record.get("media")
-    if media_block and media_block.get("size_bytes"):
-      m_size = int(media_block["size_bytes"])
-      meta["size_bytes"] = m_size
-      meta["file_size_formatted"] = _format_size_bytes(m_size)
-      return record
-
-    dur = float(record.get("duration_seconds", 0.0))
-    if dur > 0:
-      approx = int(dur * 16000)
-      meta["size_bytes"] = approx
-      meta["file_size_formatted"] = _format_size_bytes(approx)
-    elif not meta.get("file_size_formatted"):
-      meta["size_bytes"] = 1200000
-      meta["file_size_formatted"] = "1.2 MB"
-  return record
-
-
-def get_transcription_record(transcription_id: str) -> Optional[dict[str, Any]]:
-  import asyncio
-  from app.db.database import get_db
-  from app.db.repositories.transcription_repository import TranscriptionRepository
-
-  async def _get():
-    async with get_db() as db:
-      repo = TranscriptionRepository(db)
-      return await repo.get(transcription_id)
-
-  try:
-    loop = asyncio.get_running_loop()
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-      db_record = pool.submit(asyncio.run, _get()).result()
-  except RuntimeError:
-    db_record = asyncio.run(_get())
-
-  if db_record:
-    return _enrich_record_metadata(db_record)
-  return None
-
-
-def list_transcriptions() -> list[dict[str, Any]]:
-  import asyncio
-  from app.db.database import get_db
-  from app.db.repositories.transcription_repository import TranscriptionRepository
-
-  async def _list():
-    async with get_db() as db:
-      repo = TranscriptionRepository(db)
-      return await repo.list()
-
-  try:
-    loop = asyncio.get_running_loop()
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-      db_items = pool.submit(asyncio.run, _list()).result()
-  except RuntimeError:
-    db_items = asyncio.run(_list())
-
-  return [_enrich_record_metadata(item) for item in db_items]
-
-
-def update_transcription_summary(transcription_id: str, summary_data: dict[str, Any]) -> Optional[dict[str, Any]]:
-  record = get_transcription_record(transcription_id)
-  if not record:
-    return None
-  record["summary"] = summary_data
-  save_transcription_record(record)
-  return record
-
-
-def rename_transcription_speakers(transcription_id: str, speaker_map: dict[str, str]) -> Optional[dict[str, Any]]:
-  record = get_transcription_record(transcription_id)
-  if not record:
-    return None
-
-  segments = record.get("segments", [])
-  for seg in segments:
-    current_spk = seg.get("speaker", "")
-    if current_spk in speaker_map:
-      seg["speaker"] = speaker_map[current_spk]
-
-  summary = record.get("summary")
-  if summary and isinstance(summary, dict):
-    participants = summary.get("participants", [])
-    new_participants = []
-    for p in participants:
-      new_participants.append(speaker_map.get(p, p))
-    summary["participants"] = new_participants
-
-  lines = []
-  for seg in segments:
-    lines.append(f"{seg.get('speaker', 'Speaker')}: {seg.get('text', '')}")
-  record["text"] = "\n".join(lines)
-
-  save_transcription_record(record)
-  return record
-
-
-def delete_transcription_record(transcription_id: str) -> bool:
+async def save_upload(upload: UploadFile, transcription_id: str, title: str, description: str = "") -> dict[str, Any]:
+  """Stream an upload to disk in 1 MB blocks, enforcing the size limit; returns the media entry."""
+  filename = upload.filename or "media.mp3"
+  ok, err = validate_file(filename, 1)
+  if not ok:
+    raise TranscriptionJobError("unsupported_format", err)
   ensure_transcription_dirs()
+  folder = get_transcription_dir(transcription_id)
+  folder.mkdir(parents=True, exist_ok=True)
+  stored = f"media{Path(filename).suffix.lower()}"
+  dest = folder / stored
+  tmp = folder / f".{stored}.part"
+  limit = config.max_upload_bytes()
+  digest = hashlib.sha256()
+  size = 0
+  try:
+    with tmp.open("wb") as fh:
+      while True:
+        block = await upload.read(UPLOAD_BLOCK)
+        if not block:
+          break
+        size += len(block)
+        if size > limit:
+          raise TranscriptionJobError(
+            "file_too_large",
+            f"El archivo supera el máximo de {limit // (1024 * 1024)} MB.",
+          )
+        digest.update(block)
+        fh.write(block)
+    if size == 0:
+      raise TranscriptionJobError("unsupported_format", "El archivo multimedia está vacío.")
+    tmp.replace(dest)
+  except BaseException:
+    tmp.unlink(missing_ok=True)
+    if not any(folder.iterdir()):
+      folder.rmdir()
+    raise
+  resolved_title = title.strip() or filename
+  return _media_entry(transcription_id, filename, stored, dest, size, digest.hexdigest(), resolved_title, description.strip())
+
+
+def is_allowed_local_path(path: Path) -> bool:
+  resolved = path.resolve()
+  return any(resolved.is_relative_to(root) for root in config.local_roots())
+
+
+def local_media_entry(transcription_id: str, local_path: str, title: str, description: str = "") -> dict[str, Any]:
+  """Desktop mode only: reference a file inside TRANSCRIPTION_LOCAL_ROOTS without copying it."""
+  path = Path(local_path)
+  if not config.desktop_mode() or not is_allowed_local_path(path):
+    raise TranscriptionJobError("bad_request", "Ruta local no permitida.")
+  if not path.is_file():
+    raise TranscriptionJobError("bad_request", f"El archivo local no existe o no es accesible: {local_path}")
+  size = path.stat().st_size
+  ok, err = validate_file(path.name, size)
+  if not ok:
+    raise TranscriptionJobError("unsupported_format", err)
+  get_transcription_dir(transcription_id).mkdir(parents=True, exist_ok=True)
+  entry = _media_entry(transcription_id, path.name, path.name, path.resolve(), size, "", title.strip() or path.name, description.strip())
+  entry["source_path"] = str(path.resolve())
+  return entry
+
+
+def initial_record(entry: dict[str, Any], user_id: Optional[str]) -> dict[str, Any]:
+  """Record saved right after upload so the user-assigned title survives."""
+  meta: dict[str, Any] = {
+    "title": entry["title"],
+    "description": entry.get("description", ""),
+    "size_bytes": entry.get("size_bytes", 0),
+    "file_size_formatted": entry.get("file_size_formatted"),
+  }
+  if entry.get("source_path"):
+    meta["source_path"] = entry["source_path"]
+  return {
+    "id": entry["id"],
+    "media_id": entry["id"],
+    "user_id": user_id,
+    "metadata": meta,
+    "original_filename": entry["original_filename"],
+    "stored_filename": entry["stored_filename"],
+    "path": entry["path"],
+    "created_at": entry["created_at"],
+    "status": "uploaded",
+    "language": "es",
+    "duration_seconds": 0.0,
+    "segments": [],
+    "text": "",
+    "summary": None,
+    "summary_status": "skipped",
+    "source": "cloud",
+    "media": entry,
+  }
+
+
+def remove_original_after_extraction(transcription_id: str) -> None:
+  """Once audio.wav exists the uploaded container is no longer needed."""
+  folder = get_transcription_dir(transcription_id)
+  if not (folder / "audio.wav").exists():
+    return
+  for item in folder.glob("media.*"):
+    try:
+      item.unlink()
+    except OSError as exc:
+      logger.warning("Could not delete original media %s: %s", item, exc)
+
+
+def delete_folder(transcription_id: str) -> None:
   folder = get_transcription_dir(transcription_id)
   if folder.exists() and folder.is_dir():
     shutil.rmtree(folder, ignore_errors=True)
 
-  import asyncio
-  from app.db.database import get_db
-  from app.db.repositories.transcription_repository import TranscriptionRepository
 
-  async def _delete():
-    async with get_db() as db:
-      repo = TranscriptionRepository(db)
-      res = await repo.delete(transcription_id)
-      await db.commit()
-      return res
-
-  try:
-    loop = asyncio.get_running_loop()
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-      return pool.submit(asyncio.run, _delete()).result()
-  except RuntimeError:
-    return asyncio.run(_delete())
-
-
-def cleanup_old_files(ttl_hours: int = 24) -> int:
-  ensure_transcription_dirs()
-  removed_count = 0
-  now = datetime.now(timezone.utc).timestamp()
-  ttl_seconds = ttl_hours * 3600
-
-  for subfolder in TRANSCRIPTIONS_DIR.iterdir():
-    if not subfolder.is_dir():
-      continue
-    try:
-      mtime = subfolder.stat().st_mtime
-      if (now - mtime) > ttl_seconds:
-        shutil.rmtree(subfolder, ignore_errors=True)
-        removed_count += 1
-    except Exception:
-      pass
-
-  return removed_count
+def delete_chunks(transcription_id: str) -> None:
+  shutil.rmtree(chunks_dir(transcription_id), ignore_errors=True)
