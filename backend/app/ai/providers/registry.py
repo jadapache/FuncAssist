@@ -42,8 +42,10 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     name="Groq Cloud",
     litellm_prefix="groq",
     config_key="groq_api_key",
-    default_model="llama-3.3-70b-versatile",
-    fast_model="llama-3.1-8b-instant",
+    # Last-resort names only: the effective defaults are picked from the synced catalog
+    # (app.ai.catalog.pick_model) so retired models are never used.
+    default_model="openai/gpt-oss-120b",
+    fast_model="openai/gpt-oss-20b",
     default_max_tokens=4096,
   ),
   "gemini": ProviderSpec(
@@ -62,8 +64,8 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
     name="Anthropic Claude",
     litellm_prefix="anthropic",
     config_key="claude_api_key",
-    default_model="claude-3-5-sonnet-latest",
-    fast_model="claude-3-5-haiku-latest",
+    default_model="claude-sonnet-4-5",
+    fast_model="claude-haiku-4-5",
     aliases=("anthropic",),
     default_max_tokens=8192,
     supports_prompt_cache=True,

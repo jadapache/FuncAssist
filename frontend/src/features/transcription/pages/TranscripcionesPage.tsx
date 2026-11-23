@@ -15,6 +15,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import { generateTranscriptionSlug } from '../utils/transcriptionStorage'
 import { useTranscription } from '../hooks/useTranscription'
 import type { TranscriptionResult } from '../api/transcriptionApi'
+import type { TranscriptionJob } from '../context/transcriptionJobs'
 import { ConfirmationModal, PageHeader } from '../../../components/common'
 import { TranscriptionsSkeleton } from '../../../components/common/Skeleton'
 import {
@@ -26,6 +27,9 @@ import {
 
 const ITEMS_PER_PAGE = 10
 
+const titleOf = (target: TranscriptionResult | TranscriptionJob | null): string | undefined =>
+  target ? ('metadata' in target ? target.metadata?.title : target.title) || undefined : undefined
+
 export const TranscripcionesPage = () => {
   const {
     viewMode,
@@ -34,17 +38,19 @@ export const TranscripcionesPage = () => {
     activeJobs,
     recentTranscriptions,
     availableModels,
+    isCloudProvider,
     isLoadingList,
-    isUploading,
     showGenerateModal,
     selectedTranscriptionId,
     activeMeetingTitle,
-    currentProgress,
-    handleUploadAndStart,
-    handleRetranscribe,
-    handleDeleteTranscription,
+    startTranscription,
+    regenerateTranscription,
+    retryTranscription,
+    cancelTranscription,
+    deleteTranscription,
     setShowGenerateModal,
     refreshTranscriptions,
+    upsertRecent,
   } = useTranscription()
 
   const { slug } = useParams<{ slug?: string }>()
@@ -60,7 +66,7 @@ export const TranscripcionesPage = () => {
   const [isDeleting, setIsDeleting] = useState(false)
 
   // Match transcription by slug or id
-  const targetFromSlug = useMemo(() => {
+  const targetFromSlug = useMemo<TranscriptionResult | TranscriptionJob | null>(() => {
     if (!slug) return null
     return (
       recentTranscriptions.find(
@@ -85,10 +91,7 @@ export const TranscripcionesPage = () => {
   // Sync route slug with studio view
   useEffect(() => {
     if (slug) {
-      const resolvedId = targetFromSlug?.id || slug
-      const title =
-        (targetFromSlug as any)?.metadata?.title || (targetFromSlug as any)?.title || activeMeetingTitle
-      openStudio(resolvedId, title)
+      openStudio(targetFromSlug?.id || slug, titleOf(targetFromSlug) || activeMeetingTitle)
     } else if (viewMode === 'studio') {
       closeStudio()
     }
@@ -137,7 +140,7 @@ export const TranscripcionesPage = () => {
     if (!transcriptionToDelete) return
     try {
       setIsDeleting(true)
-      await handleDeleteTranscription(transcriptionToDelete.id)
+      await deleteTranscription(transcriptionToDelete.id)
       setTranscriptionToDelete(null)
     } finally {
       setIsDeleting(false)
@@ -150,17 +153,19 @@ export const TranscripcionesPage = () => {
     return (
       <div className="animate-fade-in font-sans">
         <TranscriptionStudio
+          key={studioTranscriptionId}
           transcriptionId={studioTranscriptionId}
-          initialMeetingTitle={
-            activeMeetingTitle ||
-            (targetFromSlug as any)?.metadata?.title ||
-            (targetFromSlug as any)?.title ||
-            'Transcripción'
-          }
-          activeProgress={currentProgress}
+          initialMeetingTitle={activeMeetingTitle || titleOf(targetFromSlug) || 'Transcripción'}
+          job={activeJobs.find((job) => job.id === studioTranscriptionId) ?? null}
           onBackToDashboard={handleBackToDashboard}
-          onRefreshData={refreshTranscriptions}
-          onRetranscribe={handleRetranscribe}
+          onRegenerate={(record) => regenerateTranscription(record)}
+          onRetry={retryTranscription}
+          onCancel={cancelTranscription}
+          onRequestReupload={() => {
+            handleBackToDashboard()
+            setIsUploadModalOpen(true)
+          }}
+          onRecordSaved={upsertRecent}
         />
       </div>
     )
@@ -385,11 +390,10 @@ export const TranscripcionesPage = () => {
         <UploadMediaModal
           isOpen={isUploadModalOpen}
           onClose={() => setIsUploadModalOpen(false)}
-          onUpload={async (file, title, desc) => {
-            await handleUploadAndStart(file, title, desc)
-          }}
-          isUploading={isUploading}
+          onUpload={(file, title, description, options) => startTranscription(file, title, description, options)}
           configuredModelLabel={availableModels?.active_model_label}
+          showServerOptions={isCloudProvider}
+          browserDiarizationDefault={Boolean(availableModels?.browser_diarization)}
         />
 
         {/* Delete Confirmation Modal */}

@@ -1,5 +1,10 @@
 import type { WebLLMModelDefinition } from '../types/webLlm'
 import type { ModelCatalogItem } from '../../../api/client'
+import { BROWSER_CONTEXT_TOKENS } from '../utils/promptBudget'
+
+// WebLLM loads every catalog model with a 4,096-token window (its prebuilt overrides), whatever
+// the model's native context size. The VRAM figures below assume that window.
+const BROWSER_CONTEXT_LABEL = '4.096 tokens'
 
 export interface ClientAsrModelDefinition {
   id: string
@@ -20,7 +25,8 @@ export const CLIENT_WEBLLM_MODELS: readonly WebLLMModelDefinition[] = [
     downloadSize: '~880 MB',
     vramRequiredMB: 1100,
     vramFormatted: '~1.1 GB VRAM',
-    contextWindow: '131.072 tokens',
+    contextWindow: BROWSER_CONTEXT_LABEL,
+    contextTokens: BROWSER_CONTEXT_TOKENS,
     tier: 'speed',
     requiredFeatures: [],
   },
@@ -32,7 +38,8 @@ export const CLIENT_WEBLLM_MODELS: readonly WebLLMModelDefinition[] = [
     downloadSize: '~950 MB',
     vramRequiredMB: 1630,
     vramFormatted: '~1.6 GB VRAM',
-    contextWindow: '32.768 tokens',
+    contextWindow: BROWSER_CONTEXT_LABEL,
+    contextTokens: BROWSER_CONTEXT_TOKENS,
     tier: 'balanced',
     requiredFeatures: [],
   },
@@ -44,7 +51,8 @@ export const CLIENT_WEBLLM_MODELS: readonly WebLLMModelDefinition[] = [
     downloadSize: '~2.2 GB',
     vramRequiredMB: 3100,
     vramFormatted: '~3.0 GB VRAM',
-    contextWindow: '131.072 tokens',
+    contextWindow: BROWSER_CONTEXT_LABEL,
+    contextTokens: BROWSER_CONTEXT_TOKENS,
     tier: 'quality',
     requiredFeatures: [],
   },
@@ -101,7 +109,8 @@ export function setDynamicClientCatalog(models: ModelCatalogItem[]): void {
       downloadSize: (m as any).download_size || (m as any).downloadSize || '~1 GB',
       vramRequiredMB: m.vram_required_mb || (m as any).vramRequiredMB || 1200,
       vramFormatted: m.vram_formatted || (m.vram_required_mb ? `~${m.vram_required_mb} MB VRAM` : '~1.2 GB VRAM'),
-      contextWindow: m.context_window || '4k tokens',
+      contextWindow: BROWSER_CONTEXT_LABEL,
+      contextTokens: BROWSER_CONTEXT_TOKENS,
       tier: ((m as any).tier as 'speed' | 'balanced' | 'quality') || 'balanced',
       requiredFeatures: m.required_features || [],
     }))

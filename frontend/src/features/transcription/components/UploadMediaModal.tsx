@@ -1,13 +1,16 @@
 import React from 'react'
 import { X } from 'lucide-react'
-import { UploadArea, type UploadTarget } from './UploadArea'
+import type { UploadJobOptions } from '../hooks/useTranscriptionJobRunners'
+import { UploadArea } from './UploadArea'
 
 interface UploadMediaModalProps {
   isOpen: boolean
   onClose: () => void
-  onUpload: (target: UploadTarget, title: string, description?: string) => Promise<void>
+  onUpload: (file: File, title: string, description: string, options: UploadJobOptions) => Promise<void>
   isUploading?: boolean
   configuredModelLabel?: string
+  showServerOptions?: boolean
+  browserDiarizationDefault?: boolean
 }
 
 export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
@@ -16,6 +19,8 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
   onUpload,
   isUploading = false,
   configuredModelLabel,
+  showServerOptions = false,
+  browserDiarizationDefault = false,
 }) => {
   if (!isOpen) return null
 
@@ -28,7 +33,6 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
         <div className="flex items-center justify-between px-7 py-5 border-b border-slate-100 shrink-0 bg-slate-50/50">
           <div>
             <h3 className="text-lg font-bold text-slate-900 mt-1">Nueva Transcripción</h3>
@@ -45,15 +49,16 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body */}
         <div className="p-7 overflow-y-auto max-h-[80vh]">
           <UploadArea
-            onUpload={async (target, title, desc) => {
+            onUpload={async (file, title, description, options) => {
               onClose()
-              await onUpload(target, title, desc)
+              await onUpload(file, title, description, options)
             }}
             isUploading={isUploading}
             configuredModelLabel={configuredModelLabel}
+            showServerOptions={showServerOptions}
+            browserDiarizationDefault={browserDiarizationDefault}
           />
         </div>
       </div>

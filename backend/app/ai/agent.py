@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from app.ai.events import AgentEvent
 from app.ai.providers.base import AIMessage, AIProvider, ToolCall
@@ -25,6 +25,20 @@ def _wrap_tool_output(name: str, output: str) -> str:
     )
 
 
+async def _exec_tool(tc: ToolCall, ctx: ToolContext) -> tuple[ToolCall, str, bool]:
+    tool = get_tool(tc.name)
+    if not tool:
+        logger.warning("Model requested unknown tool %s", tc.name)
+        return tc, f"[Error]: Herramienta '{tc.name}' no encontrada.", True
+    try:
+        res = await asyncio.wait_for(tool.handler(tc.arguments, ctx), timeout=TOOL_TIMEOUT_S)
+        text = str(res)
+        return tc, text, text.startswith("[Error")
+    except Exception as exc:  # tool errors go back to the model, not up the stack
+        logger.warning("Tool %s failed: %s", tc.name, exc, exc_info=True)
+        return tc, f"[Error al ejecutar {tc.name}]: {exc}", True
+
+
 async def run_agent(
     messages: list[AIMessage],
     provider: AIProvider,
@@ -36,17 +50,25 @@ async def run_agent(
 
     `messages` must already contain system prompt, documentary context, history and the
     current user turn (including images), so the agent sees the same context as the plain route.
+    Each model turn is streamed: text deltas are emitted as they arrive and tool-call deltas are
+    accumulated by the provider into complete calls when the turn ends.
     """
     tools_schema = get_tools_openai_schema()
     convo = list(messages)
 
-    yield AgentEvent(type="status", data={"message": "Analizando la solicitud..."})
+    yield AgentEvent(type="status", data={"message": "Analizando la solicitud...", "stage": "agent"})
 
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-    total_cost = 0.0
+    totals: dict[str, Any] = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_tokens": 0,
+        "cost_usd": 0.0,
+    }
     iterations = 0
     delivered_artifacts = 0
+    last_finish_reason: str | None = None
+    fallback_used = False
+    ttft_ms: float | None = None
 
     for iteration in range(max(1, max_iters)):
         iterations = iteration + 1
@@ -54,41 +76,37 @@ async def run_agent(
 
         # Tools stay declared on the last turn: providers such as Anthropic reject
         # conversations containing tool messages when no tools are declared.
-        completion = await provider.complete(
+        sink: dict[str, Any] = {}
+        text_parts: list[str] = []
+        async for delta in provider.complete_stream(
             convo,
             max_tokens=max_tokens,
             tools=tools_schema,
             tool_choice="none" if is_last else "auto",
-        )
+            usage_sink=sink,
+        ):
+            text_parts.append(delta)
+            yield AgentEvent(type="delta", data={"text": delta})
 
-        total_prompt_tokens += completion.prompt_tokens or 0
-        total_completion_tokens += completion.completion_tokens or 0
-        total_cost += completion.cost_usd or 0.0
+        for key in ("prompt_tokens", "completion_tokens", "cached_tokens"):
+            totals[key] += sink.get(key) or 0
+        totals["cost_usd"] += sink.get("cost_usd") or 0.0
+        last_finish_reason = sink.get("finish_reason") or last_finish_reason
+        fallback_used = fallback_used or bool(sink.get("fallback_used"))
+        if ttft_ms is None and sink.get("ttft_ms") is not None:
+            ttft_ms = sink["ttft_ms"]
 
-        if completion.text:
-            yield AgentEvent(type="delta", data={"text": completion.text})
-
-        if not completion.tool_calls:
+        text = "".join(text_parts)
+        tool_calls: list[ToolCall] = list(sink.get("tool_calls") or [])
+        if not tool_calls:
             break
 
-        for tc in completion.tool_calls:
+        for tc in tool_calls:
             yield AgentEvent(type="tool_call", data={"id": tc.id, "name": tc.name, "arguments": tc.arguments})
 
-        convo.append(AIMessage(role="assistant", content=completion.text or "", tool_calls=completion.tool_calls))
+        convo.append(AIMessage(role="assistant", content=text, tool_calls=tool_calls))
 
-        async def _exec_tool(tc: ToolCall) -> tuple[ToolCall, str, bool]:
-            tool = get_tool(tc.name)
-            if not tool:
-                return tc, f"[Error]: Herramienta '{tc.name}' no encontrada.", True
-            try:
-                res = await asyncio.wait_for(tool.handler(tc.arguments, ctx), timeout=TOOL_TIMEOUT_S)
-                text = str(res)
-                return tc, text, text.startswith("[Error")
-            except Exception as exc:  # tool errors go back to the model, not up the stack
-                logger.warning("Tool %s failed: %s", tc.name, exc)
-                return tc, f"[Error al ejecutar {tc.name}]: {exc}", True
-
-        results = await asyncio.gather(*[_exec_tool(tc) for tc in completion.tool_calls])
+        results = await asyncio.gather(*[_exec_tool(tc, ctx) for tc in tool_calls])
 
         for tc, output, is_err in results:
             yield AgentEvent(
@@ -107,10 +125,11 @@ async def run_agent(
     yield AgentEvent(
         type="usage",
         data={
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "cost_usd": total_cost,
+            **totals,
             "iterations": iterations,
+            "finish_reason": last_finish_reason,
+            "fallback_used": fallback_used,
+            "ttft_ms": ttft_ms,
         },
     )
     yield AgentEvent(type="done", data={"ok": True})

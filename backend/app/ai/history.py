@@ -156,7 +156,7 @@ async def _summarize_older(
         try:
             record = await store.load()
         except Exception as exc:
-            logger.warning("Could not load persisted history summary: %s", exc)
+            logger.warning("Could not load persisted history summary: %s", exc, exc_info=True)
             record = None
         if record:
             decoded = _decode_store_key(record[0])
@@ -190,7 +190,10 @@ async def _summarize_older(
             max_tokens=SUMMARY_MAX_TOKENS,
         )
     except Exception as exc:
-        logger.warning("History summarization failed: %s", exc)
+        logger.warning(
+            "History summarization failed with model %s; older turns are dropped without a summary: %s",
+            getattr(fast_provider, "default_model", "?"), exc, exc_info=True,
+        )
         return previous
 
     summary = (res.text or "").strip()
@@ -201,7 +204,7 @@ async def _summarize_older(
         try:
             await store.save(_encode_store_key(len(older), full_digest), summary)
         except Exception as exc:
-            logger.warning("Could not persist history summary: %s", exc)
+            logger.warning("Could not persist history summary: %s", exc, exc_info=True)
     return summary
 
 

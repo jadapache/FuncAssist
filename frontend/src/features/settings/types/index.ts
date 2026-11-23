@@ -45,6 +45,20 @@ export type AISettings = {
   transcription_openai_api_key_set?: boolean
   ollama_base_url: string
   active_api_key_set?: boolean
+  /** Model for auxiliary calls (planning, summaries, map-reduce). Empty: picked from the catalog. */
+  fast_model?: string | null
+  /** Up to 3 models of the same provider tried in order if the main model fails. */
+  fallback_models?: string[]
+  /** Names, acronyms and domain terms sent to the transcription model (max 1000 chars). */
+  transcription_vocabulary?: string | null
+  /** Extra filler words removed by the rule-based cleanup. */
+  transcription_fillers?: string[] | null
+  /** Transcript cleanup: off, rules (default) or llm. */
+  transcription_cleanup?: 'off' | 'rules' | 'llm' | null
+  /** auto: diarize with OpenAI when a key is available; off: never. */
+  transcription_diarization?: 'auto' | 'off' | null
+  /** on: identify speakers in the browser for in-browser jobs by default (slower, ~30 MB of models). */
+  transcription_browser_diarization?: 'on' | 'off' | null
 }
 
 export type ModelCatalogItem = {

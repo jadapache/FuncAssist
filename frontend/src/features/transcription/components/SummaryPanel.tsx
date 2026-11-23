@@ -2,6 +2,8 @@ import React from 'react'
 import { Loader2, Sparkles, Copy, Check, RefreshCw } from 'lucide-react'
 import { DownloadMenu } from './DownloadMenu'
 import { MarkdownMessage } from '../../../components/common'
+import type { SummaryStatus } from '../api/transcriptionApi'
+import { SUMMARY_STATUS_LABELS, isSummaryInProgress } from '../utils/transcriptionStages'
 
 interface SummaryTemplateOption {
   id: string
@@ -18,6 +20,8 @@ interface SummaryPanelProps {
   onSelectTemplate?: (templateId: string) => void
   isSummaryReady: boolean
   isGeneratingSummary: boolean
+  /** Automatic summary status (backend or job): pending/running show progress, failed a notice. */
+  summaryStatus?: SummaryStatus | null
   isJobActive: boolean
   hasTranscriptContent?: boolean
   hasCopiedSummary: boolean
@@ -39,6 +43,7 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
   onSelectTemplate,
   isSummaryReady,
   isGeneratingSummary,
+  summaryStatus,
   isJobActive,
   hasTranscriptContent = true,
   hasCopiedSummary,
@@ -66,6 +71,8 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
       onSelect: onDownloadJson,
     },
   ]
+
+  const isWorking = isGeneratingSummary || isSummaryInProgress(summaryStatus)
 
   const activeTemplateTitle =
     summaryTemplates.find((t) => t.id === selectedTemplate)?.title ||
@@ -153,11 +160,13 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
 
       {/* Panel Body */}
       <div className="flex-1 min-h-0 overflow-y-auto p-6 sm:p-8 bg-white space-y-6">
-        {isGeneratingSummary ? (
+        {isWorking ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
             <Loader2 className="h-8 w-8 animate-spin text-[#002777]" />
             <p className="text-xs font-semibold text-slate-700">
-              Generando resumen ejecutivo con IA...
+              {isGeneratingSummary
+                ? 'Generando resumen ejecutivo con IA...'
+                : `${SUMMARY_STATUS_LABELS[summaryStatus || 'running']}…`}
             </p>
             <p className="text-[11px] text-slate-400 max-w-xs">
               Aplicando rúbrica de {activeTemplateTitle} a la transcripción.
@@ -212,6 +221,9 @@ export const SummaryPanel: React.FC<SummaryPanelProps> = ({
             </div>
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-slate-800">Resumen no generado</h4>
+              {summaryStatus === 'failed' && (
+                <p className="text-xs font-semibold text-red-600">{SUMMARY_STATUS_LABELS.failed} automáticamente.</p>
+              )}
               <p className="text-xs text-slate-500 max-w-xs">
                 Selecciona una plantilla o rúbrica en la barra superior y genera una síntesis con IA para tus
                 entregables.

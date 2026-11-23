@@ -26,6 +26,12 @@ PROVIDER_KEY_MAP = {
   "transcription_openai": "transcription_openai_api_key",
 }
 
+# Per-user transcription preferences (docs/TRANSCRIPTION_PROCESS.md §6), stored in user_preferences.settings_json.
+TRANSCRIPTION_PREFERENCE_KEYS = (
+  "transcription_vocabulary", "transcription_fillers", "transcription_cleanup", "transcription_diarization",
+  "transcription_browser_diarization",
+)
+
 
 def load_user_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
   """Load user AI configuration from user_preferences and user_provider_credentials."""
@@ -45,7 +51,10 @@ def load_user_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
       ai_config["transcription_provider"] = prefs["transcription_provider"]
     if prefs.get("transcription_model"):
       ai_config["transcription_model"] = prefs["transcription_model"]
-    for pk in ["voice_command_provider", "voice_command_model", "ollama_base_url", "fallback_models", "fast_model"]:
+    for pk in [
+      "voice_command_provider", "voice_command_model", "ollama_base_url", "fallback_models", "fast_model",
+      *TRANSCRIPTION_PREFERENCE_KEYS,
+    ]:
       if prefs.get(pk):
         ai_config[pk] = prefs[pk]
 
@@ -77,7 +86,10 @@ def _build_preference_payload(ai_data: dict[str, Any]) -> dict[str, Any]:
     pref_payload["transcription_provider"] = ai_data["transcription_provider"]
   if "transcription_model" in ai_data:
     pref_payload["transcription_model"] = ai_data["transcription_model"]
-  for k in ["voice_command_provider", "voice_command_model", "ollama_base_url", "fallback_models", "fast_model", "language"]:
+  for k in [
+    "voice_command_provider", "voice_command_model", "ollama_base_url", "fallback_models", "fast_model", "language",
+    *TRANSCRIPTION_PREFERENCE_KEYS,
+  ]:
     if k in ai_data:
       pref_payload[k] = ai_data[k]
   return pref_payload

@@ -604,22 +604,7 @@ class AIProvider(Protocol):
         """Streaming token-by-token"""
 ```
 
-**Resolución dinámica:**
-
-```python
-def resolve_provider() -> AIProvider:
-    """Retorna proveedor según configuración actual"""
-    config = get_ai_settings()
-    provider_name = config.get("provider")
-    model_name = config.get("model")
-    
-    if provider_name == "ollama":
-        base_url = config.get("ollama_base_url")
-        return LiteLLMProvider("ollama", model_name, base_url)
-    elif provider_name == "openai":
-        return LiteLLMProvider("openai", model_name)
-    ...
-```
+**Resolución de proveedor y modelo:** `providers/factory.resolve_provider(provider_name, model_name, user_id, tier="main"|"fast")`. Los modelos por defecto se eligen del catálogo sincronizado; ver [AI_LAYER.md](./AI_LAYER.md) para el orden de resolución, las variables de entorno, las rutas del chat y el protocolo SSE v2. La transcripción (pipeline, contrato de progreso, API y variables) está en [TRANSCRIPTION_PROCESS.md](./TRANSCRIPTION_PROCESS.md).
 
 ---
 
@@ -764,27 +749,7 @@ def decrypt_secret(encrypted: str) -> str:
 
 ### AI Call Logging
 
-```python
-def log_ai_call(entry: dict) -> dict:
-    """Escribe en local/ai/logs/{uuid}.json"""
-    log_id = uuid4()
-    log_path = LOCAL_DIR / "ai" / "logs" / f"{log_id}.json"
-    
-    log_data = {
-        "id": log_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "feature": entry["feature"],
-        "refused": entry["refused"],
-        "provider": entry.get("provider"),
-        "model": entry.get("model"),
-        "output": entry.get("output"),
-        "sources_used": entry.get("sources_used"),
-        "chunk_ids": entry.get("chunk_ids"),
-    }
-    
-    log_path.write_text(json.dumps(log_data, indent=2))
-    return {"id": log_id}
-```
+`app/ai/logging.log_ai_call(entry)` añade una línea al archivo diario `USER_DATA_DIR/ai/logs/AAAA-MM-DD.jsonl` (escritura en un hilo, sin bloquear el event loop). `GET /api/ai/logs` y `GET /api/ai/logs/stats` leen esos archivos desde el final. Campos y métricas en [AI_LAYER.md](./AI_LAYER.md#logs-y-métricas).
 
 ---
 

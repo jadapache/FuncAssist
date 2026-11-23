@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -106,6 +107,8 @@ class HealthResponse(BaseModel):
   status: str = "ok"
   app: str = "FuncAssist"
   version: str = "0.4.0"
+  # Deployment identifier (image tag or build id) so clients can tell when the server was redeployed.
+  build: str | None = None
 
 
 health_router = APIRouter(tags=["health"])
@@ -116,4 +119,5 @@ health_router = APIRouter(tags=["health"])
 @health_router.get("/api/health/ready", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
   version = getattr(request.app, "version", "0.4.0")
-  return HealthResponse(version=version)
+  build = os.getenv("APP_BUILD_ID") or os.getenv("APP_VERSION") or None
+  return HealthResponse(version=version, build=build)

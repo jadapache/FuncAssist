@@ -3,6 +3,8 @@ import { AppLayout } from './components/AppLayout'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { ToastContainer } from './components/common/Toast'
 import { FloatingJobToast } from './components/common/FloatingJobToast'
+import { NewVersionAlert } from './components/common/NewVersionAlert'
+import { BrowserLlmNoticeToaster } from './components/common/BrowserLlmNoticeToaster'
 import { AuthProvider } from './context/AuthContext'
 import { UserProvider } from './context/UserContext'
 import { ToastProvider } from './context/ToastContext'
@@ -44,6 +46,8 @@ export const App = () => {
                       <ChatProvider>
                         <ToastContainer />
                         <GlobalFloatingJobs />
+                        <NewVersionAlert />
+                        <BrowserLlmNoticeToaster />
                         <Routes>
                           {/* Public Route */}
                           <Route path="login" element={<LoginPage />} />

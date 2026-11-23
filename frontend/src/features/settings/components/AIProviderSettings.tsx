@@ -18,6 +18,10 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
     setProvider,
     model,
     setModel,
+    fastModel,
+    setFastModel,
+    fallbackModels,
+    setFallbackModels,
     isWritingOpen,
     setIsWritingOpen,
     showEndpointSection,
@@ -111,6 +115,10 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
         setProvider={setProvider}
         model={model}
         setModel={setModel}
+        fastModel={fastModel}
+        setFastModel={setFastModel}
+        fallbackModels={fallbackModels}
+        setFallbackModels={setFallbackModels}
         isWritingOpen={isWritingOpen}
         setIsWritingOpen={setIsWritingOpen}
         showEndpointSection={showEndpointSection}

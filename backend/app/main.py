@@ -29,11 +29,8 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   import asyncio
-  from app.api.transcription_stream import set_main_loop
   from app.core.index_refresher import run_index_refresher
 
-  loop = asyncio.get_running_loop()
-  set_main_loop(loop)
   ensure_local_dirs()
   from app.context.knowledge_migration import migrate_knowledge_if_needed
   from app.db.database import init_db
@@ -45,14 +42,21 @@ async def lifespan(app: FastAPI):
   migrate_integrations_schema_if_needed()
   from app.core.chat_history_migration import migrate_chat_history_summary_if_needed
   migrate_chat_history_summary_if_needed()
+  from app.core.transcription_migration import migrate_transcriptions_if_needed
+  migrate_transcriptions_if_needed()
   migrate_knowledge_if_needed()
   ensure_knowledge_dirs()
   ensure_ai_files()
+
+  from app.features.transcription.jobs import job_manager
+  await job_manager.recover_interrupted_jobs()
+  job_manager.start_maintenance()
 
   refresher_task = asyncio.create_task(run_index_refresher())
   try:
     yield
   finally:
+    await job_manager.shutdown()
     refresher_task.cancel()
     try:
       await refresher_task

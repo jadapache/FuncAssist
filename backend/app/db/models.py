@@ -716,6 +716,13 @@ class AITemplateVersionModel(Base):
     }
 
 
+# Record fields kept inside `metadata_json` and exposed at the top level of the record dict.
+TRANSCRIPTION_RECORD_META_KEYS = (
+  "speakers", "diarization", "cleanup", "silence_trimmed_s", "summary_status", "source",
+  "turn_gap_s", "error", "retryable", "provider", "model", "job_options", "summary_error",
+)
+
+
 class TranscriptionModel(Base):
   """Transcription, segments, summary, and audio metadata stored in PostgreSQL."""
   __tablename__ = "transcriptions"
@@ -734,6 +741,13 @@ class TranscriptionModel(Base):
   segments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
   summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
   metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="{}")
+  # Owner (NULL for records created before per-user isolation: visible to nobody until assigned).
+  user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+  # Latest progress snapshot of the job (docs/TRANSCRIPTION_PROCESS.md §3).
+  progress_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+  error_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, default=None)
+  started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+  finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
   created_at: Mapped[Optional[datetime]] = mapped_column(
     DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
   )
@@ -746,6 +760,10 @@ class TranscriptionModel(Base):
       segments = json.loads(self.segments_json) if self.segments_json else []
     except Exception:
       segments = []
+    try:
+      progress = json.loads(self.progress_json) if self.progress_json else None
+    except Exception:
+      progress = None
 
     try:
       summary = json.loads(self.summary_json) if self.summary_json else None
@@ -762,10 +780,17 @@ class TranscriptionModel(Base):
     slug_part = re.sub(r"[\s_-]+", "-", cleaned).strip("-")[:50]
     short_id = self.id[:8] if len(self.id) >= 8 else self.id
     slug = f"{slug_part}-{short_id}" if slug_part else short_id
+    record_fields = {k: meta.pop(k) for k in TRANSCRIPTION_RECORD_META_KEYS if k in meta}
 
     return {
+      **record_fields,
       "id": self.id,
       "slug": slug,
+      "user_id": self.user_id,
+      "progress": progress,
+      "error_code": self.error_code,
+      "started_at": self.started_at.isoformat() if self.started_at else None,
+      "finished_at": self.finished_at.isoformat() if self.finished_at else None,
       "media_id": self.id,
       "title": self.title,
       "description": self.description or "",

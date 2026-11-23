@@ -1,3 +1,4 @@
+import { copyText } from '../../../core/browser/secureContext'
 import { useState, useRef, useEffect, type RefObject } from 'react'
 import { ArrowDown, Check, Copy, FileText, RotateCcw, Sparkles } from 'lucide-react'
 import { MarkdownMessage } from '../../../components/common'
@@ -38,7 +39,7 @@ export const ChatMessageList = ({
 
   const handleCopy = (id: string, text: string) => {
     if (!text) return
-    navigator.clipboard.writeText(text).catch(() => {})
+    void copyText(text)
     setCopiedId(id)
     setTimeout(() => {
       setCopiedId((current) => (current === id ? null : current))

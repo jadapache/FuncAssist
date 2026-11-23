@@ -37,6 +37,10 @@ class ChatRepository:
     artifacts = session_data.get("artifacts") or []
     active_art_id = session_data.get("activeArtifactId") or session_data.get("active_artifact_id")
     artifacts_json = json.dumps(artifacts, ensure_ascii=False) if artifacts else "[]"
+    # Partial updates: a caller that does not send artifacts/document (e.g. a chat turn that
+    # produced no document) must not wipe the ones already stored.
+    has_document = any(k in session_data for k in ("documentContent", "document_content"))
+    has_artifacts = "artifacts" in session_data
 
     stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
     result = await self.session.execute(stmt)
@@ -45,8 +49,10 @@ class ChatRepository:
     if session:
       session.title = title
       session.feature_slug = feature_slug
-      session.document_content = document_content
-      session.artifacts_json = artifacts_json
+      if has_document:
+        session.document_content = document_content
+      if has_artifacts:
+        session.artifacts_json = artifacts_json
       session.updated_at = datetime.now(timezone.utc)
       if active_art_id:
         session.active_artifact_id = active_art_id
@@ -109,6 +115,23 @@ class ChatRepository:
     messages = await self.get_session_messages(session_id, user_id=user_id)
     res["messages"] = messages
     return res
+
+  async def get_session_artifacts(
+    self, session_id: str, user_id: Optional[str] = None
+  ) -> List[dict[str, Any]]:
+    """Artifacts stored on a session (without loading its messages); [] if none or missing."""
+    stmt = select(ChatSessionModel).where(ChatSessionModel.id == session_id)
+    if user_id:
+      stmt = stmt.where(ChatSessionModel.user_id == user_id)
+    session = (await self.session.execute(stmt)).scalar_one_or_none()
+    raw = getattr(session, "artifacts_json", None) if session is not None else None
+    if not raw:
+      return []
+    try:
+      artifacts = json.loads(raw)
+    except (TypeError, ValueError):
+      return []
+    return [a for a in artifacts if isinstance(a, dict)] if isinstance(artifacts, list) else []
 
   async def delete_session(self, session_id: str, user_id: Optional[str] = None) -> bool:
     stmt = delete(ChatSessionModel).where(ChatSessionModel.id == session_id)
