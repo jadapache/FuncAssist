@@ -1,0 +1,16 @@
+[run]
+source = app
+branch = false
+omit =
+    app/__init__.py
+
+[report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    \.\.\.$
