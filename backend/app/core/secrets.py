@@ -1,6 +1,6 @@
 """
 Módulo de gestión de secretos y cifrado para llaves de API (API Keys) de modelos de IA.
-Basado en cifrado simétrico Fernet (cryptography.fernet) para proteger credenciales en archivos JSON.
+Basado en cifrado simétrico Fernet (cryptography.fernet) para proteger credenciales en reposo.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ _MASTER_SECRET_CACHE: str | None = None
 
 
 def _get_master_secret() -> str:
-    """Obtiene la clave maestra estrictamente desde variables de entorno."""
+    """Obtiene la clave maestra (SECRET_KEY, cargada desde SECRET_KEY_FILE cuando se define)."""
     global _MASTER_SECRET_CACHE
     if _MASTER_SECRET_CACHE:
         return _MASTER_SECRET_CACHE

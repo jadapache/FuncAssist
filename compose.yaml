@@ -9,10 +9,10 @@ services:
         - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:${APP_VERSION:-latest}
         - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:latest
     restart: unless-stopped
-    # HTTPS is enabled when TLS_CERT_DIR contains tls.crt and tls.key (see docs/DEPLOY_HTTPS.md).
-    ports: ["${APP_PORT:-6728}:80", "${APP_HTTPS_PORT:-6729}:443"]
+    # A certificate in TLS_CERT_DIR (tls.crt + tls.key) is mandatory; see docs/DEPLOY_HTTPS.md.
+    ports: ["${APP_PORT:-6728}:443"]
     environment:
-      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-6729}
+      APP_HTTPS_PORT: ${APP_PORT:-6728}
     volumes: ["${TLS_CERT_DIR:-./certs}:/etc/nginx/certs:ro"]
     depends_on:
       backend: { condition: service_healthy }
@@ -30,16 +30,19 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8000
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:6728}
+      FRONTEND_URL: ${FRONTEND_URL:-https://localhost:6728}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       BACKEND_URL: http://backend:8000
       DATABASE_URL: postgresql://${POSTGRES_USER:-funcassist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-funcassist}
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
-      PBKDF2_SALT: ${PBKDF2_SALT:?PBKDF2_SALT is required}
+      # Master key and salt are mounted as Docker secrets (files outside the image and .env).
+      SECRET_KEY_FILE: /run/secrets/funcassist_secret_key
+      PBKDF2_SALT_FILE: /run/secrets/funcassist_pbkdf2_salt
       DATA_DIR: /app/data
       KNOWLEDGE_DATA_DIR: /app/knowledge_data
       APP_VERSION: ${APP_VERSION:-latest}
       APP_BUILD_ID: ${APP_BUILD_ID:-}
+    secrets: [funcassist_secret_key, funcassist_pbkdf2_salt]
     volumes: [funcassist_data:/app/data, funcassist_knowledge:/app/knowledge_data]
     depends_on:
       db: { condition: service_healthy }
@@ -60,6 +63,11 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes: [redis_data:/data]
     healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 5s, retries: 5 }
+secrets:
+  funcassist_secret_key:
+    file: ${SECRET_KEY_PATH:-./secrets/secret_key}
+  funcassist_pbkdf2_salt:
+    file: ${PBKDF2_SALT_PATH:-./secrets/pbkdf2_salt}
 volumes:
   funcassist_data:
   funcassist_knowledge:
