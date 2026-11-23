@@ -421,12 +421,12 @@ async def extract_audio_endpoint(background_tasks: BackgroundTasks, file: Upload
   try:
     await _write_limited(file, temp_input, config.max_upload_bytes())
     result_path = await asyncio.to_thread(_process_audio_extraction, temp_input, temp_output)
+  except FFmpegError as exc:  # before HTTPException: FFmpegError is an HTTPException subclass
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    raise HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}") from exc
   except HTTPException:
     shutil.rmtree(temp_dir, ignore_errors=True)
     raise
-  except FFmpegError as exc:
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    raise HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}") from exc
   except Exception as exc:
     shutil.rmtree(temp_dir, ignore_errors=True)
     err_str = str(exc)
