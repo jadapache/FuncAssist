@@ -5,13 +5,11 @@ Complies with OWASP Secrets Management & Cryptographic Storage recommendations:
 - Random 96-bit (12-byte) nonce per encryption
 - Authenticity verification on decryption
 - Safe error handling without logging or leaking secrets
-- Backward compatibility with legacy Fernet encrypted tokens
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
 import os
 import secrets
@@ -22,7 +20,7 @@ from typing import Any, Generator, Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import delete, select
 
-from app.core.secrets import _derive_fernet_key, _get_master_secret, _get_pbkdf2_salt, decrypt_secret, is_encrypted
+from app.core.secrets import decrypt_secret, get_aesgcm, is_encrypted
 from app.db.interfaces.secret_repository import IUserSecretRepository
 from app.db.repositories.secret_repository import UserSecretRepository
 
@@ -32,23 +30,9 @@ SECRET_REF_PREFIX = "sec::"
 CURRENT_KEY_VERSION = 1
 
 
-def _derive_aes_key(master_secret: str) -> bytes:
-  """Derive a 256-bit (32-byte) key for AES-GCM using PBKDF2-HMAC-SHA256."""
-  salt = _get_pbkdf2_salt()
-  return hashlib.pbkdf2_hmac(
-    "sha256",
-    master_secret.encode("utf-8"),
-    salt,
-    iterations=100_000,
-    dklen=32,
-  )
-
-
 def _get_aesgcm() -> AESGCM:
-  """Return an AESGCM cipher instance initialized with the derived master key."""
-  master = _get_master_secret()
-  key = _derive_aes_key(master)
-  return AESGCM(key)
+  """Return an AESGCM cipher initialized with the derived 256-bit master key."""
+  return get_aesgcm()
 
 
 def _make_aad(user_id: str, purpose: str, secret_id: str) -> bytes:
