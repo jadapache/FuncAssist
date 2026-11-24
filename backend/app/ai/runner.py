@@ -31,6 +31,7 @@ from app.ai.policies import (
 )
 from app.ai.providers.base import AICompletion, AIMessage, AIProvider
 from app.ai.providers.factory import resolve_provider
+from app.ai.untrusted import UNTRUSTED_NOTICE
 from app.ai.request_types import (
     DocumentFeatureRequest,
     GroundedFeatureRequest,
@@ -640,13 +641,17 @@ def _format_rule_for_intent(intent: str, extension: str = "docx") -> str:
     )
 
 
+# Every prompt that can receive external content tells the model how to treat it (see app.ai.untrusted).
+_UNTRUSTED_SUFFIX = "\n\n" + UNTRUSTED_NOTICE
+
+
 async def _build_base_system_prompt(intent: str, feature: str | None = None) -> str:
     """System prompt without the output-format rule (sections add their own instructions)."""
     target_feature = intent if intent and intent != "chat" else (feature or "chat")
     try:
         tmpl = await get_prompt(target_feature)
         if tmpl and tmpl.get("system"):
-            return tmpl["system"]
+            return tmpl["system"] + _UNTRUSTED_SUFFIX
     except Exception as exc:
         logger.info("No prompt template for %s (%s); using the default system prompt", target_feature, exc)
 
@@ -654,6 +659,7 @@ async def _build_base_system_prompt(intent: str, feature: str | None = None) -> 
         "Eres un asistente experto en Aseguramiento de Calidad (QA), Gestión de Requerimientos y Arquitectura de Software. "
         "Responde con claridad, didáctica y precisión técnica utilizando formato Markdown enriquecido. "
         "Utiliza el contexto de los documentos cargados, historial de chat y las imágenes adjuntas cuando estén presentes."
+        + _UNTRUSTED_SUFFIX
     )
 
 

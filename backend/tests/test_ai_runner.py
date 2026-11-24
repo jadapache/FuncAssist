@@ -292,12 +292,16 @@ async def test_system_prompts(monkeypatch):
     return {"system": "TEMPLATE"} if f == "generic_plan" else {}
 
   monkeypatch.setattr(runner, "get_prompt", get_prompt)
-  assert await runner._build_base_system_prompt("generic_plan") == "TEMPLATE"
+  assert await runner._build_base_system_prompt("generic_plan") == "TEMPLATE" + runner._UNTRUSTED_SUFFIX
   assert "QA" in await runner._build_base_system_prompt("chat", "boom")
   assert "QA" in await runner._build_base_system_prompt("chat", None)
   assert seen == ["generic_plan", "boom", "chat"]
   full = await runner._build_chat_system_prompt("generic_plan", None, None)
   assert full.startswith("TEMPLATE") and 'extension="docx"' in full
+  # every system prompt, template or default, tells the model how to treat external content
+  for intent, feature in (("generic_plan", None), ("chat", "boom"), ("chat", None)):
+    assert "DATOS_EXTERNOS" in await runner._build_base_system_prompt(intent, feature)
+    assert "DATOS_EXTERNOS" in await runner._build_chat_system_prompt(intent, feature)
 
 
 def test_assemble_multimodal_message():
