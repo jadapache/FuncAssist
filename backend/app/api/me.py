@@ -37,7 +37,6 @@ from app.core.storage_user_integrations import (
   save_user_integration,
 )
 from app.db.interfaces.mcp_server_repository import IMcpServerRepository
-from app.integrations.executor import validate_mcp_endpoint_url
 from app.integrations.registry import registry
 
 logger = logging.getLogger(__name__)
@@ -93,38 +92,19 @@ class JiraConnectionInfo(BaseModel):
   status: str = "disconnected"
 
 
-class McpServerCreate(BaseModel):
-  name: str = Field(min_length=1, max_length=100)
-  endpoint_url: str = Field(min_length=1)
-  description: Optional[str] = None
-  transport_type: str = "sse"
-  auth_type: str = "none"
-  auth_secret: Optional[str] = None
-  allowed_tools: List[str] = Field(default_factory=list)
-
-
-class McpServerUpdate(BaseModel):
-  name: Optional[str] = None
-  endpoint_url: Optional[str] = None
-  description: Optional[str] = None
-  transport_type: Optional[str] = None
-  auth_type: Optional[str] = None
-  auth_secret: Optional[str] = None
-  allowed_tools: Optional[List[str]] = None
-  status: Optional[str] = None
+class McpToolPublic(BaseModel):
+  name: str
+  read_only: bool = False
 
 
 class McpServerInfo(BaseModel):
+  """What a user sees of a server an administrator enabled: no endpoint, no credentials."""
+
   id: str
   name: str
   description: str = ""
-  endpoint_url: str
-  transport_type: str = "sse"
-  auth_type: str = "none"
   status: str = "configured"
-  allowed_tools: List[str] = Field(default_factory=list)
-  created_at: Optional[str] = None
-  updated_at: Optional[str] = None
+  tools: List[McpToolPublic] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -367,102 +347,23 @@ async def disconnect_my_jira(
 # ---------------------------------------------------------------------------
 
 @router.get("/mcp-servers", response_model=List[McpServerInfo])
-async def list_my_mcp_servers(
+async def list_mcp_servers_for_users(
   current_user: dict[str, Any] = Depends(get_current_user),
   mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> List[McpServerInfo]:
-  """List MCP servers configured for the authenticated user."""
-  user_id = current_user["id"]
-  servers = await mcp_repo.list_by_user(user_id)
-  return [McpServerInfo(**s) for s in servers]
-
-
-@router.post("/mcp-servers", response_model=McpServerInfo)
-async def create_my_mcp_server(
-  body: McpServerCreate,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> McpServerInfo:
-  """Register an external MCP server for the authenticated user."""
-  user_id = current_user["id"]
-  if not validate_mcp_endpoint_url(body.endpoint_url, resolve_dns=False):
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="URL de servidor MCP no permitida o insegura.",
+  """MCP servers enabled by administrators. Registering, editing and approving tools is admin-only."""
+  servers = await mcp_repo.list_all()
+  return [
+    McpServerInfo(
+      id=server["id"],
+      name=server["name"],
+      description=server.get("description") or "",
+      status=server.get("status") or "configured",
+      tools=[
+        McpToolPublic(name=t["name"], read_only=bool(t.get("read_only")))
+        for t in server.get("tools") or []
+        if t.get("approved")
+      ],
     )
-
-  created = await mcp_repo.create(
-    user_id=user_id,
-    name=body.name,
-    endpoint_url=body.endpoint_url,
-    description=body.description,
-    transport_type=body.transport_type,
-    auth_type=body.auth_type,
-    allowed_tools=body.allowed_tools,
-  )
-  return McpServerInfo(**created)
-
-
-@router.patch("/mcp-servers/{server_id}", response_model=McpServerInfo)
-async def update_my_mcp_server(
-  server_id: str,
-  body: McpServerUpdate,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> McpServerInfo:
-  """Update an existing MCP server configuration for the authenticated user."""
-  user_id = current_user["id"]
-  updates = body.model_dump(exclude_unset=True)
-
-  if "endpoint_url" in updates and updates["endpoint_url"] is not None:
-    if not validate_mcp_endpoint_url(updates["endpoint_url"], resolve_dns=False):
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="URL de servidor MCP no permitida o insegura.",
-      )
-
-  updated = await mcp_repo.update(server_id, user_id, updates)
-  if not updated:
-    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-
-  return McpServerInfo(**updated)
-
-
-@router.delete("/mcp-servers/{server_id}")
-async def delete_my_mcp_server(
-  server_id: str,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> dict[str, Any]:
-  """Remove an MCP server configuration for the authenticated user."""
-  user_id = current_user["id"]
-  deleted = await mcp_repo.delete(server_id, user_id)
-  if not deleted:
-    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-
-  return {"ok": True, "deleted_id": server_id}
-
-
-@router.post("/mcp-servers/{server_id}/test")
-async def test_my_mcp_server(
-  server_id: str,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> dict[str, Any]:
-  """Test connection and validate reachability of user's MCP server."""
-  user_id = current_user["id"]
-  server = await mcp_repo.get_by_id(server_id, user_id)
-  if not server:
-    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-
-  is_valid = validate_mcp_endpoint_url(server["endpoint_url"], resolve_dns=False)
-  new_status = "connected" if is_valid else "error"
-  await mcp_repo.update_status(server_id, user_id, new_status)
-
-  return {
-    "ok": is_valid,
-    "status": new_status,
-    "endpoint_url": server["endpoint_url"],
-  }
-
-
+    for server in servers
+  ]
