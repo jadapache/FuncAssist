@@ -9,7 +9,10 @@ import type {
   UserPreferences,
   ProviderCredentialInfo,
   McpServerInfo,
-  McpServerPayload,
+  McpAdminServer,
+  McpServerCreatePayload,
+  McpServerUpdatePayload,
+  McpToolApprovalInput,
 } from '../types'
 
 export const aiSettingsApi = {
@@ -209,28 +212,40 @@ export const aiSettingsApi = {
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<McpServerInfo[]>(r)),
 
-  createMcpServer: (payload: McpServerPayload) =>
-    fetch(`${API_BASE}/api/me/mcp-servers`, {
+  adminListMcpServers: () =>
+    fetch(`${API_BASE}/api/mcp-servers`, {
+      headers: { ...getAuthHeaders() },
+    }).then((r) => handleResponse<McpAdminServer[]>(r)),
+
+  adminCreateMcpServer: (payload: McpServerCreatePayload) =>
+    fetch(`${API_BASE}/api/mcp-servers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
-    }).then((r) => handleResponse<McpServerInfo>(r)),
+    }).then((r) => handleResponse<McpAdminServer>(r)),
 
-  updateMcpServer: (id: string, payload: Partial<McpServerPayload & { status?: string }>) =>
-    fetch(`${API_BASE}/api/me/mcp-servers/${encodeURIComponent(id)}`, {
+  adminUpdateMcpServer: (id: string, payload: McpServerUpdatePayload) =>
+    fetch(`${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
-    }).then((r) => handleResponse<McpServerInfo>(r)),
+    }).then((r) => handleResponse<McpAdminServer>(r)),
 
-  deleteMcpServer: (id: string) =>
-    fetch(`${API_BASE}/api/me/mcp-servers/${encodeURIComponent(id)}`, {
+  adminDeleteMcpServer: (id: string) =>
+    fetch(`${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; deleted_id: string }>(r)),
 
-  testMcpServer: (id: string) =>
-    fetch(`${API_BASE}/api/me/mcp-servers/${encodeURIComponent(id)}/test`, {
+  adminSetMcpServerTools: (id: string, tools: McpToolApprovalInput[]) =>
+    fetch(`${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}/tools`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(tools),
+    }).then((r) => handleResponse<McpAdminServer>(r)),
+
+  adminTestMcpServer: (id: string) =>
+    fetch(`${API_BASE}/api/mcp-servers/${encodeURIComponent(id)}/test`, {
       method: 'POST',
       headers: { ...getAuthHeaders() },
     }).then((r) => handleResponse<{ ok: boolean; status: string; endpoint_url: string }>(r)),
