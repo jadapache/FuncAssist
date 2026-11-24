@@ -164,7 +164,7 @@ FuncAssist/
 ### 🔌 Integraciones Desacopladas
 
 - **Jira**: OAuth 2.0 (Atlassian 3LO) personal, de solo lectura; cada usuario vincula su cuenta y solo ve su información
-- **GitHub** y **GitLab**: conexión de organización que habilita el administrador, con selección de repositorios. No se admiten tokens de acceso personal (PAT); la migración a cuentas de servicio está en [docs/SECURITY_SEC-04_SEC-05.md](docs/SECURITY_SEC-04_SEC-05.md)
+- **GitHub** y **GitLab**: conexión de organización que habilita el administrador, con selección de repositorios. No se admiten tokens de acceso personal (PAT); está prevista su sustitución por cuentas de servicio de solo lectura
 - Sincronización automática de caché sin bloqueos
 
 ### 🤖 Motor de IA Multiproveedor

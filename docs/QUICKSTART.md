@@ -177,7 +177,7 @@ curl -X POST http://127.0.0.1:8000/api/knowledge/retrieve \
 
 1. Un administrador abre **Configuración** → **Integraciones** → **GitHub**
 2. Click en "Conectar" y autoriza con OAuth. La conexión queda disponible para todos los usuarios.
-3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una cuenta de servicio de solo lectura (ver `docs/SECURITY_SEC-04_SEC-05.md`).
+3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una cuenta de servicio de solo lectura.
 
 ### Ollama (Local, Recomendado para Desarrollo)
 
