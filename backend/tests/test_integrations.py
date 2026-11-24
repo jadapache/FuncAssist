@@ -43,7 +43,10 @@ async def test_mcp_rejects_internal_endpoints_and_unauthorized_tools():
     provider="jira", tool_name="dangerous_operation", arguments={}, allowed_tools=["get_issues"],
   )
   assert res["ok"] is False and "not authorized" in res["error"]
-  assert executor.can_invoke_tool("jira", "get_issues", ["*"]) is True
+  assert executor.can_invoke_tool("jira", "get_issues", ["*"]) is False
+  assert executor.can_invoke_tool("jira", "get_issues", []) is False
+  assert executor.can_invoke_tool("jira", "get_issues", None) is False
+  assert executor.can_invoke_tool("jira", "get_issues", ["get_issues"]) is True
 
 
 def test_git_connections_are_isolated_per_organization():
