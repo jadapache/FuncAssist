@@ -7,7 +7,6 @@ import {
 } from './integrations/IntegrationMarketplaceCard'
 import { IntegrationConfigModal } from './integrations/IntegrationConfigModal'
 import { RequestIntegrationModal } from './integrations/RequestIntegrationModal'
-import { api } from '../../../api/client'
 import type { IntegrationInfo } from '../../../types'
 
 export type IntegrationsPanelProps = {
@@ -51,7 +50,6 @@ export const IntegrationsPanel = ({ integrationsManager: externalManager }: Inte
     busyIntegrationId,
     handleOAuthConnect,
     handleDisconnect,
-    handlePatConnected,
   } = externalManager || internalManager
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -100,7 +98,7 @@ export const IntegrationsPanel = ({ integrationsManager: externalManager }: Inte
       id: item.id,
       name: item.name,
       description: item.description,
-      auth_method: 'pat',
+      auth_method: 'oauth',
       connected: item.connected,
       status: item.connected ? 'connected' : 'not_configured',
     }
@@ -206,10 +204,6 @@ export const IntegrationsPanel = ({ integrationsManager: externalManager }: Inte
         onClose={() => setIsConfigOpen(false)}
         onRefresh={loadIntegrations}
         onConnectOAuth={handleOAuthConnect}
-        onConnectPat={async (id, token, email, url) => {
-          await api.connectWithPat(id, { token, email, base_url: url })
-          await handlePatConnected(id, id)
-        }}
         onDisconnect={handleDisconnect}
       />
 
