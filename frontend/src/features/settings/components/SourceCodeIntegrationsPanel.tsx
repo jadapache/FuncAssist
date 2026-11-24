@@ -5,11 +5,13 @@ import { useIntegrationsManager } from '../hooks/useIntegrationsManager'
 import { useToast } from '../../../context/ToastContext'
 
 export type SourceCodeIntegrationsPanelProps = {
+  isAdmin?: boolean
   integrationsManager?: ReturnType<typeof useIntegrationsManager>
 }
 
 export const SourceCodeIntegrationsPanel = ({
   integrationsManager: externalManager,
+  isAdmin = false,
 }: SourceCodeIntegrationsPanelProps) => {
   const internalManager = useIntegrationsManager()
   const {
@@ -57,6 +59,7 @@ export const SourceCodeIntegrationsPanel = ({
             <IntegrationCard
               integration={github}
               busy={busyIntegrationId === 'github'}
+              canManage={isAdmin}
               onOAuth={() => void handleOAuthConnect('github')}
               onDisconnect={() => void handleDisconnect('github')}
               onTest={() => void handleTest('github')}
@@ -73,6 +76,7 @@ export const SourceCodeIntegrationsPanel = ({
             <IntegrationCard
               integration={gitlab}
               busy={busyIntegrationId === 'gitlab'}
+              canManage={isAdmin}
               onOAuth={() => void handleOAuthConnect('gitlab')}
               onDisconnect={() => void handleDisconnect('gitlab')}
               onTest={() => void handleTest('gitlab')}

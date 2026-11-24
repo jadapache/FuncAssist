@@ -179,7 +179,7 @@ export const SettingsPage = () => {
       {canSeeIntegrations && (
         <div className={activeTab === 'integrations' ? 'block' : 'hidden'}>
           {integrationsMounted && (
-            <SourceCodeIntegrationsPanel integrationsManager={integrationsManager} />
+            <SourceCodeIntegrationsPanel integrationsManager={integrationsManager} isAdmin={isAdmin} />
           )}
         </div>
       )}
