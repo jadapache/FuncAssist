@@ -42,34 +42,9 @@ class FakeRegistry:
 class FakeMcpRepo:
   def __init__(self):
     self.servers: dict[str, dict] = {}
-    self.status_updates = []
 
-  async def list_by_user(self, user_id):
-    return [s for s in self.servers.values() if s["_user"] == user_id]
-
-  async def create(self, user_id, name, endpoint_url, description, transport_type, auth_type, allowed_tools):
-    sid = f"srv-{len(self.servers) + 1}"
-    self.servers[sid] = {"id": sid, "_user": user_id, "name": name, "endpoint_url": endpoint_url,
-                         "description": description or "", "transport_type": transport_type,
-                         "auth_type": auth_type, "allowed_tools": allowed_tools}
-    return self.servers[sid]
-
-  async def get_by_id(self, sid, user_id):
-    s = self.servers.get(sid)
-    return s if s and s["_user"] == user_id else None
-
-  async def update(self, sid, user_id, updates):
-    s = await self.get_by_id(sid, user_id)
-    if not s:
-      return None
-    s.update({k: v for k, v in updates.items() if v is not None})
-    return s
-
-  async def delete(self, sid, user_id):
-    return self.servers.pop(sid, None) is not None
-
-  async def update_status(self, sid, user_id, status):
-    self.status_updates.append((sid, status))
+  async def list_all(self):
+    return list(self.servers.values())
 
 
 @pytest.fixture
@@ -170,7 +145,7 @@ def test_jira_connect_is_oauth_only(client, env):
 
 
 def test_jira_connect_ignores_a_token_in_the_body(client, env):
-  """SEC-05: a personal access token sent to the connect endpoint is never stored or used."""
+  """A personal access token sent to the connect endpoint is never stored or used."""
   r = client.post("/api/me/integrations/jira/connect",
                   json={"auth_method": "pat", "token": "tok", "email": "a@b.c", "jira_url": "https://j"})
   assert r.status_code == 200 and "authorization_url" in r.json()
@@ -218,30 +193,34 @@ def test_jira_disconnect(client, env):
   assert r.status_code == 200 and env["deleted_integration"] is True
 
 
-def test_mcp_servers_crud(client, env, monkeypatch):
-  monkeypatch.setattr(mod, "validate_mcp_endpoint_url", lambda url, resolve_dns=False: url.startswith("https://"))
+def test_mcp_servers_users_only_see_what_administrators_enabled(client, env):
   assert client.get("/api/me/mcp-servers").json() == []
-  assert client.post("/api/me/mcp-servers", json={"name": "s", "endpoint_url": "http://127.0.0.1"}).status_code == 400
-  assert client.post("/api/me/mcp-servers", json={"name": "", "endpoint_url": "https://x"}).status_code == 422
-  r = client.post("/api/me/mcp-servers", json={"name": "s", "endpoint_url": "https://mcp.example.com",
-                                                "allowed_tools": ["t1"]})
-  assert r.status_code == 200
-  sid = r.json()["id"]
-  assert r.json()["allowed_tools"] == ["t1"] and "_user" not in r.json()
-  assert [s["id"] for s in client.get("/api/me/mcp-servers").json()] == [sid]
+  env["repo"].servers["srv-1"] = {
+    "id": "srv-1", "name": "Playwright", "description": "Browser", "status": "connected",
+    "endpoint_url": "https://internal.example.com/sse", "auth_type": "bearer",
+    "tools": [
+      {"name": "snapshot", "read_only": True, "approved": True, "fingerprint": "f1"},
+      {"name": "click", "read_only": False, "approved": True, "fingerprint": "f2"},
+      {"name": "evaluate", "read_only": False, "approved": False, "fingerprint": None},
+    ],
+  }
+  body = client.get("/api/me/mcp-servers").json()
+  assert body == [{
+    "id": "srv-1", "name": "Playwright", "description": "Browser", "status": "connected",
+    "tools": [{"name": "snapshot", "read_only": True}, {"name": "click", "read_only": False}],
+  }]
+  text = str(body)
+  assert "internal.example.com" not in text and "bearer" not in text  # no endpoint or credentials for users
 
-  assert client.patch(f"/api/me/mcp-servers/{sid}", json={"endpoint_url": "ftp://bad"}).status_code == 400
-  r = client.patch(f"/api/me/mcp-servers/{sid}", json={"name": "renamed"})
-  assert r.status_code == 200 and r.json()["name"] == "renamed"
-  assert client.patch("/api/me/mcp-servers/missing", json={"name": "x"}).status_code == 404
 
-  r = client.post(f"/api/me/mcp-servers/{sid}/test")
-  assert r.json() == {"ok": True, "status": "connected", "endpoint_url": "https://mcp.example.com"}
-  env["repo"].servers[sid]["endpoint_url"] = "http://internal"
-  r = client.post(f"/api/me/mcp-servers/{sid}/test")
-  assert r.json()["ok"] is False and r.json()["status"] == "error"
-  assert env["repo"].status_updates == [(sid, "connected"), (sid, "error")]
-  assert client.post("/api/me/mcp-servers/missing/test").status_code == 404
-
-  assert client.delete(f"/api/me/mcp-servers/{sid}").json() == {"ok": True, "deleted_id": sid}
-  assert client.delete(f"/api/me/mcp-servers/{sid}").status_code == 404
+@pytest.mark.parametrize("method,path", [
+  ("post", "/api/me/mcp-servers"),
+  ("patch", "/api/me/mcp-servers/srv-1"),
+  ("delete", "/api/me/mcp-servers/srv-1"),
+  ("post", "/api/me/mcp-servers/srv-1/test"),
+])
+def test_users_cannot_register_or_change_mcp_servers(client, env, method, path):
+  """Only administrators register servers and approve their tools."""
+  r = client.request(method.upper(), path, json={"name": "s", "endpoint_url": "https://mcp.example.com"})
+  assert r.status_code in (404, 405)
+  assert env["repo"].servers == {}

@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.integrations.mcp_policy import ToolDescriptor, authorize_call, normalize_tools, validate_arguments
+
 logger = logging.getLogger(__name__)
 
 # Standard permitted external web schemes and ports for MCP SSE / HTTP endpoints
@@ -238,3 +240,35 @@ class IntegrationToolExecutor:
       return {"ok": False, "error": str(exc)}
     self._audit(provider, tool_name, arguments, "allowed")
     return {"ok": True, "result": result}
+
+  async def execute_mcp_tool(
+    self,
+    server: dict[str, Any],
+    descriptor: ToolDescriptor,
+    arguments: Any,
+    *,
+    user_confirmed: bool = False,
+  ) -> dict[str, Any]:
+    """Authorize a call to a tool of an MCP server an administrator enabled.
+
+    The policy runs before any transport exists: the tool must be approved, unchanged since its approval
+    and, when it can change things, confirmed by the user; the arguments must match the approved schema.
+    The remote session transport itself is not enabled yet, so a call that passes still does not run.
+    """
+    provider = f"mcp:{server.get('id') or server.get('name')}"
+    decision = authorize_call(server.get("tools"), descriptor, user_confirmed=user_confirmed)
+    if not decision.allowed:
+      denied = self._deny(provider, descriptor.name, arguments, decision.reason)
+      if decision.requires_confirmation:
+        denied["requires_confirmation"] = True
+      return denied
+
+    entry = next(e for e in normalize_tools(server.get("tools")) if e["name"] == descriptor.name)
+    problems = validate_arguments(entry.get("input_schema"), arguments)
+    if problems:
+      return self._deny(provider, descriptor.name, arguments, "Invalid arguments: " + "; ".join(problems))
+
+    return self._deny(
+      provider, descriptor.name, arguments,
+      "The remote MCP session transport is not enabled yet; the call was authorized but not sent.",
+    )
