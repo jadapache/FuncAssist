@@ -30,4 +30,6 @@ export const CLOUD_PROVIDERS: CloudProvider[] = [
   { id: 'gemini', name: 'Google' },
   { id: 'openai', name: 'OpenAI' },
   { id: 'claude', name: 'Anthropic' },
+  { id: 'openrouter', name: 'OpenRouter' },
+  { id: 'deepseek', name: 'DeepSeek' },
 ]

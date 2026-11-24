@@ -7,6 +7,8 @@ const PREFERRED_DEFAULT_MODELS: Record<string, string[]> = {
   gemini: ['gemini-2.5-flash'],
   openai: ['gpt-4o-mini', 'gpt-4o'],
   claude: ['claude-sonnet-4-5', 'claude-haiku-4-5'],
+  openrouter: ['meta-llama/llama-3.3-70b-instruct'],
+  deepseek: ['deepseek-chat'],
 }
 
 /** Default chat model for a cloud provider: a preferred one if the catalog has it, else the first available. */

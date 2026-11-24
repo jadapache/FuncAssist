@@ -41,6 +41,8 @@ export type AISettings = {
   claude_api_key_set: boolean
   groq_api_key_set: boolean
   gemini_api_key_set?: boolean
+  openrouter_api_key_set?: boolean
+  deepseek_api_key_set?: boolean
   transcription_groq_api_key_set?: boolean
   transcription_openai_api_key_set?: boolean
   ollama_base_url: string

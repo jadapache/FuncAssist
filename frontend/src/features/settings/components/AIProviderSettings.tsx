@@ -43,6 +43,10 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
     setOpenaiKey,
     claudeKey,
     setClaudeKey,
+    openrouterKey,
+    setOpenRouterKey,
+    deepseekKey,
+    setDeepSeekKey,
     showKey,
     setShowKey,
     savingAi,
@@ -138,6 +142,10 @@ export const AIProviderSettings = ({ onSaved }: AIProviderSettingsProps) => {
         setOpenaiKey={setOpenaiKey}
         claudeKey={claudeKey}
         setClaudeKey={setClaudeKey}
+        openrouterKey={openrouterKey}
+        setOpenRouterKey={setOpenRouterKey}
+        deepseekKey={deepseekKey}
+        setDeepSeekKey={setDeepSeekKey}
         showKey={showKey}
         setShowKey={setShowKey}
         savingAi={savingAi}

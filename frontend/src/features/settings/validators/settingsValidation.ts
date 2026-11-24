@@ -45,11 +45,13 @@ export type AiSettingsValidationParams = {
   geminiKey?: string
   openaiKey?: string
   claudeKey?: string
+  openrouterKey?: string
+  deepseekKey?: string
   isKeyConfigured?: boolean
 }
 
 export function validateAiSettingsPayload(params: AiSettingsValidationParams): ValidationResult {
-  const { provider, model, ollamaUrl, groqKey, geminiKey, openaiKey, claudeKey, isKeyConfigured } = params
+  const { provider, model, ollamaUrl, groqKey, geminiKey, openaiKey, claudeKey, openrouterKey, deepseekKey, isKeyConfigured } = params
 
   if (!model || !model.trim()) {
     return {
@@ -76,12 +78,14 @@ export function validateAiSettingsPayload(params: AiSettingsValidationParams): V
     }
   }
 
-  if (['groq', 'gemini', 'openai', 'claude'].includes(provider)) {
+  if (['groq', 'gemini', 'openai', 'claude', 'openrouter', 'deepseek'].includes(provider)) {
     let key = ''
     if (provider === 'groq') key = groqKey || ''
     if (provider === 'gemini') key = geminiKey || ''
     if (provider === 'openai') key = openaiKey || ''
     if (provider === 'claude') key = claudeKey || ''
+    if (provider === 'openrouter') key = openrouterKey || ''
+    if (provider === 'deepseek') key = deepseekKey || ''
 
     if (!isKeyConfigured && !key.trim()) {
       return {
