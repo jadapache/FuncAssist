@@ -18,6 +18,7 @@ from app.schemas.transcription import TranscriptionSummary
 
 logger = logging.getLogger(__name__)
 
+_BULLET = re.compile(r"^(?:[-*•]|\d+[.)])\s+")
 _GENERIC_SPEAKER = re.compile(r"(participante|speaker|hablante|interlocutor)\s*\d+", re.IGNORECASE)
 
 
@@ -164,8 +165,8 @@ def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
       continue
 
     # Extract bullet points
-    if re.match(r"^[-*•\d+.]\s+", stripped):
-      item_text = re.sub(r"^[-*•\d+.]\s*", "", stripped).strip()
+    if _BULLET.match(stripped):
+      item_text = _BULLET.sub("", stripped, count=1).strip()
       if item_text:
         if current_section == "key_insights":
           key_insights.append(item_text)
