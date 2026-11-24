@@ -85,7 +85,7 @@ Cada petición al chat deja una entrada en `USER_DATA_DIR/ai/logs/AAAA-MM-DD.jso
 
 `python -m scripts.smoke_ai_providers` (desde `backend/`) muestra, sin llamar a ningún proveedor, qué modelo principal y rápido resuelve el catálogo para cada proveedor y avisa si los valores del registro ya no están en el catálogo.
 
-Con `--live` (consume crédito) y las claves configuradas, por proveedor: una llamada del tier rápido (indicando si tuvo que recurrir al modelo principal), un plan por secciones (debe dar `sections > 0`) y, si el modelo admite herramientas, una llamada a herramienta en streaming seguida de la respuesta final. `--providers groq,claude,openai` limita los proveedores (también acepta `openrouter` y `deepseek`, que no están en la lista por defecto) y `--user <id>` usa las claves guardadas de ese usuario. Sale con código 1 si alguna comprobación falla.
+Con `--live` (consume crédito) y las claves configuradas, por proveedor: una llamada del tier rápido (indicando si tuvo que recurrir al modelo principal), un plan por secciones (debe dar `sections > 0`) y, si el modelo admite herramientas, una llamada a herramienta en streaming seguida de la respuesta final. `--providers groq,claude,openai` limita los proveedores (por defecto se revisan Groq, Claude, OpenAI, Gemini, OpenRouter y DeepSeek; los que no tienen clave se omiten) y `--user <id>` usa las claves guardadas de ese usuario. Sale con código 1 si alguna comprobación falla.
 
 ## Datos
 
