@@ -226,6 +226,22 @@ class TestCleanupLLM:
     assert calls[0][0].role == "system"
 
 
+class TestApplyLlmDlp:
+  @pytest.mark.asyncio
+  async def test_dlp_block_keeps_rule_cleanup(self):
+    from app.ai.errors import AIError
+
+    class Blocked:
+      async def complete(self, messages, max_tokens):
+        raise AIError("confidential_data_blocked", "bloqueado")
+
+    segs = [{"id": "1", "text_raw": "documento confidencial", "text": "Documento confidencial"}]
+    stats = cleanup.CleanupStats()
+    out = await cleanup.apply_llm(segs, Blocked(), stats)
+    assert out[0]["text"] == "Documento confidencial"
+    assert stats.llm_segments == 0
+
+
 class TestGroupTurns:
   def test_group_turns(self):
     segs = [

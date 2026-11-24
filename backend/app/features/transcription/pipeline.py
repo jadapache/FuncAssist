@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 PROMPT_MAX_CHARS = 800  # ~200 tokens
 PLAN_VERSION = 1
-LOCAL_WRITING_PROVIDERS = {"webllm", "local", "builtin", "browser", "ollama", "ollama_remote"}
+LOCAL_WRITING_PROVIDERS = {"webllm", "local", "builtin", "browser"}
 
 
 @dataclass
