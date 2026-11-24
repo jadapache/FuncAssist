@@ -1,7 +1,7 @@
 """Data Loss Prevention for prompts sent to cloud AI providers.
 
 Policy (see docs/SECURITY_COMPLIANCE.md):
-- Content classified as CONFIDENTIAL is processed only by on-premise engines (Ollama / WebLLM).
+- Content classified as CONFIDENTIAL is processed only by on-premise engines (WebLLM). Remote Ollama is a third-party endpoint and is treated as cloud.
   Any message carrying a confidential marker is blocked before reaching a cloud provider.
 - INTERNAL content may go to cloud providers after sanitization: personal identifiers and
   secrets are replaced with placeholders so they never leave the organization.
@@ -76,6 +76,6 @@ def enforce_cloud_policy(messages: list[dict[str, Any]], provider_name: str) -> 
       raise AIError(
         "confidential_data_blocked",
         f"El contenido está clasificado como confidencial y no puede enviarse a {provider_name}. "
-        "Usa un modelo local (Ollama o el modelo en el navegador).",
+        "Usa el modelo en el navegador.",
       )
   return [{**m, "content": _sanitize_content(m.get("content"))} for m in messages]

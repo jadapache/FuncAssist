@@ -1,6 +1,7 @@
 """Provider layer: LiteLLM provider, error mapping, retries, streaming, factory and registry."""
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -343,12 +344,38 @@ def test_build_kwargs_claude_stream_with_cache_and_fallbacks():
   assert "fallbacks" not in p._build_kwargs(msgs, native_fallbacks=False)
 
 
-def test_build_kwargs_gemini_no_temperature_and_ollama_skips_dlp():
+def test_build_kwargs_gemini_no_temperature():
   g = LiteLLMProvider("gemini", api_key="k")
   assert "temperature" not in g._build_kwargs([AIMessage(role="user", content="hi")])
+
+
+def test_build_kwargs_remote_ollama_goes_through_dlp():
   o = LiteLLMProvider("ollama_remote", base_url="https://o")
-  with patch.object(impl, "enforce_cloud_policy") as dlp:
+  assert o._is_on_premise() is False
+  with patch.object(impl, "enforce_cloud_policy", side_effect=lambda msgs, name: msgs) as dlp:
     o._build_kwargs([AIMessage(role="user", content="hi")])
+  dlp.assert_called_once()
+  assert dlp.call_args.args[1] == "Ollama Remote"
+
+
+def test_remote_ollama_blocks_confidential_content():
+  o = LiteLLMProvider("ollama_remote", base_url="https://o")
+  with pytest.raises(AIError) as exc:
+    o._build_kwargs([AIMessage(role="user", content="Documento CONFIDENCIAL: plan de negocio")])
+  assert exc.value.code == "confidential_data_blocked"
+
+
+def test_remote_ollama_sanitizes_personal_data():
+  o = LiteLLMProvider("ollama_remote", base_url="https://o")
+  kwargs = o._build_kwargs([AIMessage(role="user", content="Escribe a luis@fcv.org")])
+  assert "luis@fcv.org" not in str(kwargs["messages"])
+
+
+def test_local_spec_skips_dlp():
+  local = LiteLLMProvider("ollama_remote", base_url="https://o")
+  local.spec = replace(local.spec, is_local=True)
+  with patch.object(impl, "enforce_cloud_policy") as dlp:
+    local._build_kwargs([AIMessage(role="user", content="hi")])
   dlp.assert_not_called()
 
 

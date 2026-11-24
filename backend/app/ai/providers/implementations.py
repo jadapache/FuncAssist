@@ -339,7 +339,7 @@ class LiteLLMProvider(AIProvider):
       return False
 
   def _is_on_premise(self) -> bool:
-    return self.spec.is_local or self.spec.id in {"ollama", "local", "ollama_remote"} or "ollama" in self.spec.aliases
+    return self.spec.is_local
 
   def _retries(self) -> int:
     try:
@@ -430,8 +430,8 @@ class LiteLLMProvider(AIProvider):
 
     kwargs.update(extra)
 
-    # PRI-06: on-premise engines (Ollama) receive the context as is; cloud providers only get
-    # sanitized, non-confidential content.
+    # on-premise engines receive the context as is; every other provider (including
+    # remote Ollama) gets sanitized, non-confidential content.
     if not self._is_on_premise():
       kwargs["messages"] = enforce_cloud_policy(kwargs["messages"], self.spec.name)
 
