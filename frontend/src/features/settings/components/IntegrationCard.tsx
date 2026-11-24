@@ -17,6 +17,8 @@ export type IntegrationCardProps = {
   onConnected: () => Promise<void>
   onOAuthSaved: () => Promise<void>
   onError: (message: string) => void
+  /** Organization integrations (GitHub, GitLab) can only be managed by an administrator. */
+  canManage?: boolean
 }
 
 export const IntegrationCard = ({
@@ -28,9 +30,12 @@ export const IntegrationCard = ({
   onConnected,
   onOAuthSaved,
   onError,
+  canManage = true,
 }: IntegrationCardProps) => {
   const connected = integration.status === 'connected'
   const [showConnectForm, setShowConnectForm] = useState(false)
+  // Jira connections are personal, so every user manages their own.
+  const manageable = canManage || integration.id === 'jira'
 
   return (
     <article className="card border border-[var(--color-border)] p-6 space-y-5">
@@ -67,7 +72,15 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-3">
+      {!manageable ? (
+        <p className="text-xs text-[var(--color-ink-muted)]">
+          {connected
+            ? 'Esta integración es de la organización y la gestiona un administrador.'
+            : 'Esta integración aún no está conectada. Solo un administrador puede conectarla.'}
+        </p>
+      ) : null}
+
+      <div className={manageable ? 'flex flex-wrap gap-3' : 'hidden'}>
         {connected ? (
           <>
             <button
@@ -122,7 +135,7 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
-      {connected && integration.id === 'github' ? (
+      {manageable && connected && integration.id === 'github' ? (
         <div className="pt-2 border-t border-[var(--color-border)]">
           <GitHostingReposPanel
             integrationId="github"
@@ -134,7 +147,7 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
-      {connected && integration.id === 'gitlab' ? (
+      {manageable && connected && integration.id === 'gitlab' ? (
         <div className="pt-2 border-t border-[var(--color-border)]">
           <GitHostingReposPanel
             integrationId="gitlab"
@@ -146,7 +159,7 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
-      {showConnectForm ? (
+      {manageable && showConnectForm ? (
         <div className="mt-6 border-t border-[var(--color-border)] pt-5 space-y-4">
           <div className="mt-4">
             {integration.id === 'jira' ? (
