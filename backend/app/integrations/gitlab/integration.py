@@ -370,9 +370,12 @@ class GitLabIntegration(Integration):
     return results[:max_results]
 
   async def get_files_changed(self, *, pr_number: int, repo: str | None = None) -> list[dict[str, Any]]:
-    target_repo = repo or (self.selected_repos()[0] if self.selected_repos() else None)
+    selected = self.selected_repos()
+    target_repo = repo or (selected[0] if selected else None)
     if not target_repo:
       raise ValueError("Provide a project or select projects first.")
+    if target_repo not in selected:
+      raise ValueError("The project is not enabled by the administrator.")
 
     data = load_connection(self.id) or {}
     api_base = self._api_base(data)
