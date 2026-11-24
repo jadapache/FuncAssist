@@ -52,6 +52,8 @@ def get_ai_settings(user_id: Optional[str] = None) -> dict[str, Any]:
     "claude_api_key": ai.get("claude_api_key") or os.getenv("ANTHROPIC_API_KEY", ""),
     "groq_api_key": ai.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
     "gemini_api_key": ai.get("gemini_api_key") or os.getenv("GEMINI_API_KEY", ""),
+    "openrouter_api_key": ai.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY", ""),
+    "deepseek_api_key": ai.get("deepseek_api_key") or os.getenv("DEEPSEEK_API_KEY", ""),
     "transcription_groq_api_key": ai.get("transcription_groq_api_key") or ai.get("groq_api_key") or os.getenv("GROQ_API_KEY", ""),
     "transcription_openai_api_key": ai.get("transcription_openai_api_key") or ai.get("openai_api_key") or os.getenv("OPENAI_API_KEY", ""),
     "ollama_base_url": ai.get("ollama_base_url") or os.getenv("OLLAMA_BASE_URL") or None,
