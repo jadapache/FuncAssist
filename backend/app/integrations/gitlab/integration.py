@@ -1,4 +1,4 @@
-"""GitLab integration — OAuth or PAT with project selection."""
+"""GitLab integration — OAuth with project selection."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ class GitLabIntegration(Integration):
         name=self.name,
         description=self.description,
         status=ConnectionStatus.NOT_CONNECTED,
-        auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
+        auth_methods=[AuthMethod.OAUTH],
         capabilities=self.get_capabilities(),
         oauth_configured=oauth_configured,
       )
@@ -66,7 +66,7 @@ class GitLabIntegration(Integration):
       name=self.name,
       description=self.description,
       status=ConnectionStatus.CONNECTED,
-      auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
+      auth_methods=[AuthMethod.OAUTH],
       capabilities=self.get_capabilities(),
       account_label=data.get("account_login"),
       workspace_label=host,
@@ -81,9 +81,7 @@ class GitLabIntegration(Integration):
   def _is_connected(self, data: dict[str, Any] | None) -> bool:
     if not data:
       return False
-    if data.get("auth_method") == AuthMethod.OAUTH.value:
-      return bool(data.get("access_token"))
-    return bool(data.get("pat_token"))
+    return data.get("auth_method") == AuthMethod.OAUTH.value and bool(data.get("access_token"))
 
   async def start_oauth(self) -> AuthStartResponse:
     oauth = get_gitlab_oauth_config()
@@ -164,40 +162,6 @@ class GitLabIntegration(Integration):
     save_connection(self.id, payload)
     return self.get_info()
 
-  async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
-    if not token:
-      raise ValueError("GitLab PAT is required.")
-
-    base_url = str(kwargs.get("base_url") or DEFAULT_HOST).strip().rstrip("/")
-    api_base = f"{base_url}/api/v4"
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      response = await client.get(
-        f"{api_base}/user",
-        headers={"PRIVATE-TOKEN": token},
-      )
-      if response.status_code >= 400:
-        raise ValueError(f"GitLab PAT authentication failed ({response.status_code})")
-      user = response.json()
-
-    existing = load_connection(self.id) or {}
-    selected_repos = kwargs.get("selected_repos")
-    if selected_repos is None:
-      selected_repos = existing.get("selected_repos") or []
-
-    payload = {
-      "auth_method": AuthMethod.PERSONAL_ACCESS_TOKEN.value,
-      "pat_token": token,
-      "base_url": base_url,
-      "api_base": api_base,
-      "account_login": user.get("username"),
-      "account_label": user.get("username"),
-      "account_name": user.get("name"),
-      "selected_repos": selected_repos,
-    }
-    save_connection(self.id, payload)
-    return self.get_info()
-
   async def disconnect(self) -> None:
     delete_connection(self.id)
 
@@ -236,8 +200,6 @@ class GitLabIntegration(Integration):
       raise ValueError("GitLab is not connected.")
     if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
       return {"Authorization": f"Bearer {data['access_token']}"}
-    if data.get("pat_token"):
-      return {"PRIVATE-TOKEN": data["pat_token"]}
     raise ValueError("GitLab is not connected.")
 
   def selected_repos(self) -> list[str]:

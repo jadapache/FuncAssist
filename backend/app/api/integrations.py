@@ -25,13 +25,6 @@ def _require_git_hosting(integration_id: str):
   return registry.get(integration_id)
 
 
-class PatConnectRequest(BaseModel):
-  token: str = Field(min_length=1)
-  email: str | None = None
-  base_url: str | None = None
-  selected_repos: list[str] = Field(default_factory=list)
-
-
 class SelectedReposRequest(BaseModel):
   selected_repos: list[str]
 
@@ -48,7 +41,7 @@ async def list_integrations() -> list[IntegrationInfo]:
 @router.get("/auth-methods")
 async def auth_methods() -> dict[str, list[str]]:
   return {
-    "methods": [AuthMethod.OAUTH.value, AuthMethod.PERSONAL_ACCESS_TOKEN.value],
+    "methods": [AuthMethod.OAUTH.value],
   }
 
 
@@ -63,8 +56,9 @@ async def jira_oauth_callback(code: str | None = None, state: str | None = None,
     return RedirectResponse(f"{frontend}/integrations?jira=error&message=missing_code")
 
   try:
-    await registry.get("jira").handle_oauth_callback(code, state)
-    await sync_integration("jira")
+    jira = registry.get("jira")
+    await jira.handle_oauth_callback(code, state)
+    await sync_integration("jira", user_id=jira.user_id_from_state(state))  # type: ignore[attr-defined]
   except Exception as exc:
     return RedirectResponse(f"{frontend}/integrations?jira=error&message={quote(str(exc))}")
 
@@ -145,33 +139,6 @@ async def start_oauth(
     raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/{integration_id}/pat", response_model=IntegrationInfo)
-async def connect_with_pat(
-  integration_id: str,
-  body: PatConnectRequest,
-  current_user: dict = Depends(get_current_user),
-) -> IntegrationInfo:
-  try:
-    integration = registry.get(integration_id)
-    user_id = current_user["id"]
-    info = await integration.connect_with_pat(
-      body.token,
-      email=body.email,
-      base_url=body.base_url,
-      selected_repos=body.selected_repos,
-    )
-    if await integration.authenticate(user_id=user_id if integration_id == "jira" else None):
-      try:
-        await sync_integration(integration_id)
-      except Exception:
-        pass
-    return info
-  except KeyError as exc:
-    raise HTTPException(status_code=404, detail=str(exc)) from exc
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/{integration_id}/test", response_model=TestConnectionResult)
 async def test_integration(
   integration_id: str,
@@ -233,7 +200,7 @@ async def update_projects(
     user_id = current_user["id"]
     info = await registry.get("jira").update_selected_projects(body.selected_projects, user_id=user_id)  # type: ignore[attr-defined]
     try:
-      await sync_integration(integration_id)
+      await sync_integration(integration_id, user_id=str(user_id))
     except Exception:
       pass
     return info
@@ -258,7 +225,7 @@ async def auto_select_jira_project(
       raise ValueError("Jira is not connected or site URL is missing.")
     await jira.auto_select_projects_from_url(site_url, user_id=user_id)  # type: ignore[attr-defined]
     try:
-      await sync_integration("jira")
+      await sync_integration("jira", user_id=str(user_id))
     except Exception:
       pass
     return jira.get_info(user_id=user_id)

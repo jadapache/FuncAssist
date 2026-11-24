@@ -13,7 +13,7 @@ OAUTH_CFG = {
   "configured": True, "client_id": "cid", "client_secret": "sec",
   "redirect_uri": "http://x/cb", "base_url": "https://git.example.com/",
 }
-PAT = {"auth_method": "pat", "pat_token": "glpat", "base_url": "https://gitlab.com"}
+CONNECTED = {"auth_method": "oauth", "access_token": "glat", "base_url": "https://gitlab.com"}
 
 
 @pytest.fixture
@@ -42,12 +42,13 @@ def test_api_base_variants(store):
 def test_info_and_is_connected(store):
   integ = gl.GitLabIntegration()
   assert integ.get_info().status == ConnectionStatus.NOT_CONNECTED
-  store["gitlab"] = {**PAT, "account_login": "ana", "selected_repos": ["g/p"], "base_url": "https://git.example.com"}
+  store["gitlab"] = {**CONNECTED, "account_login": "ana", "selected_repos": ["g/p"], "base_url": "https://git.example.com"}
   info = integ.get_info()
   assert info.status == ConnectionStatus.CONNECTED and info.workspace_label == "git.example.com"
   assert info.details["selected_repos"] == ["g/p"]
   assert integ._is_connected({"auth_method": "oauth", "access_token": "t"}) is True
   assert integ._is_connected({"auth_method": "oauth"}) is False
+  assert integ._is_connected({"auth_method": "pat", "pat_token": "x"}) is False  # PATs are no longer accepted
   assert integ._is_connected(None) is False
 
 
@@ -91,30 +92,6 @@ async def test_oauth_callback(store, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_connect_with_pat(store, monkeypatch):
-  integ = gl.GitLabIntegration()
-  with pytest.raises(ValueError, match="required"):
-    await integ.connect_with_pat("")
-  mock_http(monkeypatch, lambda req: httpx.Response(401))
-  with pytest.raises(ValueError, match="authentication failed"):
-    await integ.connect_with_pat("bad")
-
-  seen = {}
-
-  def ok(req: httpx.Request):
-    seen["host"], seen["token"] = req.url.host, req.headers["private-token"]
-    return httpx.Response(200, json={"username": "ana"})
-
-  mock_http(monkeypatch, ok)
-  store["gitlab"] = {"selected_repos": ["old/p"]}
-  await integ.connect_with_pat("tk", base_url="https://git.corp.io/")
-  assert seen == {"host": "git.corp.io", "token": "tk"}
-  assert store["gitlab"]["selected_repos"] == ["old/p"] and store["gitlab"]["api_base"] == "https://git.corp.io/api/v4"
-  await integ.connect_with_pat("tk", selected_repos=["n/p"])
-  assert store["gitlab"]["selected_repos"] == ["n/p"] and store["gitlab"]["base_url"] == "https://gitlab.com"
-
-
-@pytest.mark.asyncio
 async def test_connection_lifecycle(store, monkeypatch):
   integ = gl.GitLabIntegration()
   assert await integ.authenticate() is False
@@ -126,8 +103,8 @@ async def test_connection_lifecycle(store, monkeypatch):
   with pytest.raises(ValueError, match="not connected"):
     await integ.get_repositories()
 
-  store["gitlab"] = dict(PAT)
-  assert integ._headers() == {"PRIVATE-TOKEN": "glpat"}
+  store["gitlab"] = dict(CONNECTED)
+  assert integ._headers() == {"Authorization": "Bearer glat"}
   mock_http(monkeypatch, lambda req: httpx.Response(200, json={"username": "ana"}))
   assert (await integ.test_connection()).details["username"] == "ana"
   mock_http(monkeypatch, lambda req: httpx.Response(500))
@@ -148,7 +125,7 @@ async def test_connection_lifecycle(store, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_repositories(store, monkeypatch):
-  store["gitlab"] = {**PAT, "selected_repos": ["g/p"]}
+  store["gitlab"] = {**CONNECTED, "selected_repos": ["g/p"]}
   mock_http(monkeypatch, lambda req: httpx.Response(200, json=[
     {"path_with_namespace": "g/p", "name": "p", "visibility": "private"},
     {"path_with_namespace": "g/q", "name": "q", "visibility": "public"},
@@ -164,7 +141,7 @@ async def test_merge_requests_commits_issues(store, monkeypatch):
     with pytest.raises(ValueError, match="No GitLab projects"):
       await call()
 
-  store["gitlab"] = {**PAT, "selected_repos": ["g/a", "g/b"]}
+  store["gitlab"] = {**CONNECTED, "selected_repos": ["g/a", "g/b"]}
   states = []
 
   def handler(req: httpx.Request):
@@ -198,7 +175,7 @@ async def test_files_changed(store, monkeypatch):
   with pytest.raises(ValueError, match="Provide a project"):
     await integ.get_files_changed(pr_number=1)
 
-  store["gitlab"] = {**PAT, "selected_repos": ["g/p"]}
+  store["gitlab"] = {**CONNECTED, "selected_repos": ["g/p"]}
   paths = []
 
   def handler(req: httpx.Request):
@@ -212,3 +189,11 @@ async def test_files_changed(store, monkeypatch):
   files = await integ.get_files_changed(pr_number=4)
   assert paths[-1] == "/api/v4/projects/g%2Fp/merge_requests/4/changes"
   assert [(f["filename"], f["status"]) for f in files] == [("b.py", "renamed"), ("c.py", "modified")]
+
+
+def test_personal_access_tokens_are_not_supported():
+  integ = gl.GitLabIntegration()
+  assert not hasattr(integ, "connect_with_pat")
+  assert [m.value for m in integ.get_info().auth_methods] == ["oauth"]
+  with pytest.raises(ValueError):
+    gl.GitLabIntegration()._headers()

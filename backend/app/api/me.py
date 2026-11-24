@@ -83,13 +83,6 @@ class ProviderCredentialInfo(BaseModel):
   updated_at: Optional[str] = None
 
 
-class JiraConnectRequest(BaseModel):
-  jira_url: Optional[str] = None
-  auth_method: str = "oauth"
-  token: Optional[str] = None
-  email: Optional[str] = None
-
-
 class JiraConnectionInfo(BaseModel):
   connected: bool
   account_email: Optional[str] = None
@@ -263,29 +256,11 @@ async def delete_my_provider_credential(
 
 @router.post("/integrations/jira/connect")
 async def connect_my_jira(
-  body: Optional[JiraConnectRequest] = None,
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-  """Start personal Jira connection via OAuth 2.0 or PAT."""
+  """Start the personal Jira connection through OAuth 2.0 (3LO). Jira has no token-based connection."""
   user_id = current_user["id"]
   jira_integration = registry.get("jira")
-
-  if body and body.auth_method == "pat" and body.token:
-    info = await jira_integration.connect_with_pat(
-      token=body.token,
-      email=body.email,
-      base_url=body.jira_url or "",
-    )
-    save_user_integration(user_id, "jira", {
-      "auth_method": "pat",
-      "pat_token": body.token,
-      "email": body.email,
-      "jira_url": body.jira_url,
-      "status": "connected",
-    })
-    return {"ok": True, "status": "connected", "info": info.model_dump() if hasattr(info, "model_dump") else info}
-
-  # OAuth 2.0 3LO Start
   oauth_res = await jira_integration.start_oauth(user_id=user_id)
   return oauth_res.model_dump() if hasattr(oauth_res, "model_dump") else oauth_res
 

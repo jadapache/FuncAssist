@@ -36,7 +36,7 @@ def test_info_not_connected_and_connected(store):
   assert info.status == ConnectionStatus.NOT_CONNECTED and info.oauth_configured is True
   assert {c.value for c in integ.get_capabilities()} >= {"get_pull_requests", "get_commits"}
 
-  store["github"] = {"auth_method": "pat", "pat_token": "t", "account_login": "ana", "selected_repos": ["a/b"]}
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "account_login": "ana", "selected_repos": ["a/b"]}
   info = integ.get_info()
   assert info.status == ConnectionStatus.CONNECTED and info.account_label == "ana"
   assert info.details["selected_repos"] == ["a/b"]
@@ -46,11 +46,10 @@ def test_info_not_connected_and_connected(store):
   "data,expected",
   [
     (None, False),
-    ({"auth_method": "pat", "pat_token": "x"}, True),
-    ({"auth_method": "pat"}, False),
     ({"auth_method": "oauth", "access_token": "x"}, True),
     ({"auth_method": "oauth"}, False),
-    ({"access_token": "x"}, True),
+    ({"access_token": "x"}, False),  # a token without the OAuth method is not a connection
+    ({"auth_method": "pat", "pat_token": "x"}, False),  # PATs are no longer accepted
     ({"other": 1}, False),
   ],
 )
@@ -104,31 +103,13 @@ async def test_oauth_callback_errors(store, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_connect_with_pat(store, monkeypatch):
-  integ = gh.GitHubIntegration()
-  with pytest.raises(ValueError, match="required"):
-    await integ.connect_with_pat("")
-
-  mock_http(monkeypatch, lambda req: httpx.Response(401))
-  with pytest.raises(ValueError, match="authentication failed"):
-    await integ.connect_with_pat("bad")
-
-  mock_http(monkeypatch, lambda req: httpx.Response(200, json={"login": "ana", "name": "Ana"}))
-  store["github"] = {"selected_repos": ["old/repo"], "pat_token": "x"}
-  info = await integ.connect_with_pat("good")
-  assert info.account_label == "ana" and store["github"]["selected_repos"] == ["old/repo"]
-  await integ.connect_with_pat("good", selected_repos=["new/repo"])
-  assert store["github"]["selected_repos"] == ["new/repo"]
-
-
-@pytest.mark.asyncio
 async def test_disconnect_authenticate_and_test_connection(store, monkeypatch):
   integ = gh.GitHubIntegration()
   assert await integ.authenticate() is False
   res = await integ.test_connection()
   assert res.ok is False and "not connected" in res.message
 
-  store["github"] = {"auth_method": "pat", "pat_token": "t", "selected_repos": ["a/b"]}
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b"]}
   assert await integ.authenticate() is True
   mock_http(monkeypatch, lambda req: httpx.Response(200, json={"login": "ana"}))
   res = await integ.test_connection()
@@ -145,10 +126,11 @@ def test_token_selection(store):
   integ = gh.GitHubIntegration()
   with pytest.raises(ValueError):
     integ._token()
-  store["github"] = {"auth_method": "oauth", "access_token": "o", "pat_token": "p"}
+  store["github"] = {"auth_method": "oauth", "access_token": "o"}
   assert integ._token() == "o" and integ._headers()["Authorization"] == "Bearer o"
-  store["github"] = {"auth_method": "pat", "pat_token": "p"}
-  assert integ._token() == "p"
+  store["github"] = {"auth_method": "pat", "pat_token": "p"}  # legacy PAT data is ignored
+  with pytest.raises(ValueError):
+    integ._token()
   store["github"] = {"auth_method": "oauth"}
   with pytest.raises(ValueError):
     integ._token()
@@ -160,7 +142,7 @@ async def test_update_selected_repos(store):
   integ = gh.GitHubIntegration()
   with pytest.raises(ValueError, match="not connected"):
     await integ.update_selected_repos(["a/b"])
-  store["github"] = {"auth_method": "pat", "pat_token": "t"}
+  store["github"] = {"auth_method": "oauth", "access_token": "t"}
   info = await integ.update_selected_repos(["a/b"])
   assert info.details["selected_repos"] == ["a/b"]
 
@@ -171,7 +153,7 @@ async def test_get_repositories(store, monkeypatch):
   with pytest.raises(ValueError, match="not connected"):
     await integ.get_repositories()
 
-  store["github"] = {"auth_method": "pat", "pat_token": "t", "selected_repos": ["a/b"]}
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b"]}
   seen = {}
 
   def handler(req: httpx.Request):
@@ -192,7 +174,7 @@ async def test_pull_requests_and_commits(store, monkeypatch):
   with pytest.raises(ValueError, match="No GitHub repositories"):
     await integ.get_commits()
 
-  store["github"] = {"auth_method": "pat", "pat_token": "t", "selected_repos": ["a/b", "c/d"]}
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b", "c/d"]}
 
   def handler(req: httpx.Request):
     parts = req.url.path.split("/")
@@ -219,7 +201,7 @@ async def test_files_changed(store, monkeypatch):
   with pytest.raises(ValueError, match="Provide a repo"):
     await integ.get_files_changed(pr_number=1)
 
-  store["github"] = {"auth_method": "pat", "pat_token": "t", "selected_repos": ["a/b"]}
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b"]}
   paths = []
 
   def handler(req: httpx.Request):
@@ -231,3 +213,10 @@ async def test_files_changed(store, monkeypatch):
   assert paths[-1] == "/repos/a/b/pulls/7/files" and files[0]["filename"] == "x.py" and files[0]["repo"] == "a/b"
   await integ.get_files_changed(pr_number=7, repo="z/y")
   assert paths[-1] == "/repos/z/y/pulls/7/files"
+
+
+def test_personal_access_tokens_are_not_supported():
+  integ = gh.GitHubIntegration()
+  assert not hasattr(integ, "connect_with_pat")
+  assert not hasattr(AuthMethod, "PERSONAL_ACCESS_TOKEN")
+  assert [m.value for m in integ.get_info().auth_methods] == ["oauth"]

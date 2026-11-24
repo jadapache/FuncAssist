@@ -17,11 +17,6 @@ class FakeJira:
     self.callback_exc = None
     self.disconnect_exc = None
 
-  async def connect_with_pat(self, token, email=None, base_url=None):
-    self.calls.append(("pat", token, email, base_url))
-    return IntegrationInfo(id="jira", name="Jira", description="d", status="connected",
-                           auth_methods=[], capabilities=[])
-
   async def start_oauth(self, user_id=None):
     self.calls.append(("oauth", user_id))
     return AuthStartResponse(authorization_url="https://auth/jira", state="st", auth_method=AuthMethod.OAUTH)
@@ -168,14 +163,19 @@ def test_provider_credentials(client, env):
   assert client.delete("/api/me/provider-credentials/openai").json()["ok"] is False
 
 
-def test_jira_connect_pat_and_oauth(client, env):
-  r = client.post("/api/me/integrations/jira/connect",
-                  json={"auth_method": "pat", "token": "tok", "email": "a@b.c", "jira_url": "https://j"})
-  assert r.status_code == 200 and r.json()["status"] == "connected" and r.json()["info"]["id"] == "jira"
-  assert env["saved_integration"]["pat_token"] == "tok" and env["saved_integration"]["auth_method"] == "pat"
+def test_jira_connect_is_oauth_only(client, env):
   r = client.post("/api/me/integrations/jira/connect")
   assert r.status_code == 200 and r.json()["authorization_url"] == "https://auth/jira"
   assert env["reg"].jira.calls[-1] == ("oauth", "test-user-id")
+
+
+def test_jira_connect_ignores_a_token_in_the_body(client, env):
+  """SEC-05: a personal access token sent to the connect endpoint is never stored or used."""
+  r = client.post("/api/me/integrations/jira/connect",
+                  json={"auth_method": "pat", "token": "tok", "email": "a@b.c", "jira_url": "https://j"})
+  assert r.status_code == 200 and "authorization_url" in r.json()
+  assert env["reg"].jira.calls[-1] == ("oauth", "test-user-id")
+  assert env.get("saved_integration") in (None, {}) or "pat_token" not in env["saved_integration"]
 
 
 @pytest.mark.parametrize("params,exc,expected", [

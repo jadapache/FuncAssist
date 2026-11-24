@@ -47,14 +47,14 @@ async def test_mcp_rejects_internal_endpoints_and_unauthorized_tools():
 
 
 def test_git_connections_are_isolated_per_organization():
-  storage.save_connection("github", {"pat_token": "ghp_org1", "selected_repos": ["acme/backend"]}, org_id="org-1")
-  storage.save_connection("gitlab", {"pat_token": "glpat-org1"}, org_id="org-1")
-  storage.save_connection("gitlab", {"pat_token": "glpat-org2"}, org_id="org-2")
+  storage.save_connection("github", {"access_token": "ghp_org1", "selected_repos": ["acme/backend"]}, org_id="org-1")
+  storage.save_connection("gitlab", {"access_token": "glpat-org1"}, org_id="org-1")
+  storage.save_connection("gitlab", {"access_token": "glpat-org2"}, org_id="org-2")
 
   github = storage.load_connection("github", org_id="org-1")
-  assert github["pat_token"] == "ghp_org1" and github["selected_repos"] == ["acme/backend"]
-  assert storage.load_connection("gitlab", org_id="org-1")["pat_token"] == "glpat-org1"
-  assert storage.load_connection("gitlab", org_id="org-2")["pat_token"] == "glpat-org2"
+  assert github["access_token"] == "ghp_org1" and github["selected_repos"] == ["acme/backend"]
+  assert storage.load_connection("gitlab", org_id="org-1")["access_token"] == "glpat-org1"
+  assert storage.load_connection("gitlab", org_id="org-2")["access_token"] == "glpat-org2"
 
 
 @pytest.mark.asyncio

@@ -101,7 +101,7 @@ FuncAssist/
 │   │   ├── core/           # Settings, security, secrets (Fernet), storage
 │   │   ├── db/             # Repository pattern, interfaces, SQLAlchemy ORM, PostgreSQL
 │   │   ├── features/       # Servicios (standup, mejoras funcionales)
-│   │   ├── integrations/   # Adaptadores (Jira OAuth/PAT, GitHub PAT, GitLab PAT)
+│   │   ├── integrations/   # Adaptadores (Jira OAuth personal, GitHub y GitLab OAuth)
 │   │   ├── models/         # Pydantic models (AI catalog)
 │   │   ├── schemas/        # Schemas de validación (user, chat, prd, test_plan)
 │   │   └── main.py         # Entry point
@@ -163,9 +163,8 @@ FuncAssist/
 
 ### 🔌 Integraciones Desacopladas
 
-- **Jira**: OAuth 2.0 (Atlassian 3LO) + Personal Access Token (PAT)
-- **GitHub**: PAT con selección de repositorios
-- **GitLab**: PAT con inspección de proyectos
+- **Jira**: OAuth 2.0 (Atlassian 3LO) personal, de solo lectura; cada usuario vincula su cuenta y solo ve su información
+- **GitHub** y **GitLab**: conexión de organización que habilita el administrador, con selección de repositorios. No se admiten tokens de acceso personal (PAT); la migración a cuentas de servicio está en [docs/SECURITY_SEC-04_SEC-05.md](docs/SECURITY_SEC-04_SEC-05.md)
 - Sincronización automática de caché sin bloqueos
 
 ### 🤖 Motor de IA Multiproveedor
