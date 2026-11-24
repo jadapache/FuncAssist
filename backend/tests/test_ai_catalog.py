@@ -85,6 +85,21 @@ def test_pick_model_tiers_and_fallbacks(db):
   assert catalog.pick_model("deepseek", "main", registry_default="other") is None
 
 
+def test_pick_model_openrouter_skips_variants(db):
+  db.items = [item(m, provider="openrouter") for m in (
+    "meta-llama/llama-3.3-70b-instruct:free", "meta-llama/llama-3.3-70b-instruct",
+    "meta-llama/llama-3.1-8b-instruct:free", "meta-llama/llama-3.1-8b-instruct", "other/model",
+  )]
+  assert catalog.pick_model("openrouter", "main") == "meta-llama/llama-3.3-70b-instruct"
+  assert catalog.pick_model("openrouter", "fast") == "meta-llama/llama-3.1-8b-instruct"
+
+
+def test_pick_model_deepseek_chat(db):
+  db.items = [item(m, provider="deepseek") for m in ("deepseek-reasoner", "deepseek-chat")]
+  assert catalog.pick_model("deepseek", "main") == "deepseek-chat"
+  assert catalog.pick_model("deepseek", "fast") == "deepseek-chat"
+
+
 def test_pick_model_prefers_newest_undated(db):
   db.items = [item(m, provider="claude") for m in
               ("claude-3-5-sonnet-20241022", "claude-sonnet-4-5", "claude-sonnet-4", "claude-3-5-haiku")]
