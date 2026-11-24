@@ -133,6 +133,15 @@ def test_preferences_roundtrip(client, env):
   assert client.patch("/api/me/preferences", json={"settings_json": "x"}).status_code == 422
 
 
+@pytest.mark.parametrize("provider", ["openrouter", "deepseek"])
+def test_provider_credentials_for_openrouter_and_deepseek(client, env, provider):
+  r = client.put(f"/api/me/provider-credentials/{provider.upper()}", json={"api_key": "sk-123456"})
+  assert r.status_code == 200 and r.json()["provider"] == provider
+  assert env["creds"][provider] == "sk-123456"
+  r = client.post(f"/api/me/provider-credentials/{provider}/test")
+  assert r.status_code == 200 and r.json() == {"ok": True, "provider": provider, "status": "active"}
+
+
 def test_provider_credentials(client, env):
   r = client.put("/api/me/provider-credentials/OpenAI", json={"api_key": "sk-123456"})
   assert r.status_code == 200 and r.json() == {"provider": "openai", "status": "active", "is_configured": True,

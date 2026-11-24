@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["me-configuration"])
 
-VALID_PROVIDERS = {"openai", "anthropic", "claude", "gemini", "groq"}
+VALID_PROVIDERS = {"openai", "anthropic", "claude", "gemini", "groq", "openrouter", "deepseek"}
 
 
 # ---------------------------------------------------------------------------

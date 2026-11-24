@@ -25,6 +25,8 @@ class AITestConnectionRequest(BaseModel):
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     claude_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    deepseek_api_key: str | None = None
     ollama_base_url: str | None = None
 
 
@@ -38,6 +40,8 @@ def _extract_candidate_api_key(body: AITestConnectionRequest) -> str | None:
         or body.openai_api_key
         or body.gemini_api_key
         or body.claude_api_key
+        or body.openrouter_api_key
+        or body.deepseek_api_key
     )
 
 

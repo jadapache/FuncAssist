@@ -22,6 +22,8 @@ PROVIDER_KEY_MAP = {
   "claude": "claude_api_key",
   "groq": "groq_api_key",
   "gemini": "gemini_api_key",
+  "openrouter": "openrouter_api_key",
+  "deepseek": "deepseek_api_key",
   "transcription_groq": "transcription_groq_api_key",
   "transcription_openai": "transcription_openai_api_key",
 }
