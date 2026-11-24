@@ -197,3 +197,15 @@ def test_personal_access_tokens_are_not_supported():
   assert [m.value for m in integ.get_info().auth_methods] == ["oauth"]
   with pytest.raises(ValueError):
     gl.GitLabIntegration()._headers()
+
+
+@pytest.mark.asyncio
+async def test_files_changed_only_for_enabled_projects(store, monkeypatch):
+  integ = gl.GitLabIntegration()
+  store["gitlab"] = {**CONNECTED, "selected_repos": ["g/p"]}
+  requests = []
+  mock_http(monkeypatch, lambda req: requests.append(req) or httpx.Response(200, json={"changes": []}))
+  for repo in ("other/secret", "g/p/../../x"):
+    with pytest.raises(ValueError, match="not enabled"):
+      await integ.get_files_changed(pr_number=1, repo=repo)
+  assert requests == []

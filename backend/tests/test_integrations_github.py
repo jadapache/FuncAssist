@@ -201,7 +201,7 @@ async def test_files_changed(store, monkeypatch):
   with pytest.raises(ValueError, match="Provide a repo"):
     await integ.get_files_changed(pr_number=1)
 
-  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b"]}
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b", "z/y"]}
   paths = []
 
   def handler(req: httpx.Request):
@@ -220,3 +220,15 @@ def test_personal_access_tokens_are_not_supported():
   assert not hasattr(integ, "connect_with_pat")
   assert not hasattr(AuthMethod, "PERSONAL_ACCESS_TOKEN")
   assert [m.value for m in integ.get_info().auth_methods] == ["oauth"]
+
+
+@pytest.mark.asyncio
+async def test_files_changed_only_for_enabled_repositories(store, monkeypatch):
+  integ = gh.GitHubIntegration()
+  store["github"] = {"auth_method": "oauth", "access_token": "t", "selected_repos": ["a/b"]}
+  requests = []
+  mock_http(monkeypatch, lambda req: requests.append(req) or httpx.Response(200, json=[]))
+  for repo in ("other/private", "a/b/../../../user", "a/b/extra"):
+    with pytest.raises(ValueError, match="not enabled"):
+      await integ.get_files_changed(pr_number=1, repo=repo)
+  assert requests == []  # nothing reached GitHub

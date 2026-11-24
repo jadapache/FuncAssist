@@ -303,9 +303,12 @@ class GitHubIntegration(Integration):
     return results[:max_results]
 
   async def get_files_changed(self, *, pr_number: int, repo: str | None = None) -> list[dict[str, Any]]:
-    target_repo = repo or (self.selected_repos()[0] if self.selected_repos() else None)
+    selected = self.selected_repos()
+    target_repo = repo or (selected[0] if selected else None)
     if not target_repo:
       raise ValueError("Provide a repo or select repositories first.")
+    if target_repo not in selected:
+      raise ValueError("The repository is not enabled by the administrator.")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.get(
