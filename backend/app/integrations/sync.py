@@ -12,14 +12,26 @@ from app.integrations.registry import GIT_HOSTING_IDS, registry
 CACHE_TTL_SECONDS = 3600 * 24  # 24 hours
 
 
+PERSONAL_INTEGRATION_IDS = frozenset({"jira"})
+
+
 def _cache_key(integration_id: str, tenant_or_user_id: str | None = None) -> str:
-  prefix = f"user:{tenant_or_user_id}:" if tenant_or_user_id else "global:"
-  return f"funcassist:sync:{prefix}{integration_id}"
+  """Personal integrations (Jira) are cached per user; organization ones (GitHub, GitLab) are shared."""
+  if integration_id in PERSONAL_INTEGRATION_IDS:
+    if not tenant_or_user_id:
+      raise ValueError(f"{integration_id} is a personal integration: a user is required.")
+    return f"funcassist:sync:user:{tenant_or_user_id}:{integration_id}"
+  return f"funcassist:sync:global:{integration_id}"
 
 
-async def _fetch_integration_payload(integration_id: str) -> dict[str, Any]:
+async def _fetch_integration_payload(integration_id: str, user_id: str | None = None) -> dict[str, Any]:
   integration = registry.get(integration_id)
-  if not await integration.authenticate():
+  if integration_id in PERSONAL_INTEGRATION_IDS:
+    if not user_id:
+      raise ValueError(f"{integration_id} is a personal integration: a user is required.")
+    if not await integration.authenticate(user_id=user_id):  # type: ignore[call-arg]
+      raise ValueError(f"{integration_id} is not connected.")
+  elif not await integration.authenticate():
     raise ValueError(f"{integration_id} is not connected.")
 
   synced_at = datetime.now(timezone.utc).isoformat()
@@ -30,9 +42,9 @@ async def _fetch_integration_payload(integration_id: str) -> dict[str, Any]:
   }
 
   if integration_id == "jira":
-    payload["data"]["issues"] = await integration.get_issues(max_results=50)  # type: ignore[attr-defined]
-    payload["data"]["projects"] = await integration.get_projects()  # type: ignore[attr-defined]
-    payload["data"]["sprints"] = await integration.get_sprints()  # type: ignore[attr-defined]
+    payload["data"]["issues"] = await integration.get_issues(max_results=50, user_id=user_id)  # type: ignore[attr-defined]
+    payload["data"]["projects"] = await integration.get_projects(user_id=user_id)  # type: ignore[attr-defined]
+    payload["data"]["sprints"] = await integration.get_sprints(user_id=user_id)  # type: ignore[attr-defined]
   elif integration_id in GIT_HOSTING_IDS:
     payload["data"]["repositories"] = await integration.get_repositories()  # type: ignore[attr-defined]
     payload["data"]["pull_requests"] = await integration.get_pull_requests(max_results=30)  # type: ignore[attr-defined]
@@ -62,8 +74,8 @@ async def sync_integration(
   user_id: str | None = None,
 ) -> dict[str, Any]:
   """Fetch live integration data and store exclusively in Redis cache."""
-  payload = await _fetch_integration_payload(integration_id)
-  key = _cache_key(integration_id, user_id)
+  key = _cache_key(integration_id, user_id)  # validates that personal integrations have a user
+  payload = await _fetch_integration_payload(integration_id, user_id)
   redis = get_redis_client()
   await redis.set(key, json.dumps(payload, indent=2), ex=CACHE_TTL_SECONDS)
   return payload
