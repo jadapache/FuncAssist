@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
@@ -32,7 +32,14 @@ import {
   SystemConfigProgressBadge,
   type ConfigProgressItem,
 } from '../components/SystemConfigProgressBadge'
-import type { JiraConnectionStatus, McpServerInfo, McpServerPayload } from '../types'
+import type {
+  JiraConnectionStatus,
+  McpAdminServer,
+  McpServerCreatePayload,
+  McpServerInfo,
+  McpServerUpdatePayload,
+  McpToolApprovalInput,
+} from '../types'
 import type { IntegrationInfo } from '../../../types'
 
 type OutletContext = {
@@ -103,6 +110,7 @@ export const ProfilePage = () => {
 
   // MCP Servers State
   const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([])
+  const [adminMcpServers, setAdminMcpServers] = useState<McpAdminServer[]>([])
   const [loadingMcp, setLoadingMcp] = useState(false)
 
   // System Health & Integrations State
@@ -116,6 +124,8 @@ export const ProfilePage = () => {
 
   const activeName = user?.display_name || nameInput
   const activeRole: UserRole = user?.user_role || 'admin'
+  const isAdmin = user?.user_role === 'admin'
+  const mcpServerCount = isAdmin ? adminMcpServers.length : mcpServers.length
   const activeRoleLabel = roleLabels[activeRole] || 'Usuario'
   const memberSince = formatDate(authUser?.created_at)
 
@@ -172,17 +182,20 @@ export const ProfilePage = () => {
     }
   }
 
-  const loadMcpServers = async () => {
+  const loadMcpServers = useCallback(async () => {
     setLoadingMcp(true)
     try {
-      const list = await api.listMcpServers()
-      setMcpServers(list)
+      if (isAdmin) {
+        setAdminMcpServers(await api.adminListMcpServers())
+      } else {
+        setMcpServers(await api.listMcpServers())
+      }
     } catch {
       // Fallback
     } finally {
       setLoadingMcp(false)
     }
-  }
+  }, [isAdmin])
 
   const loadSystemStatus = async () => {
     try {
@@ -207,9 +220,12 @@ export const ProfilePage = () => {
   useEffect(() => {
     void loadProfile()
     void loadJira()
-    void loadMcpServers()
     void loadSystemStatus()
   }, [])
+
+  useEffect(() => {
+    if (user) void loadMcpServers()
+  }, [user, loadMcpServers])
 
   const connectedIntegrationsCount = integrations.filter((item) => item.status === 'connected').length
   const totalIntegrations = integrations.length
@@ -234,11 +250,11 @@ export const ProfilePage = () => {
     {
       id: 'mcp',
       label: 'Servidores MCP',
-      description: mcpServers.length > 0 ? `${mcpServers.length} servidor(es) configurado(s)` : 'Sin servidores MCP registrados',
-      done: mcpServers.length > 0,
+      description: mcpServerCount > 0 ? `${mcpServerCount} servidor(es) disponible(s)` : 'Sin servidores MCP registrados',
+      done: mcpServerCount > 0,
       tabTarget: 'mcp',
     },
-  ], [aiConfigured, configuredAiLabel, jiraStatus, integrations, mcpServers])
+  ], [aiConfigured, configuredAiLabel, jiraStatus, integrations, mcpServerCount])
 
   const readinessScore = useMemo(() => {
     const total = configItems.length
@@ -318,40 +334,56 @@ export const ProfilePage = () => {
     toast.success(successMsg)
   }
 
-  // MCP Actions
-  const handleAddMcpServer = async (payload: McpServerPayload) => {
+  // MCP Actions (administración)
+  const handleAddMcpServer = async (payload: McpServerCreatePayload) => {
     try {
-      await api.createMcpServer(payload)
-      toast.success(`Servidor MCP "${payload.name}" registrado exitosamente.`)
+      await api.adminCreateMcpServer(payload)
+      toast.success(`Servidor MCP "${payload.name}" registrado. Aún no tiene herramientas aprobadas.`)
       await loadMcpServers()
+      return true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar el servidor MCP.')
+      return false
     }
   }
 
-  const handleUpdateMcpServer = async (id: string, payload: Partial<McpServerPayload & { status?: string }>) => {
+  const handleUpdateMcpServer = async (id: string, payload: McpServerUpdatePayload) => {
     try {
-      await api.updateMcpServer(id, payload)
+      await api.adminUpdateMcpServer(id, payload)
       toast.success('Servidor MCP actualizado.')
       await loadMcpServers()
+      return true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al actualizar el servidor MCP.')
+      return false
     }
   }
 
   const handleDeleteMcpServer = async (id: string) => {
     try {
-      await api.deleteMcpServer(id)
-      toast.success('Servidor MCP eliminado de tu cuenta.')
+      await api.adminDeleteMcpServer(id)
+      toast.success('Servidor MCP eliminado.')
       await loadMcpServers()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar el servidor MCP.')
     }
   }
 
+  const handleSetMcpTools = async (id: string, tools: McpToolApprovalInput[]) => {
+    try {
+      await api.adminSetMcpServerTools(id, tools)
+      toast.success('Herramientas del servidor MCP actualizadas.')
+      await loadMcpServers()
+      return true
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al actualizar las herramientas del servidor MCP.')
+      return false
+    }
+  }
+
   const handleTestMcpServer = async (id: string) => {
     try {
-      const res = await api.testMcpServer(id)
+      const res = await api.adminTestMcpServer(id)
       if (res.ok) {
         toast.success('Prueba de conexión exitosa con el servidor MCP.')
       } else {
@@ -384,7 +416,7 @@ export const ProfilePage = () => {
       id: 'mcp' as ProfileTab,
       label: 'Servidores MCP',
       icon: Server,
-      badgeCount: mcpServers.length > 0 ? mcpServers.length : undefined,
+      badgeCount: mcpServerCount > 0 ? mcpServerCount : undefined,
     },
   ]
 
@@ -683,12 +715,15 @@ export const ProfilePage = () => {
       {activeTab === 'mcp' && (
         <div className="space-y-6">
           <MCPServersSection
+            isAdmin={isAdmin}
             servers={mcpServers}
+            adminServers={adminMcpServers}
             loading={loadingMcp}
             onAddServer={handleAddMcpServer}
             onUpdateServer={handleUpdateMcpServer}
             onDeleteServer={handleDeleteMcpServer}
             onTestServer={handleTestMcpServer}
+            onSetTools={handleSetMcpTools}
           />
         </div>
       )}
