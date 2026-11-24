@@ -246,6 +246,11 @@ _TIER_PATTERNS: dict[str, dict[str, tuple[str, ...]]] = {
         "main": (r"^deepseek-chat$",),
         "fast": (r"^deepseek-chat$",),
     },
+    # OpenRouter ids are vendor-prefixed; the `$` anchors skip variants such as `:free` or `:extended`.
+    "openrouter": {
+        "main": (r"llama-3\.3-70b-instruct$",),
+        "fast": (r"llama-3\.1-8b-instruct$",),
+    },
 }
 # Variants that are never a sensible default for chat even if their name matches a pattern.
 _EXCLUDED_VARIANTS = re.compile(
