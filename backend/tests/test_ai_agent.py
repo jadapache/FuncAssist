@@ -31,8 +31,9 @@ async def _collect(gen):
 
 def test_wrap_tool_output_clips_and_marks_untrusted():
   out = agent._wrap_tool_output("t", "x" * (agent.TOOL_RESULT_MAX_CHARS + 10))
-  assert out.startswith('<tool_result name="t">')
-  assert "[...truncado]" in out and "no instrucciones" in out
+  assert out.startswith("<<<DATOS_EXTERNOS id=") and "fuente=tool ref=t>>>" in out
+  assert out.rstrip().endswith(">>>") and "<<<FIN_DATOS_EXTERNOS id=" in out
+  assert "[...truncado]" in out
   assert "[...truncado]" not in agent._wrap_tool_output("t", "short")
 
 

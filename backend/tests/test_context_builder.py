@@ -92,7 +92,9 @@ def test_build_small_context_has_no_truncation():
   result = ContextBuilder.build(params)
   assert result.truncated_sections == []
   assert result.rag_context.startswith("Contexto RAG Relevante:")
-  assert "[1] Doc A (kb):\ntexto uno" in result.rag_context and "[2] Doc B (kb):" in result.rag_context
+  assert "[1] <<<DATOS_EXTERNOS" in result.rag_context and "Doc A\ntexto uno" in result.rag_context
+  assert "[2] <<<DATOS_EXTERNOS" in result.rag_context and "Doc B\ntexto dos" in result.rag_context
+  assert "fuente=knowledge ref=kb>>>" in result.rag_context
   assert result.turn_prompt == "Instrucción del Usuario:\n¿Qué hacer?"
   assert result.estimated_total_tokens > 0
   prompt = result.assemble_prompt()
