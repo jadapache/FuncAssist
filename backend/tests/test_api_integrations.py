@@ -221,7 +221,7 @@ def test_regular_users_can_still_read_organization_integrations(regular_client, 
 
 @pytest.mark.parametrize("iid", ["jira", "github", "gitlab", "nope"])
 def test_pat_endpoint_does_not_exist(client, reg, iid):
-  """SEC-05: personal access tokens are not a supported way to connect."""
+  """Personal access tokens are not a supported way to connect."""
   r = client.post(f"/api/integrations/{iid}/pat", json={"token": "t", "email": "a@b.c", "base_url": "https://x"})
   assert r.status_code in (404, 405)
   assert not any(name == "connect_with_pat" for item in reg.items.values() for name, *_ in item.calls)

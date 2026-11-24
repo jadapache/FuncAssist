@@ -437,7 +437,7 @@ Listar estado de todas las integraciones.
 }
 ```
 
-> No existe un endpoint para conectar con Personal Access Token: los PAT no se admiten en ninguna integración (SEC-05).
+> No existe un endpoint para conectar con Personal Access Token: los PAT no se admiten en ninguna integración.
 
 #### `POST /api/integrations/{id}/oauth/start`
 Iniciar flujo OAuth 2.0 (Jira personal; GitHub y GitLab de organización).

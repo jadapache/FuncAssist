@@ -79,7 +79,7 @@ def test_oauth_scopes_with_extra(monkeypatch):
 
 
 def test_default_oauth_scopes_are_read_only():
-  """SEC-05: least privilege. No default scope may grant write or admin access."""
+  """Least privilege: no default scope may grant write or admin access."""
   for scope in jira.JIRA_OAUTH_SCOPES_CORE:
     assert not scope.startswith(("write:", "manage:", "delete:", "admin:")), scope
   assert all(s.startswith("read:") or s == "offline_access" for s in jira.get_jira_oauth_scopes())
