@@ -39,9 +39,8 @@ class FakeIntegration:
   async def handle_oauth_callback(self, code, state):
     self._maybe("handle_oauth_callback", code, state)
 
-  async def connect_with_pat(self, token, **kw):
-    self._maybe("connect_with_pat", token, **kw)
-    return _info(self.id)
+  def user_id_from_state(self, state):
+    return f"user-of-{state}"
 
   async def authenticate(self, **kw):
     self._maybe("authenticate", **kw)
@@ -140,7 +139,7 @@ def test_list_and_auth_methods(client):
   assert r.status_code == 200
   assert {i["id"] for i in r.json()} == {"jira", "github", "gitlab", "notion"}
   r = client.get("/api/integrations/auth-methods")
-  assert r.status_code == 200 and len(r.json()["methods"]) == 2
+  assert r.status_code == 200 and r.json()["methods"] == ["oauth"]
 
 
 @pytest.mark.parametrize("iid", ["jira", "github", "gitlab"])
@@ -154,6 +153,8 @@ def test_oauth_callbacks(client, reg, iid):
   r = client.get(base, params={"code": "c", "state": "s"})
   assert r.headers["location"].endswith(f"{iid}=connected")
   assert reg.state["sync_calls"][-1][0] == iid
+  # Jira is personal: the sync runs for the user the OAuth state belongs to. GitHub and GitLab are shared.
+  assert reg.state["sync_calls"][-1][1] == ("user-of-s" if iid == "jira" else None)
   reg.items[iid].raise_exc["handle_oauth_callback"] = RuntimeError("bad token")
   r = client.get(base, params={"code": "c", "state": "s"})
   assert "bad%20token" in r.headers["location"]
@@ -180,21 +181,12 @@ def test_start_oauth(client, reg):
   assert client.post("/api/integrations/github/oauth/start").status_code == 400
 
 
-def test_connect_with_pat(client, reg):
-  r = client.post("/api/integrations/jira/pat", json={"token": "t", "email": "a@b.c", "base_url": "https://x"})
-  assert r.status_code == 200 and r.json()["id"] == "jira"
-  assert reg.state["sync_calls"] == [("jira", None)]
-  reg.state["sync_exc"] = RuntimeError("boom")  # swallowed
-  assert client.post("/api/integrations/github/pat", json={"token": "t"}).status_code == 200
-  reg.state["sync_exc"] = None
-  reg.items["gitlab"].auth_ok = False
-  client.post("/api/integrations/gitlab/pat", json={"token": "t"})
-  assert ("gitlab", None) not in reg.state["sync_calls"]
-  assert client.post("/api/integrations/jira/pat", json={"token": ""}).status_code == 422
-  assert client.post("/api/integrations/nope/pat", json={"token": "t"}).status_code == 404
-  reg.items["jira"].raise_exc["connect_with_pat"] = ValueError("bad pat")
-  r = client.post("/api/integrations/jira/pat", json={"token": "t"})
-  assert r.status_code == 400 and r.json()["detail"] == "bad pat"
+@pytest.mark.parametrize("iid", ["jira", "github", "gitlab", "nope"])
+def test_pat_endpoint_does_not_exist(client, reg, iid):
+  """SEC-05: personal access tokens are not a supported way to connect."""
+  r = client.post(f"/api/integrations/{iid}/pat", json={"token": "t", "email": "a@b.c", "base_url": "https://x"})
+  assert r.status_code in (404, 405)
+  assert not any(name == "connect_with_pat" for item in reg.items.values() for name, *_ in item.calls)
 
 
 def test_test_and_disconnect(client, reg):

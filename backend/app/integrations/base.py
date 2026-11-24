@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 class AuthMethod(str, Enum):
   OAUTH = "oauth"
-  PERSONAL_ACCESS_TOKEN = "pat"
 
 
 class ConnectionStatus(str, Enum):
@@ -77,10 +76,6 @@ class Integration(ABC):
 
   @abstractmethod
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    raise NotImplementedError
-
-  @abstractmethod
-  async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
     raise NotImplementedError
 
   @abstractmethod

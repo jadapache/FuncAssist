@@ -421,7 +421,7 @@ Listar estado de todas las integraciones.
       "id": "jira",
       "name": "Jira",
       "status": "connected",
-      "auth_methods": ["oauth", "pat"],
+      "auth_methods": ["oauth"],
       "capabilities": ["get_issues", "get_projects"],
       "account_label": "user@company.com",
       "oauth_configured": true
@@ -430,26 +430,17 @@ Listar estado de todas las integraciones.
       "id": "github",
       "name": "GitHub",
       "status": "not_connected",
-      "auth_methods": ["pat"],
+      "auth_methods": ["oauth"],
       "capabilities": ["get_pull_requests", "get_commits", "get_repositories"]
     }
   ]
 }
 ```
 
-#### `POST /api/integrations/{id}/pat`
-Conectar con Personal Access Token (GitHub, GitLab).
-
-**Request:**
-```json
-{
-  "token": "ghp_...",
-  "selected_repos": ["repo1", "repo2"]
-}
-```
+> No existe un endpoint para conectar con Personal Access Token: los PAT no se admiten en ninguna integración (SEC-05).
 
 #### `POST /api/integrations/{id}/oauth/start`
-Iniciar flujo OAuth 2.0 (Jira).
+Iniciar flujo OAuth 2.0 (Jira personal; GitHub y GitLab de organización).
 
 **Response:**
 ```json

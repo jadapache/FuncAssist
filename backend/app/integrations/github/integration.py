@@ -1,4 +1,4 @@
-"""GitHub integration — OAuth or PAT with repo selection."""
+"""GitHub integration — OAuth with repo selection."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class GitHubIntegration(Integration):
         name=self.name,
         description=self.description,
         status=ConnectionStatus.NOT_CONNECTED,
-        auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
+        auth_methods=[AuthMethod.OAUTH],
         capabilities=self.get_capabilities(),
         oauth_configured=oauth_configured,
       )
@@ -63,7 +63,7 @@ class GitHubIntegration(Integration):
       name=self.name,
       description=self.description,
       status=ConnectionStatus.CONNECTED,
-      auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
+      auth_methods=[AuthMethod.OAUTH],
       capabilities=self.get_capabilities(),
       account_label=data.get("account_login"),
       workspace_label="GitHub",
@@ -77,11 +77,7 @@ class GitHubIntegration(Integration):
   def _is_connected(self, data: dict[str, Any] | None) -> bool:
     if not data:
       return False
-    if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
-      return bool(data.get("pat_token"))
-    if data.get("auth_method") == AuthMethod.OAUTH.value:
-      return bool(data.get("access_token"))
-    return bool(data.get("pat_token") or data.get("access_token"))
+    return data.get("auth_method") == AuthMethod.OAUTH.value and bool(data.get("access_token"))
 
   async def start_oauth(self) -> AuthStartResponse:
     oauth = get_github_oauth_config()
@@ -157,35 +153,6 @@ class GitHubIntegration(Integration):
     save_connection(self.id, payload)
     return self.get_info()
 
-  async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
-    if not token:
-      raise ValueError("GitHub PAT is required.")
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      response = await client.get(
-        f"{API}/user",
-        headers={**HEADERS_BASE, "Authorization": f"Bearer {token}"},
-      )
-      if response.status_code >= 400:
-        raise ValueError(f"GitHub PAT authentication failed ({response.status_code})")
-      user = response.json()
-
-    existing = load_connection(self.id) or {}
-    selected_repos = kwargs.get("selected_repos")
-    if selected_repos is None:
-      selected_repos = existing.get("selected_repos") or []
-
-    payload = {
-      "auth_method": AuthMethod.PERSONAL_ACCESS_TOKEN.value,
-      "pat_token": token,
-      "account_login": user.get("login"),
-      "account_label": user.get("login"),
-      "account_name": user.get("name"),
-      "selected_repos": selected_repos,
-    }
-    save_connection(self.id, payload)
-    return self.get_info()
-
   async def disconnect(self) -> None:
     delete_connection(self.id)
 
@@ -221,8 +188,6 @@ class GitHubIntegration(Integration):
       raise ValueError("GitHub is not connected.")
     if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
       return str(data["access_token"])
-    if data.get("pat_token"):
-      return str(data["pat_token"])
     raise ValueError("GitHub is not connected.")
 
   def _headers(self) -> dict[str, str]:

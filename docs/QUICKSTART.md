@@ -170,17 +170,14 @@ curl -X POST http://127.0.0.1:8000/api/knowledge/retrieve \
 ### Jira
 
 1. Navega a **Configuración** → **Integraciones** → **Jira**
-2. Elige **OAuth** o **PAT**:
-   - **OAuth**: Click en "Conectar" (abre Atlassian login)
-   - **PAT**: Genera token en Jira Cloud Settings → Security → API Tokens, pega en el formulario
-3. Click en "Conectar" y luego "Probar conexión"
+2. Click en "Conectar" (abre el inicio de sesión de Atlassian). La conexión es personal y de solo lectura.
+3. Luego "Probar conexión"
 
 ### GitHub
 
-1. **Configuración** → **Integraciones** → **GitHub**
-2. Genera PAT en GitHub → Settings → Developer Settings → Personal Access Tokens → Tokens (classic)
-3. Scopes mínimos: `repo`, `read:user`
-4. Pega en el formulario y "Conectar"
+1. Un administrador abre **Configuración** → **Integraciones** → **GitHub**
+2. Click en "Conectar" y autoriza con OAuth. La conexión queda disponible para todos los usuarios.
+3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una cuenta de servicio de solo lectura (ver `docs/SECURITY_SEC-04_SEC-05.md`).
 
 ### Ollama (Local, Recomendado para Desarrollo)
 
