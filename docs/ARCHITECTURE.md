@@ -58,7 +58,8 @@ Guía del diseño, patrones y decisiones arquitectónicas de FuncAssist (v0.8.0)
 │ + pgvector   │ │ caché       │ │ Jira · GitHub · GitLab       │
 │ RLS por      │ │ compartida  │ │ LLMs vía LiteLLM: OpenAI,    │
 │ usuario/org  │ │             │ │ Anthropic, Gemini, Groq,     │
-└──────────────┘ └─────────────┘ │ Ollama remoto · Servidores   │
+└──────────────┘ └─────────────┘ │ OpenRouter, DeepSeek,        │
+                                 │ Ollama remoto · Servidores   │
                                  │ MCP                          │
                                  └──────────────────────────────┘
         + Volúmenes de archivos: DATA_DIR (settings, cache, generated,
@@ -135,7 +136,7 @@ FuncAssist sigue un paradigma **Client-First** para la IA local:
    - El backend no descarga, almacena ni ejecuta modelos GGUF, Whisper u ONNX.
 
 2. **Proveedores cloud**
-   - OpenAI, Anthropic, Google Gemini y Groq se invocan desde el backend vía LiteLLM con claves cifradas.
+   - OpenAI, Anthropic, Google Gemini, Groq, OpenRouter y DeepSeek se invocan desde el backend vía LiteLLM con claves cifradas.
    - **Ollama remoto** se trata como API externa por HTTPS. `ai/endpoint_security.py` (y los validadores del frontend) rechazan loopback (`127.0.0.1`, `localhost`, `::1`) e IPs privadas.
    - La transcripción en servidor usa Groq u OpenAI (`features/transcription/whisper_cloud.py`) con fragmentación, recorte de silencios, limpieza de muletillas y diarización de OpenAI cuando hay clave. Detalle en [TRANSCRIPTION_PROCESS.md](./TRANSCRIPTION_PROCESS.md).
 

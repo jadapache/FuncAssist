@@ -226,5 +226,5 @@ FuncAssist utiliza una arquitectura **Client-First** para garantizar privacidad,
 
 - **Redaccion y Chat Local:** Ejecutado en el navegador mediante WebLLM y WebGPU (`@mlc-ai/web-llm`). Compatible con Llama 3.2 y Qwen 2.5, almacenados directamente en la cache del navegador.
 - **Transcripcion de Audio Local:** Ejecutada en el navegador mediante un Web Worker con `@huggingface/transformers` (Whisper ONNX sobre WebGPU/WASM).
-- **APIs Cloud y Ollama Remoto:** Proveedores externos como OpenAI, Anthropic, Google Gemini, Groq y Ollama Remoto (sobre HTTPS publico estricto) son canalizados a traves de la API de backend con LiteLLM.
+- **APIs Cloud y Ollama Remoto:** Proveedores externos como OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, DeepSeek y Ollama Remoto (sobre HTTPS publico estricto) son canalizados a traves de la API de backend con LiteLLM.
 - **Cero Pesos en Servidor:** El backend no ejecuta GGUF ni Whisper en Python. Los directorios legados en disco (`data/models/whisper`, `data/models/builtin`, `~/.cache/whisper`) pueden eliminarse con total seguridad.

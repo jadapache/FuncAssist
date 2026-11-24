@@ -7,6 +7,7 @@ Referencia de `backend/app/ai/**` y del chat agéntico (`/api/doc-agent/agentic-
 | Variable | Valor por defecto | Efecto |
 |---|---|---|
 | `AI_PROVIDER` / `AI_MODEL` | — | Proveedor y modelo principal si el usuario no configuró uno. |
+| `OPENROUTER_API_KEY` / `DEEPSEEK_API_KEY` | — | Claves de OpenRouter y DeepSeek cuando el usuario no guardó una propia. El resto de proveedores usa `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` y `GROQ_API_KEY`. |
 | `AI_FAST_MODEL` | elegido del catálogo | Modelo del tier rápido (planificación, resúmenes, map-reduce). |
 | `AI_FALLBACK_MODELS` | — | Lista separada por comas, máximo 3, del mismo proveedor. Se prueban en orden si el principal falla. |
 | `AI_PROMPT_CACHE` | `on` | `off` desactiva los puntos de caché explícitos (Anthropic). OpenAI, Gemini y DeepSeek cachean el prefijo de forma implícita. |
@@ -84,7 +85,7 @@ Cada petición al chat deja una entrada en `USER_DATA_DIR/ai/logs/AAAA-MM-DD.jso
 
 `python -m scripts.smoke_ai_providers` (desde `backend/`) muestra, sin llamar a ningún proveedor, qué modelo principal y rápido resuelve el catálogo para cada proveedor y avisa si los valores del registro ya no están en el catálogo.
 
-Con `--live` (consume crédito) y las claves configuradas, por proveedor: una llamada del tier rápido (indicando si tuvo que recurrir al modelo principal), un plan por secciones (debe dar `sections > 0`) y, si el modelo admite herramientas, una llamada a herramienta en streaming seguida de la respuesta final. `--providers groq,claude,openai` limita los proveedores y `--user <id>` usa las claves guardadas de ese usuario. Sale con código 1 si alguna comprobación falla.
+Con `--live` (consume crédito) y las claves configuradas, por proveedor: una llamada del tier rápido (indicando si tuvo que recurrir al modelo principal), un plan por secciones (debe dar `sections > 0`) y, si el modelo admite herramientas, una llamada a herramienta en streaming seguida de la respuesta final. `--providers groq,claude,openai` limita los proveedores (también acepta `openrouter` y `deepseek`, que no están en la lista por defecto) y `--user <id>` usa las claves guardadas de ese usuario. Sale con código 1 si alguna comprobación falla.
 
 ## Datos
 
