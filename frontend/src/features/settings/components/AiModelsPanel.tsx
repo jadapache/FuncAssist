@@ -37,6 +37,10 @@ export const AiModelsPanel = () => {
     setOpenaiKey,
     claudeKey,
     setClaudeKey,
+    openrouterKey,
+    setOpenRouterKey,
+    deepseekKey,
+    setDeepSeekKey,
     showKey,
     setShowKey,
     savingAi,
@@ -122,6 +126,10 @@ export const AiModelsPanel = () => {
         setOpenaiKey={setOpenaiKey}
         claudeKey={claudeKey}
         setClaudeKey={setClaudeKey}
+        openrouterKey={openrouterKey}
+        setOpenRouterKey={setOpenRouterKey}
+        deepseekKey={deepseekKey}
+        setDeepSeekKey={setDeepSeekKey}
         showKey={showKey}
         setShowKey={setShowKey}
         savingAi={savingAi}

@@ -163,7 +163,7 @@ export const BuiltinModelsList = ({
             <span>
               Entraste por una dirección http:// de la red ({window.location.host}). En ese caso el navegador desactiva
               WebGPU y los modelos en el navegador no pueden ejecutarse. Pide a TI la dirección HTTPS de la aplicación o
-              elige una API externa (Groq, OpenAI, Gemini, Claude u Ollama Remoto).
+              elige una API externa (Groq, OpenAI, Gemini, Claude, OpenRouter, DeepSeek u Ollama Remoto).
             </span>
           </div>
         </div>
@@ -175,7 +175,7 @@ export const BuiltinModelsList = ({
           <div>
             <span className="font-semibold block">Aceleración WebGPU no detectada</span>
             <span>
-              Tu navegador o hardware no tiene WebGPU activo. Te sugerimos seleccionar una API externa (Groq, OpenAI, Gemini, Claude u Ollama Remoto).
+              Tu navegador o hardware no tiene WebGPU activo. Te sugerimos seleccionar una API externa (Groq, OpenAI, Gemini, Claude, OpenRouter, DeepSeek u Ollama Remoto).
             </span>
           </div>
         </div>
