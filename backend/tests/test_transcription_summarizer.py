@@ -284,7 +284,24 @@ async def test_summarize_llm_failure_status(llm, error, status):
   assert "Error al generar resumen" in exc.value.detail
 
 
-@pytest.mark.xfail(strict=True, reason="Bug: numbered bullets ('1. x') do not match the bullet regex in summarizer.py")
+# --- bullet parsing regressions -----------------------------------------------------------------
+
+
 def test_parse_numbered_bullets():
-  r = parse_summary_markdown_or_json("## Decisiones\n1. Usar Postgres\n2. Migrar")
-  assert r.decisions == ["Usar Postgres", "Migrar"]
+  r = parse_summary_markdown_or_json("## Decisiones\n1. Usar Postgres\n2) Migrar\n10. Cerrar")
+  assert r.decisions == ["Usar Postgres", "Migrar", "Cerrar"]
+
+
+def test_parse_does_not_treat_plain_numbers_as_bullets():
+  r = parse_summary_markdown_or_json("## Decisiones\n2026 será el año\n- Real")
+  assert r.decisions == ["Real"]
+
+
+def test_parse_blank_lines_and_summary_header_switch_back():
+  text = "## Participantes\n- Ana\n\n## Resumen\nTexto del resumen\n- punto suelto\n"
+  r = parse_summary_markdown_or_json(text)
+  assert r.participants == ["Ana"]
+  assert r.key_insights == ["punto suelto"]  # bullets under the summary section are insights
+  assert r.summary_text.startswith("## Participantes")
+
+
