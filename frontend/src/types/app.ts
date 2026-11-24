@@ -1,4 +1,4 @@
-export type AuthMethod = 'oauth' | 'pat' | 'api_key' | 'none'
+export type AuthMethod = 'oauth' | 'api_key' | 'none'
 
 export type IntegrationInfo = {
   id: string

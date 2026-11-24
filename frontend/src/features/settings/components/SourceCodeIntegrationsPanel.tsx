@@ -19,7 +19,7 @@ export const SourceCodeIntegrationsPanel = ({
     handleOAuthConnect,
     handleDisconnect,
     handleTest,
-    handlePatConnected,
+    handleConnected,
     github,
     gitlab,
   } = externalManager || internalManager
@@ -60,7 +60,7 @@ export const SourceCodeIntegrationsPanel = ({
               onOAuth={() => void handleOAuthConnect('github')}
               onDisconnect={() => void handleDisconnect('github')}
               onTest={() => void handleTest('github')}
-              onPatConnected={() => handlePatConnected('github', 'GitHub')}
+              onConnected={() => handleConnected('github', 'GitHub')}
               onOAuthSaved={async () => {
                 await loadIntegrations()
                 toast.success('Credenciales OAuth de GitHub guardadas con éxito.')
@@ -76,7 +76,7 @@ export const SourceCodeIntegrationsPanel = ({
               onOAuth={() => void handleOAuthConnect('gitlab')}
               onDisconnect={() => void handleDisconnect('gitlab')}
               onTest={() => void handleTest('gitlab')}
-              onPatConnected={() => handlePatConnected('gitlab', 'GitLab')}
+              onConnected={() => handleConnected('gitlab', 'GitLab')}
               onOAuthSaved={async () => {
                 await loadIntegrations()
                 toast.success('Credenciales OAuth de GitLab guardadas con éxito.')

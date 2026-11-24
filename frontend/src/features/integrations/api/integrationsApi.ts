@@ -26,16 +26,6 @@ export const integrationsApi = {
       handleResponse<{ authorization_url: string; state: string; auth_method: string }>(r),
     ),
 
-  connectWithPat: (
-    id: string,
-    payload: { token: string; email?: string; base_url?: string; selected_repos?: string[] },
-  ) =>
-    fetch(`${API_BASE}/api/integrations/${id}/pat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify(payload),
-    }).then((r) => handleResponse<IntegrationInfo>(r)),
-
   testIntegration: (id: string) =>
     fetch(`${API_BASE}/api/integrations/${id}/test`, {
       method: 'POST',
@@ -136,13 +126,6 @@ export const integrationsApi = {
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ auth_method: 'oauth' }),
     }).then((r) => handleResponse<{ authorization_url: string; state: string; auth_method: string }>(r)),
-
-  connectUserJiraPat: (payload: { token: string; email?: string; jira_url?: string }) =>
-    fetch(`${API_BASE}/api/me/integrations/jira/connect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ auth_method: 'pat', ...payload }),
-    }).then((r) => handleResponse<{ ok: boolean; status: string }>(r)),
 
   connectJiraOAuth: (payload: { code: string; state: string; redirect_uri?: string }) =>
     fetch(`${API_BASE}/api/me/integrations/jira/connect`, {

@@ -57,7 +57,7 @@ export function useIntegrationsManager(options?: { enabled?: boolean }) {
     handleCallback('gitlab', 'GitLab')
   }, [searchParams, setSearchParams, loadIntegrations, toast])
 
-  const handlePatConnected = async (id: string, label: string) => {
+  const handleConnected = async (id: string, label: string) => {
     try {
       await api.syncIntegration(id)
       toast.success(`${label} conectado. Datos sincronizados.`)
@@ -121,7 +121,7 @@ export function useIntegrationsManager(options?: { enabled?: boolean }) {
     loadingIntegrations,
     busyIntegrationId,
     loadIntegrations,
-    handlePatConnected,
+    handleConnected,
     handleOAuthConnect,
     handleDisconnect,
     handleTest,
