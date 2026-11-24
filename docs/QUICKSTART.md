@@ -38,29 +38,6 @@ Copia el template y edita si es necesario:
 cp .env.example .env
 ```
 
-Contenido por defecto en `.env`:
-
-```env
-# Backend
-FASTAPI_ENV=development
-PMQA_SECRET_KEY=         # (opcional) dejar vacío para usar keyring del sistema
-
-# Frontend
-VITE_API_BASE=http://127.0.0.1:8000
-
-# Integrations (opcional por ahora)
-JIRA_CLIENT_ID=
-JIRA_CLIENT_SECRET=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-
-# AI Provider (deja vacío por ahora, configurable desde UI)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-GROQ_API_KEY=
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-```
-
 > No necesitas credenciales aún. Puedes configurarlas desde la interfaz más adelante.
 
 ### 3. Instalar dependencias del Backend
@@ -158,7 +135,7 @@ curl http://127.0.0.1:8000/api/health
 Respuesta esperada:
 
 ```json
-{"status": "ok", "app": "QA Project MGMT"}
+{"status":"ok","app":"FuncAssist","version":"0.8.0","build":"latest"}
 ```
 
 ### 2. Generar Standup (sin contexto)
@@ -276,14 +253,14 @@ LOGLEVEL=DEBUG python -m uvicorn app.main:app --reload
 
 ## 🐛 Troubleshooting Rápido
 
-### "Port 8000 already in use"
+### "Port 6728 already in use"
 
 ```bash
 # Linux/Mac
 lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill -9
 
 # Windows PowerShell
-Get-Process -Id (Get-NetTCPConnection -LocalPort 8000).OwningProcess | Stop-Process -Force
+Get-Process -Id (Get-NetTCPConnection -LocalPort 6728).OwningProcess | Stop-Process -Force
 ```
 
 Luego re-inicia el backend.
