@@ -7,7 +7,10 @@ and SSRF prevention for remote MCP server endpoints.
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import ipaddress
+import json
 import logging
 import socket
 from typing import Any, Optional
@@ -130,19 +133,50 @@ class SafeMCPHttpClient:
       return response
 
 
+INTEGRATION_PROVIDERS = frozenset({"github", "gitlab", "jira"})
+# Jira connections are personal: the call always runs with the authenticated user's own token.
+PERSONAL_PROVIDERS = frozenset({"jira"})
+# Arguments the caller (ultimately the model) may never choose.
+RESERVED_ARGUMENTS = frozenset({"self", "user_id"})
+_AUDIT = logging.getLogger("funcassist.tool_audit")
+
+
+def _arguments_digest(arguments: Any) -> str:
+  """Stable short hash of the arguments, so the audit log never stores their content."""
+  try:
+    raw = json.dumps(arguments, sort_keys=True, default=str)
+  except (TypeError, ValueError):
+    raw = repr(arguments)
+  return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 class IntegrationToolExecutor:
-  """Safe dispatch and execution adapter for external tools and MCP endpoints."""
+  """Safe dispatch and execution adapter for external tools and MCP endpoints.
+
+  Default deny: a tool runs only when it is in the explicit `allowed_tools` list AND it is one of the
+  adapter's read-only capabilities. Connection management (`connect_*`, `disconnect`, `update_*`,
+  `start_oauth`) is never reachable from here.
+  """
 
   def __init__(self, organization_id: str = "default", user_id: Optional[str] = None):
     self.organization_id = organization_id
     self.user_id = user_id
     self.http_client = SafeMCPHttpClient()
 
-  def can_invoke_tool(self, provider: str, tool_name: str, allowed_tools: list[str]) -> bool:
-    """Check if the given tool is authorized within the integration scope."""
-    if not allowed_tools or "*" in allowed_tools:
-      return True
-    return tool_name in allowed_tools
+  def can_invoke_tool(self, provider: str, tool_name: str, allowed_tools: Optional[list[str]]) -> bool:
+    """An explicit allowlist only: an empty list or a wildcard authorizes nothing."""
+    return bool(allowed_tools) and tool_name in allowed_tools
+
+  def _audit(self, provider: str, tool_name: str, arguments: Any, decision: str, reason: str = "") -> None:
+    _AUDIT.info(
+      "tool_call user=%s org=%s provider=%s tool=%s args=%s decision=%s%s",
+      self.user_id, self.organization_id, provider, tool_name, _arguments_digest(arguments), decision,
+      f" reason={reason}" if reason else "",
+    )
+
+  def _deny(self, provider: str, tool_name: str, arguments: Any, error: str) -> dict[str, Any]:
+    self._audit(provider, tool_name, arguments, "denied", error)
+    return {"ok": False, "error": error}
 
   async def execute_tool(
     self,
@@ -151,48 +185,56 @@ class IntegrationToolExecutor:
     arguments: dict[str, Any],
     allowed_tools: Optional[list[str]] = None,
   ) -> dict[str, Any]:
-    """Execute a validated operation against an integration adapter or MCP server.
+    """Execute a validated read-only operation against an integration adapter.
 
-    Strictly applies tool permission checks, argument validation, and executes without
-    ever returning or leaking internal secrets or credentials to the caller.
+    Never returns or leaks credentials to the caller. Every decision is audited (arguments by hash).
     """
-    allowed = allowed_tools or ["*"]
-    if not self.can_invoke_tool(provider, tool_name, allowed):
-      return {
-        "ok": False,
-        "error": f"Tool '{tool_name}' is not authorized for provider '{provider}'.",
-      }
+    if not self.can_invoke_tool(provider, tool_name, allowed_tools):
+      return self._deny(provider, tool_name, arguments, f"Tool '{tool_name}' is not authorized for provider '{provider}'.")
 
-    # Safe dispatch to known internal adapters (e.g. Jira, GitHub, GitLab)
-    if provider in ("github", "gitlab", "jira"):
-      from app.integrations.registry import registry
-      try:
-        adapter = registry.get(provider)
-        if hasattr(adapter, tool_name):
-          method = getattr(adapter, tool_name)
-          if callable(method):
-            # Pass user_id to Jira methods if applicable
-            call_args = dict(arguments)
-            if provider == "jira" and self.user_id and "user_id" not in call_args:
-              import inspect
-              sig = inspect.signature(method)
-              if "user_id" in sig.parameters:
-                call_args["user_id"] = self.user_id
-
-            res = await method(**call_args)
-            return {"ok": True, "result": res}
-        return {"ok": False, "error": f"Method '{tool_name}' not supported by adapter '{provider}'."}
-      except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-    # Extensible MCP endpoint execution point
     if provider.startswith("mcp:"):
-      return {
-        "ok": False,
-        "error": f"Remote MCP client protocol for '{provider}' is configured but remote session transport is in extension-point mode.",
-      }
+      return self._deny(
+        provider, tool_name, arguments,
+        f"Remote MCP client protocol for '{provider}' is configured but remote session transport is in extension-point mode.",
+      )
 
-    return {
-      "ok": False,
-      "error": f"Provider '{provider}' has no registered execution adapter.",
-    }
+    if provider not in INTEGRATION_PROVIDERS:
+      return self._deny(provider, tool_name, arguments, f"Provider '{provider}' has no registered execution adapter.")
+
+    if not isinstance(arguments, dict):
+      return self._deny(provider, tool_name, arguments, "Tool arguments must be an object.")
+
+    from app.integrations.registry import registry
+
+    try:
+      adapter = registry.get(provider)
+    except KeyError:
+      return self._deny(provider, tool_name, arguments, f"Provider '{provider}' has no registered execution adapter.")
+
+    read_only = {capability.value for capability in adapter.get_capabilities()}
+    method = getattr(adapter, tool_name, None) if tool_name in read_only else None
+    if not callable(method):
+      return self._deny(provider, tool_name, arguments, f"Method '{tool_name}' is not a read-only tool of adapter '{provider}'.")
+
+    signature = inspect.signature(method)
+    accepted = {
+      name for name, param in signature.parameters.items()
+      if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    } - RESERVED_ARGUMENTS
+    rejected = sorted(set(arguments) - accepted)
+    if rejected:
+      return self._deny(provider, tool_name, arguments, f"Argument not allowed for '{tool_name}': {', '.join(rejected)}.")
+
+    call_args = dict(arguments)
+    if provider in PERSONAL_PROVIDERS:
+      if not self.user_id:
+        return self._deny(provider, tool_name, arguments, f"{provider} is a personal integration: a user is required.")
+      call_args["user_id"] = self.user_id  # always the caller; never a value chosen by the model
+
+    try:
+      result = await method(**call_args)
+    except Exception as exc:
+      self._audit(provider, tool_name, arguments, "error", type(exc).__name__)
+      return {"ok": False, "error": str(exc)}
+    self._audit(provider, tool_name, arguments, "allowed")
+    return {"ok": True, "result": result}
