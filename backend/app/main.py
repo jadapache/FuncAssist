@@ -1,10 +1,5 @@
 
 import os
-import sys
-
-if sys.platform == "win32":
-  import asyncio
-  asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Prevent LiteLLM from attempting synchronous remote fetches during startup/imports
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
