@@ -9,10 +9,10 @@ services:
         - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:${APP_VERSION:-latest}
         - ${FRONTEND_IMAGE:-ghcr.io/${GHCR_OWNER:-owner}/funcassist-frontend}:latest
     restart: unless-stopped
-    # HTTPS is enabled when TLS_CERT_DIR contains tls.crt and tls.key (see docs/DEPLOY_HTTPS.md).
-    ports: ["${APP_PORT:-6728}:80", "${APP_HTTPS_PORT:-6729}:443"]
+    # A certificate in TLS_CERT_DIR (tls.crt + tls.key) is mandatory; see docs/DEPLOY_HTTPS.md.
+    ports: ["${APP_PORT:-6728}:443"]
     environment:
-      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-6729}
+      APP_HTTPS_PORT: ${APP_PORT:-6728}
     volumes: ["${TLS_CERT_DIR:-./certs}:/etc/nginx/certs:ro"]
     depends_on:
       backend: { condition: service_healthy }
@@ -30,38 +30,72 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8000
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:6728}
+      FRONTEND_URL: ${FRONTEND_URL:-https://localhost:6728}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       BACKEND_URL: http://backend:8000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-funcassist}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-funcassist}
-      REDIS_URL: redis://redis:6379
-      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
-      PBKDF2_SALT: ${PBKDF2_SALT:?PBKDF2_SALT is required}
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${POSTGRES_USER:-funcassist}
+      DATABASE_NAME: ${POSTGRES_DB:-funcassist}
+      DATABASE_PASSWORD_FILE: /run/secrets/funcassist/postgres_password
+      VALKEY_URL: redis://valkey:6379
+      # Master key and salt are rendered from OpenBao by openbao-agent into a memory-backed volume.
+      SECRET_KEY_FILE: /run/secrets/funcassist/secret_key
+      PBKDF2_SALT_FILE: /run/secrets/funcassist/pbkdf2_salt
       DATA_DIR: /app/data
       KNOWLEDGE_DATA_DIR: /app/knowledge_data
       APP_VERSION: ${APP_VERSION:-latest}
       APP_BUILD_ID: ${APP_BUILD_ID:-}
-    volumes: [funcassist_data:/app/data, funcassist_knowledge:/app/knowledge_data]
+    volumes: [funcassist_data:/app/data, funcassist_knowledge:/app/knowledge_data, funcassist_secrets:/run/secrets/funcassist:ro]
     depends_on:
       db: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      openbao-agent: { condition: service_healthy }
     healthcheck: { test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"], interval: 30s, timeout: 10s, start_period: 60s, retries: 5 }
   db:
-    image: pgvector/pgvector:pg16
+    # PostgreSQL 16.16 + pgvector extension 0.8.7, pinned by digest.
+    image: pgvector/pgvector:0.8.7-pg16-bookworm@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-funcassist}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/funcassist/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-funcassist}
-    volumes: [postgres_data:/var/lib/postgresql/data]
+    volumes: [postgres_data:/var/lib/postgresql/data, funcassist_secrets:/run/secrets/funcassist:ro]
+    depends_on:
+      openbao-agent: { condition: service_healthy }
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"], interval: 10s, timeout: 5s, retries: 5 }
-  redis:
-    image: redis:7-alpine
+  valkey:
+    # Valkey (BSD-3-Clause) replaces Redis, which left the BSD license in 7.4.
+    image: valkey/valkey:8.1.12-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes: [redis_data:/data]
-    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 5s, retries: 5 }
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes: [valkey_data:/data]
+    healthcheck: { test: ["CMD", "valkey-cli", "ping"], interval: 10s, timeout: 5s, retries: 5 }
+  openbao:
+    # Secret manager (MPL-2.0). Not published: reachable only on the internal network.
+    image: openbao/openbao:2.7.3@sha256:ba4b133eb9586630024e71a617e66f37f29cc3534cdd46a6233e098ceded8dc9
+    restart: unless-stopped
+    command: ["server"]
+    volumes: ["./docker/openbao/server.hcl:/openbao/config/server.hcl:ro", "openbao_data:/openbao/file"]
+    # Healthy only when initialized and unsealed (bao status exits 2 while sealed).
+    healthcheck: { test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"], interval: 10s, timeout: 5s, retries: 5 }
+  openbao-agent:
+    image: openbao/openbao:2.7.3@sha256:ba4b133eb9586630024e71a617e66f37f29cc3534cdd46a6233e098ceded8dc9
+    restart: unless-stopped
+    command: ["agent", "-config=/openbao/config/agent.hcl"]
+    volumes:
+      - ./docker/openbao/agent.hcl:/openbao/config/agent.hcl:ro
+      - ./openbao/approle:/openbao/approle:ro
+      - funcassist_secrets:/run/secrets/funcassist
+    depends_on:
+      openbao: { condition: service_healthy }
+    healthcheck: { test: ["CMD-SHELL", "test -s /run/secrets/funcassist/secret_key && test -s /run/secrets/funcassist/pbkdf2_salt"], interval: 10s, timeout: 5s, retries: 10 }
 volumes:
   funcassist_data:
   funcassist_knowledge:
   postgres_data:
-  redis_data:
+  valkey_data:
+  openbao_data:
+  funcassist_secrets:
+    driver: local
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,uid=100,mode=0755" }

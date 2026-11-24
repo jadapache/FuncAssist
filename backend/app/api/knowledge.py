@@ -178,7 +178,7 @@ async def check_integrity() -> dict[str, Any]:
 
 @router.post("/admin/rebuild-index")
 async def rebuild_index() -> dict[str, Any]:
-  """Rebuild the FTS5 inverted index. Use after detecting search anomalies."""
+  """Rebuild the PostgreSQL full-text search index. Use after detecting search anomalies."""
   count = rebuild_fts_index()
   return {"ok": True, "chunks_reindexed": count}
 

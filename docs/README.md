@@ -9,9 +9,9 @@ Bienvenido a la documentación técnica de **FuncAssist**, un asistente local pa
 - **[Backend](./BACKEND.md)** — Módulos Python, endpoints FastAPI, AI engine, integración con servicios externos.
 - **[Frontend](./FRONTEND.md)** — Componentes React, hooks personalizados, gestión de estado, interfaz de usuario.
 - **[API Reference](./API_REFERENCE.md)** — Especificación completa de endpoints REST.
-- [x] **[Base de Conocimiento (SQLite FTS5)](./KNOWLEDGE_BASE_SQLITE_FTS5.md)** — Motor RAG con SQLite FTS5, BM25, soporte de red compartida y migración.
+- [x] **[Base de Conocimiento (PostgreSQL RAG)](./KNOWLEDGE_BASE_POSTGRESQL_RAG.md)** — Motor RAG sobre PostgreSQL (vectorial, full-text y trigramas) y migración.
 - **[CI/CD Pipeline](./CICD_RELEASE_GUIDE.md)** — Pipeline automatizado de GitHub Actions (tests, linting, build frontend y release).
-- **[Database Schema](./DATABASE.md)** — Modelos de datos, tablas SQLite, relaciones.
+- **[Database Schema](./DATABASE.md)** — Modelos de datos, tablas PostgreSQL, relaciones.
 - **[Deployment](./DEPLOYMENT.md)** — Docker, Render.com, configuración de producción.
 - **[Contributing](./CONTRIBUTING.md)** — Guía para contribuidores: convenciones de código, branching, testing.
 - **[Troubleshooting](./TROUBLESHOOTING.md)** — Solución de problemas comunes y FAQ.
@@ -29,7 +29,7 @@ QA Project MGMT es una solución integrada para equipos de QA y Product Manageme
 3. **Análisis de Impacto** — Evalúa el impacto de cambios sobre la arquitectura y estrategia de pruebas.
 4. **QA Features** — Suite de generadores: regression test matrices, casos de API QA, datos de prueba inteligentes.
 5. **Generador de Mejoras Funcionales** — Documento agentic de especificaciones funcionales con edición en tiempo real.
-6. **Base de Conocimiento Local** — Ingesta de PDFs, DOCXs, MDs; RAG con BM25 para consultas grounded.
+6. **Base de Conocimiento Local** — Ingesta de PDFs, DOCXs, MDs; RAG sobre PostgreSQL para consultas grounded.
 7. **Integración Multiproveedor** — Jira (OAuth + PAT), GitHub (PAT), GitLab (Token), con sincronización de caché.
 8. **AI Multiproveedor** — Ollama local, OpenAI, Anthropic Claude, con fallback dinámico.
 
@@ -40,9 +40,9 @@ QA Project MGMT es una solución integrada para equipos de QA y Product Manageme
 | Capa | Tecnología |
 |------|-----------|
 | **Frontend** | React 19, TypeScript 6, Vite 8, Tailwind CSS 4, React Router 7 |
-| **Backend** | Python 3.11+, FastAPI, Pydantic, SQLite con aiosqlite |
+| **Backend** | Python 3.11+, FastAPI, Pydantic, PostgreSQL con SQLAlchemy 2 (async) y psycopg 3 |
 | **AI** | LiteLLM (multi-provider), Ollama (local), OpenAI, Anthropic |
-| **RAG** | BM25 (rank-bm25), ingesta de documentos (pypdf, python-docx) |
+| **RAG** | PostgreSQL (pgvector, full-text, pg_trgm), ingesta de documentos (pypdf, python-docx) |
 | **Deployment** | Docker, Render.com, HTTPS ready |
 
 ---

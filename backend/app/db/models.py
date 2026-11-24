@@ -719,7 +719,7 @@ class AITemplateVersionModel(Base):
 # Record fields kept inside `metadata_json` and exposed at the top level of the record dict.
 TRANSCRIPTION_RECORD_META_KEYS = (
   "speakers", "diarization", "cleanup", "silence_trimmed_s", "summary_status", "source",
-  "turn_gap_s", "error", "retryable", "provider", "model", "job_options", "summary_error",
+  "turn_gap_s", "error", "retryable", "provider", "model", "job_options", "summary_error", "consent",
 )
 
 

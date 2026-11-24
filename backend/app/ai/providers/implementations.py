@@ -14,6 +14,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 import litellm
 
+from app.ai.dlp import enforce_cloud_policy
 from app.ai.errors import AIError
 from app.ai.providers.base import AICompletion, AIMessage, AIProvider, ToolCall
 from app.ai.providers.registry import (
@@ -337,6 +338,9 @@ class LiteLLMProvider(AIProvider):
       logger.info("Tool calling support unknown for %s (%s); using the plain route", formatted, exc)
       return False
 
+  def _is_on_premise(self) -> bool:
+    return self.spec.is_local or self.spec.id in {"ollama", "local", "ollama_remote"} or "ollama" in self.spec.aliases
+
   def _retries(self) -> int:
     try:
       return max(0, int(os.getenv("AI_NUM_RETRIES", "2")))
@@ -425,6 +429,11 @@ class LiteLLMProvider(AIProvider):
       kwargs["api_base"] = self.base_url
 
     kwargs.update(extra)
+
+    # PRI-06: on-premise engines (Ollama) receive the context as is; cloud providers only get
+    # sanitized, non-confidential content.
+    if not self._is_on_premise():
+      kwargs["messages"] = enforce_cloud_policy(kwargs["messages"], self.spec.name)
 
     if self.spec.id in _EXPLICIT_CACHE_PROVIDERS and self.spec.supports_prompt_cache and _prompt_cache_enabled():
       apply_cache_breakpoints(kwargs["messages"])

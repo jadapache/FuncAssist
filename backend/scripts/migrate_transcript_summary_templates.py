@@ -41,7 +41,7 @@ def migrate_schema_and_templates() -> None:
         db.execute(text(alter_sql))
         db.commit()
       except Exception as exc:
-        logger.debug("Schema migration skipped or not supported (e.g. SQLite): %s", exc)
+        logger.debug("Schema migration skipped or not supported: %s", exc)
 
     # 2. Delete legacy default templates
     legacy_ids = ["prompt:transcript_summary", "rubric:transcript_summary"]

@@ -160,3 +160,5 @@ class SubmitClientTranscriptionRequest(BaseModel):
   generate_summary_now: bool = True
   # "browser": segments carry speaker ids from in-browser diarization (S1, S2…); otherwise one speaker.
   diarization: Optional[Literal["browser", "none"]] = None
+  # PRI-04 (Ley 1581 de 2012): participants authorized the recording and its processing.
+  consent_confirmed: bool = False

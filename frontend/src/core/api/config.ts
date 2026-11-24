@@ -1,18 +1,8 @@
-import { AUTH_TOKEN_KEY } from '../../constants/app'
-
 export const API_BASE =
-  import.meta.env.VITE_API_BASE !== undefined
-    ? import.meta.env.VITE_API_BASE
-    : import.meta.env.DEV
-      ? 'http://127.0.0.1:6728'
-      : ''
+  import.meta.env.VITE_API_BASE !== undefined ? import.meta.env.VITE_API_BASE : ''
 
-export const getAuthToken = (): string | null => {
-  return localStorage.getItem(AUTH_TOKEN_KEY)
-}
-
-export const getAuthHeaders = (): Record<string, string> => {
-  const token = getAuthToken()
-
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
+/**
+ * Session JWT lives in an HttpOnly cookie set by the backend; JavaScript never reads
+ * it. Same-origin requests (Nginx in production, the Vite proxy in development) send it.
+ */
+export const getAuthHeaders = (): Record<string, string> => ({})

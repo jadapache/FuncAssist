@@ -199,7 +199,7 @@ export const LoginPage: React.FC = () => {
           trimmedFullName,
           role,
         )
-        if (res.status === 'approved' && res.token) {
+        if (res.status === 'approved') {
           toast.success('¡Cuenta de Administrador creada y aprobada!', 'Bienvenido')
           navigate('/', { replace: true })
         } else {

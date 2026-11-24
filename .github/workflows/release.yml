@@ -44,8 +44,8 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-frontend:latest
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
-          provenance: false
-          sbom: false
+          provenance: true
+          sbom: true
       - name: Build and publish backend image
         uses: docker/build-push-action@v6
         with:
@@ -57,16 +57,27 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-backend:latest
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
-          provenance: false
-          sbom: false
+          provenance: true
+          sbom: true
       - name: Package source code
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
           git archive --format=zip --prefix="funcassist-${VERSION}/" --output="SourceCode.zip" HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate SBOM (CycloneDX, DEP-04)
+        run: |
+          pip install cyclonedx-bom==9.0.0
+          cyclonedx-py requirements backend/requirements.txt --of JSON -o sbom-backend.cdx.json
+          npx --yes @cyclonedx/cyclonedx-npm@7.0.1 --package-lock-only --omit dev --output-file sbom-frontend.cdx.json frontend/package.json
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: SourceCode.zip
+          files: |
+            SourceCode.zip
+            sbom-backend.cdx.json
+            sbom-frontend.cdx.json
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

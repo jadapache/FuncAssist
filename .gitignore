@@ -59,6 +59,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+openbao/approle/
+openbao-init.txt
 
 # Node.js / JavaScript
 node_modules/
@@ -136,9 +138,6 @@ local/media/**
 local/transcriptions/**
 !local/transcriptions/.gitkeep
 
-# Legacy & reference folders
-_legacy_archive/
-pm_qa_copilot/
 
 
 
@@ -155,3 +154,4 @@ certs/
 
 # Claude Project Skills
 .claude/skills/*
+

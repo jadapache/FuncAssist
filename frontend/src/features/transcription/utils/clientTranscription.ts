@@ -26,9 +26,9 @@ export interface BrowserTranscriptionOptions {
   language?: string
   modelId?: string
   signal: AbortSignal
-  /** Identify speakers in the browser (pyannote + WeSpeaker in the worker). */
   diarize?: boolean
   numSpeakers?: number | null
+  consentConfirmed: boolean
   onStage: (update: BrowserStageUpdate) => void
   onSegments: (segments: TranscriptionSegment[]) => void
   /** Non-fatal problems, e.g. speakers could not be identified. */
@@ -69,10 +69,14 @@ export async function runBrowserTranscription(options: BrowserTranscriptionOptio
     signal,
     diarize = false,
     numSpeakers = null,
+    consentConfirmed,
     onStage,
     onSegments,
     onWarning,
   } = options
+  if (!consentConfirmed) {
+    throw new Error('Debes confirmar la autorización de los participantes (Ley 1581 de 2012) antes de transcribir.')
+  }
 
   onStage({ stage: 'decoding', stageProgress: 0, message: 'Preparando el audio…' })
   const { samples, duration } = await decodeMediaFile(file, {
@@ -112,6 +116,7 @@ export async function runBrowserTranscription(options: BrowserTranscriptionOptio
     language: result.language,
     generate_summary_now: false,
     diarization: result.diarization,
+    consent_confirmed: consentConfirmed,
   })
   if (!response?.ok || !response.transcription) {
     throw new Error('No se pudo registrar la transcripción en la plataforma.')

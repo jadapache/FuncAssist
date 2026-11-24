@@ -170,7 +170,11 @@ def apply_speaker_edits(
   changes: dict[str, str] = {}
   for item in merge or []:
     changes.update(merge_speakers(record, str(item.get("from") or ""), str(item.get("into") or "")))
-  changes.update(rename_speakers(record, rename or {}))
+  renamed = rename_speakers(record, rename or {})
+  # A speaker merged into one that is then renamed must end with the final name too.
+  for old, new in list(changes.items()):
+    changes[old] = renamed.get(new, new)
+  changes.update(renamed)
   return _sync(record, changes)
 
 

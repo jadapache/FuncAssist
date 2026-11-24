@@ -1,60 +1,36 @@
 """Organization integrations persistence (Jira, GitHub, GitLab, etc.).
 
-Handles organization-level OAuth configuration and access secrets with Fernet encryption.
+Handles organization-level OAuth configuration and access secrets with AES-256-GCM encryption.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import logging
-import os
 import uuid
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.exceptions import InvalidTag
 from sqlalchemy import select
 
-from app.core.settings import get_settings
+from app.core.secrets import decrypt_bytes, encrypt_bytes
 from app.core.storage_cache import _CACHE_CONNECTIONS, make_conn_cache_key
 from app.db.repositories.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
 
 
-def _derive_fernet_key(secret: str) -> bytes:
-  digest = hashlib.sha256(secret.encode("utf-8")).digest()
-  return base64.urlsafe_b64encode(digest)
-
-
-def _resolve_secret() -> str:
-  settings = get_settings()
-  secret = settings.secret_key or os.getenv("SECRET_KEY")
-  if secret and secret.strip():
-    return secret.strip()
-
-  raise RuntimeError(
-    "SECRET_KEY environment variable is required for application storage and encryption. "
-    "Please define SECRET_KEY in your .env or container environment."
-  )
-
-
-def _fernet() -> Fernet:
-  return Fernet(_derive_fernet_key(_resolve_secret()))
-
-
 def save_connection(integration_id: str, payload: dict[str, Any], org_id: str = "default") -> None:
   """Save encrypted connection payload to organization_integrations table."""
   raw = json.dumps(payload, indent=2).encode("utf-8")
-  encrypted = _fernet().encrypt(raw)
+  encrypted = encrypt_bytes(raw)
   cache_key = make_conn_cache_key(org_id, integration_id)
   _CACHE_CONNECTIONS[cache_key] = encrypted
 
   try:
     from app.db.unit_of_work import SyncUnitOfWork
     with SyncUnitOfWork() as uow:
-      enc_str = encrypted.decode("ascii")
+      enc_str = encrypted
       uow.integrations.save_organization_integration(
         organization_id=org_id,
         provider=integration_id,
@@ -72,14 +48,14 @@ def save_connection(integration_id: str, payload: dict[str, Any], org_id: str = 
 def load_connection(integration_id: str, org_id: str = "default") -> dict[str, Any] | None:
   """Load encrypted connection payload from organization_integrations table."""
   cache_key = make_conn_cache_key(org_id, integration_id)
-  encrypted: bytes | None = _CACHE_CONNECTIONS.get(cache_key)
+  encrypted: str | None = _CACHE_CONNECTIONS.get(cache_key)
 
   try:
     from app.db.unit_of_work import SyncUnitOfWork
     with SyncUnitOfWork() as uow:
       item = uow.integrations.get_organization_integration(org_id, integration_id)
       if item and item.get("client_secret_ref"):
-        encrypted = item["client_secret_ref"].encode("ascii")
+        encrypted = item["client_secret_ref"]
         _CACHE_CONNECTIONS[cache_key] = encrypted
       elif item is None:
         # If DB explicitly has no record, invalidate cache
@@ -92,9 +68,9 @@ def load_connection(integration_id: str, org_id: str = "default") -> dict[str, A
     return None
 
   try:
-    decrypted = _fernet().decrypt(encrypted)
+    decrypted = decrypt_bytes(encrypted)
     return json.loads(decrypted.decode("utf-8"))
-  except (InvalidToken, json.JSONDecodeError, OSError) as exc:
+  except (InvalidTag, ValueError, json.JSONDecodeError) as exc:
     logger.warning("Decryption failed for integration %s: %s", integration_id, exc)
     return None
 

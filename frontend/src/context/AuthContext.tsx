@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { api, type AuthUser } from '../api/client'
-import { AUTH_TOKEN_KEY } from '../constants/app'
 
 type AuthContextType = {
   user: AuthUser | null
@@ -15,7 +14,7 @@ type AuthContextType = {
     email?: string,
     fullName?: string,
     role?: string,
-  ) => Promise<{ status?: string; message?: string; token?: string; user?: AuthUser }>
+  ) => Promise<{ status?: string; message?: string; user?: AuthUser }>
   logout: () => void
   clearError: () => void
   updateUser: (user: AuthUser) => void
@@ -25,23 +24,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(AUTH_TOKEN_KEY))
+  const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const initAuth = async () => {
-      const storedToken = localStorage.getItem(AUTH_TOKEN_KEY)
-      if (!storedToken) {
-        setIsLoading(false)
-        return
-      }
       try {
         const res = await api.getMe()
         setUser(res.user)
-        setToken(storedToken)
+        setToken('cookie')
       } catch {
-        localStorage.removeItem(AUTH_TOKEN_KEY)
         setToken(null)
         setUser(null)
       } finally {
@@ -56,9 +49,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setError(null)
     try {
       const res = await api.login({ username, password })
-      if (res.token) {
-        localStorage.setItem(AUTH_TOKEN_KEY, res.token)
-        setToken(res.token)
+      if (res.status === 'approved' && res.user) {
+        setToken('cookie')
         setUser(res.user)
       }
     } catch (err: unknown) {
@@ -87,9 +79,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         full_name: fullName,
         role: role || 'user',
       })
-      if (res.token && res.user) {
-        localStorage.setItem(AUTH_TOKEN_KEY, res.token)
-        setToken(res.token)
+      if (res.status === 'approved' && res.user) {
+        setToken('cookie')
         setUser(res.user)
       }
       return res
@@ -103,7 +94,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }
 
   const logout = () => {
-    localStorage.removeItem(AUTH_TOKEN_KEY)
+    void api.logout().catch(() => undefined)
+    try {
+      localStorage.removeItem('funcassist_auth_token')
+    } catch {
+    }
     setToken(null)
     setUser(null)
   }

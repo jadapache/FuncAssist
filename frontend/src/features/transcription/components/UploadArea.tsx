@@ -53,6 +53,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
   const [numSpeakers, setNumSpeakers] = useState('')
   const [vocabulary, setVocabulary] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [consent, setConsent] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handlePickerClick = () => {
@@ -98,19 +99,21 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
     setDiarize(defaultDiarize)
     setNumSpeakers('')
     setVocabulary('')
+    setConsent(false)
     setValidationError(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedFile) return
+    if (!selectedFile || !consent) return
     const finalTitle = title.trim() || cleanTitleFromFilename(selectedFile.name)
     const speakers = Number.parseInt(numSpeakers, 10)
     await onUpload(selectedFile, finalTitle, description, {
       diarize,
       numSpeakers: diarize && speakers >= 1 && speakers <= MAX_SPEAKERS ? speakers : null,
       vocabulary: vocabulary.trim() || undefined,
+      consentConfirmed: consent,
     })
   }
 
@@ -304,6 +307,21 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
               </div>
             )}
 
+            <label className="flex items-start gap-2 px-3.5 py-2.5 rounded-xl bg-amber-50/70 border border-amber-200 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                disabled={isUploading}
+                className="mt-0.5"
+              />
+              <span>
+                Confirmo que todos los participantes fueron informados y autorizaron previamente la grabación y el
+                tratamiento de sus datos personales (voz y nombre) conforme a la Ley 1581 de 2012. El archivo no contiene
+                datos de pacientes.
+              </span>
+            </label>
+
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -316,7 +334,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({
 
               <button
                 type="submit"
-                disabled={isUploading || !title.trim()}
+                disabled={isUploading || !title.trim() || !consent}
                 className="btn-primary px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 text-xs shadow-md shadow-blue-900/10 cursor-pointer disabled:opacity-50"
               >
                 <Sparkles className={`h-4 w-4 ${isUploading ? 'animate-spin' : ''}`} />

@@ -237,10 +237,7 @@ local/
 │   └── logs/                 # Auditoría de llamadas AI (JSON)
 ├── connections/              # Credenciales encriptadas por servicio
 ├── knowledge/
-│   ├── documents.json        # Índice de documentos cargados
-│   ├── chunks.json           # Chunks de texto indexados con BM25
 │   └── uploads/              # Archivos originales cargados
-└── database.db               # SQLite con usuarios, chats, standups
 ```
 
 No commitees `local/` — está en `.gitignore`.
@@ -334,13 +331,14 @@ npm install
 
 ```bash
 # Reset total (borra base de datos y archivos locales)
-rm -rf backend/database.db local/
+rm -rf local/
+docker compose down -v  # borra el volumen de PostgreSQL
 
 # Rebuild frontend
 cd frontend && npm run build
 
-# Ver logs del DB (SQLite)
-sqlite3 backend/database.db ".schema"
+# Ver esquema de la base de datos (PostgreSQL)
+docker compose exec db psql -U funcassist -d funcassist -c "\dt"
 
 # Exportar prompt actual
 curl http://127.0.0.1:8000/api/ai/prompts/standup | jq .

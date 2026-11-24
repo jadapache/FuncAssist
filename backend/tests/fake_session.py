@@ -1,11 +1,12 @@
 """In-memory SQLAlchemy Fake Sessions for testing PostgreSQL ORM queries.
 
-Zero SQLite dependencies - operates strictly as an in-memory double of SQLAlchemy AsyncSession/Session.
+Operates strictly as an in-memory double of SQLAlchemy AsyncSession/Session.
 """
 
 from __future__ import annotations
 
 import copy
+from sqlalchemy.sql import operators
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, List, Optional, Type
@@ -198,7 +199,7 @@ def _eval_statement(stmt: Any, storage: FakeStorage) -> FakeResult:
       if col is None:
         col = oc
       col_name = getattr(col, "key", getattr(col, "name", None))
-      is_desc = getattr(oc, "modifier", None) is not None or "desc" in str(oc).lower()
+      is_desc = getattr(oc, "modifier", None) is operators.desc_op
       if col_name:
         filtered.sort(
           key=lambda x: (getattr(x, col_name) is None, getattr(x, col_name)),

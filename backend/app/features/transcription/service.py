@@ -177,6 +177,7 @@ async def submit_client_transcription(payload: dict[str, Any], user: dict[str, A
     "turn_gap_s": config.turn_gap_s(),
     "error": None,
     "error_code": None,
+    "consent": payload.get("consent"),
   }
   normalize_record(record)
   record["text"] = full_text(record["segments"]) or (payload.get("text") or "")

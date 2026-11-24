@@ -18,7 +18,7 @@ export type * from '../features/settings/types'
 export type * from '../features/document/types'
 export type * from '../features/transcription/api/transcriptionApi'
 
-export { API_BASE, getAuthHeaders, getAuthToken } from '../core/api/config'
+export { API_BASE, getAuthHeaders } from '../core/api/config'
 
 export type AuthUser = {
   id: string

@@ -1,4 +1,4 @@
-"""Unit and integration tests for PostgreSQL RAG Knowledge Base (pure PostgreSQL, no SQLite)."""
+"""Unit and integration tests for PostgreSQL RAG Knowledge Base."""
 
 import re
 import unicodedata
@@ -136,6 +136,17 @@ class FakePGCursor:
           words = re.findall(r"\w+", term_clean)
           if any(w in c_clean for w in words):
             matched.append({**c, "score": 0.85})
+        self._last_result = matched
+        return
+
+      if "word_similarity" in q:
+        # Trigram fallback: case-insensitive substring match
+        terms = [str((p or {}).get("query", "")).lower()]
+        matched = [
+          {**c, "score": 0.5}
+          for c in self.storage["chunks"]
+          if any(t and t in c["text"].lower() for t in terms)
+        ]
         self._last_result = matched
         return
 

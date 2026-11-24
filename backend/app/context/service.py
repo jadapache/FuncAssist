@@ -203,7 +203,7 @@ async def assemble_context(
       else:
         missing.append("knowledge (no matching chunks)")
 
-  # Prefer higher BM25 scores first, then live items
+  # Prefer higher relevance scores first, then live items
   chunks.sort(key=lambda item: item.score if item.score is not None else 0.0, reverse=True)
   return ContextBundle(
     query=query,

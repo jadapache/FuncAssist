@@ -76,7 +76,7 @@ La documentación técnica completa está disponible en **[`docs/`](./docs/)**:
 |------|-----------|---------|
 | **Frontend** | React, TypeScript, Vite, Tailwind CSS v4, React Router | 19 / 6 / 8 / 4 / 7 |
 | **Backend** | Python, FastAPI, Pydantic | 3.11+ / 0.111+ / 2.8+ |
-| **IA & RAG** | WebLLM (Browser WebGPU), Transformers.js (Browser ASR), LiteLLM (Cloud), BM25 | Modern Client-First |
+| **IA & RAG** | WebLLM (Browser WebGPU), Transformers.js (Browser ASR), LiteLLM (Cloud), PostgreSQL (pgvector + full-text + pg_trgm) | Modern Client-First |
 | **Almacenamiento** | Local JSON (`app.json`), Fernet encryption, local history | JSON-only |
 | **Seguridad & Acceso** | Rol de usuario local (`admin`, `pm`, `funcional`, `dev`, `qa`), cryptography, keyring | 44+ / 25.6+ |
 
@@ -97,7 +97,7 @@ FuncAssist/
 │   ├── app/
 │   │   ├── ai/             # Motor LLM multiproveedor, prompts, templates, logging
 │   │   ├── api/            # Routers FastAPI (auth, features, knowledge, doc-agent, integrations)
-│   │   ├── context/        # RAG: ingesta, BM25, ensamblaje de contexto
+│   │   ├── context/        # RAG: ingesta, búsqueda en PostgreSQL, ensamblaje de contexto
 │   │   ├── core/           # Settings, security, secrets (Fernet), storage
 │   │   ├── db/             # Repository pattern, interfaces, SQLAlchemy ORM, PostgreSQL
 │   │   ├── features/       # Servicios (standup, mejoras funcionales)
@@ -157,7 +157,7 @@ FuncAssist/
 ### 📚 Base de Conocimiento RAG Local
 
 - **Ingesta Multi-formato**: Soporta PDF, DOCX, Markdown, TXT
-- **Búsqueda BM25**: Ranking rápido e interpretable sin dependencias de LLMs
+- **Búsqueda híbrida en PostgreSQL**: vectorial (pgvector), full-text en español y trigramas (pg_trgm) para siglas e identificadores
 - **Chat Grounded**: Consultas conversacionales fundamentadas en documentación cargada
 - **Zero-shot Offline**: Funciona completamente sin conexión a internet (con Ollama local)
 

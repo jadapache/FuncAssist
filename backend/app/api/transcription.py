@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import asyncio
 import logging
 import re
@@ -97,6 +99,24 @@ async def _write_limited(upload: UploadFile, dest: Path, limit: int) -> int:
   return size
 
 
+def _require_consent(confirmed: bool) -> None:
+  """PRI-04 (Ley 1581 de 2012): recordings need the participants' prior, informed consent."""
+  if not confirmed:
+    raise HTTPException(
+      status_code=400,
+      detail="Debes confirmar que los participantes autorizaron la grabación y su tratamiento (Ley 1581 de 2012).",
+    )
+
+
+def _consent_record(current_user: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "confirmed": True,
+    "confirmed_by": current_user.get("username"),
+    "confirmed_at": datetime.now(timezone.utc).isoformat(),
+    "legal_basis": "Ley 1581 de 2012 - autorización previa e informada",
+  }
+
+
 # --- upload and jobs ---------------------------------------------------------------------------
 
 
@@ -106,9 +126,15 @@ async def upload_transcription_media(
   title: str = Form(""),
   description: str = Form(""),
   transcription_id: Optional[str] = Form(None),
+  consent_confirmed: bool = Form(False),
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-  """Stream the media file to disk (size-limited) and create the transcription record."""
+  """Stream the media file to disk (size-limited) and create the transcription record.
+
+  The uploader must confirm that every participant gave prior, informed consent to the recording and its processing. 
+  The confirmation is stored with the record.
+  """
+  _require_consent(consent_confirmed)
   tid = _new_id(transcription_id)
   existing = await records.get_record(tid)
   if existing is not None:
@@ -118,7 +144,9 @@ async def upload_transcription_media(
     entry = await storage.save_upload(file, tid, title or file.filename or "Reunión", description)
   except TranscriptionJobError as exc:
     raise _http_error(exc) from exc
-  await records.save_record(service.media_entry_for_upload(entry, current_user))
+  record = service.media_entry_for_upload(entry, current_user)
+  record["consent"] = _consent_record(current_user)
+  await records.save_record(record)
   return {
     "ok": True,
     "media_id": tid,
@@ -217,8 +245,11 @@ async def submit_client_transcription(
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
   """Persist a transcript decoded in the browser (rule cleanup applied here)."""
+  _require_consent(req.consent_confirmed)
+  payload = req.model_dump(exclude={"consent_confirmed"})
+  payload["consent"] = _consent_record(current_user)
   try:
-    saved, summary = await service.submit_client_transcription(req.model_dump(), current_user)
+    saved, summary = await service.submit_client_transcription(payload, current_user)
   except TranscriptionJobError as exc:
     raise _http_error(exc) from exc
   saved.pop("user_id", None)
@@ -390,12 +421,12 @@ async def extract_audio_endpoint(background_tasks: BackgroundTasks, file: Upload
   try:
     await _write_limited(file, temp_input, config.max_upload_bytes())
     result_path = await asyncio.to_thread(_process_audio_extraction, temp_input, temp_output)
+  except FFmpegError as exc:  # before HTTPException: FFmpegError is an HTTPException subclass
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    raise HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}") from exc
   except HTTPException:
     shutil.rmtree(temp_dir, ignore_errors=True)
     raise
-  except FFmpegError as exc:
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    raise HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}") from exc
   except Exception as exc:
     shutil.rmtree(temp_dir, ignore_errors=True)
     err_str = str(exc)
