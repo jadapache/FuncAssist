@@ -34,6 +34,15 @@ def test_inspect_rejects_traversal_out_of_root(local_root, tmp_path):
   assert res["ok"] is False and res["exists"] is False
 
 
+def test_inspect_rejects_inconsistent_root_match(monkeypatch, tmp_path):
+  """Defense in depth: the guard next to the file access holds even if the resolver misbehaves."""
+  f = tmp_path / "a.mp3"
+  f.write_bytes(b"x")
+  monkeypatch.setattr(local_picker, "match_local_root", lambda raw: (str(f), str(tmp_path / "other") + "/"))
+  res = local_picker.inspect_local_file(str(f))
+  assert res == {"ok": False, "exists": False, "error": "Ruta local no permitida."}
+
+
 def test_inspect_rejects_when_no_roots_configured(monkeypatch, tmp_path):
   monkeypatch.delenv("TRANSCRIPTION_LOCAL_ROOTS", raising=False)
   f = tmp_path / "a.mp3"
