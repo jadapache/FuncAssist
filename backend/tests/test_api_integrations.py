@@ -181,6 +181,44 @@ def test_start_oauth(client, reg):
   assert client.post("/api/integrations/github/oauth/start").status_code == 400
 
 
+@pytest.fixture
+def regular_client(client):
+  """The same app, but the caller is a regular user instead of an administrator."""
+  from app.api.deps import get_current_user
+
+  client.app.dependency_overrides[get_current_user] = lambda: {"id": "regular-user", "role": "user"}
+  return client
+
+
+@pytest.mark.parametrize("iid", ["github", "gitlab", "notion"])
+def test_organization_integrations_require_an_administrator(regular_client, reg, iid):
+  assert regular_client.post(f"/api/integrations/{iid}/oauth/start").status_code == 403
+  assert regular_client.post(f"/api/integrations/{iid}/disconnect").status_code == 403
+  if iid != "notion":
+    assert regular_client.put(f"/api/integrations/{iid}/repositories", json={"selected_repos": ["a/b"]}).status_code == 403
+  # nothing reached the adapter
+  assert reg.items[iid].calls == []
+
+
+@pytest.mark.parametrize("iid", ["github", "gitlab"])
+def test_administrators_manage_organization_integrations(client, reg, iid):
+  assert client.post(f"/api/integrations/{iid}/oauth/start").status_code == 200
+  assert client.put(f"/api/integrations/{iid}/repositories", json={"selected_repos": ["a/b"]}).status_code == 200
+  assert client.post(f"/api/integrations/{iid}/disconnect").status_code == 200
+
+
+def test_regular_users_connect_their_own_jira(regular_client, reg):
+  assert regular_client.post("/api/integrations/jira/oauth/start").status_code == 200
+  assert reg.items["jira"].calls[-1][2] == {"user_id": "regular-user"}
+  assert regular_client.post("/api/integrations/jira/disconnect").status_code == 200
+
+
+def test_regular_users_can_still_read_organization_integrations(regular_client, reg):
+  assert regular_client.get("/api/integrations/github").status_code == 200
+  assert regular_client.get("/api/integrations/github/repositories").status_code == 200
+  assert regular_client.post("/api/integrations/github/test").status_code == 200
+
+
 @pytest.mark.parametrize("iid", ["jira", "github", "gitlab", "nope"])
 def test_pat_endpoint_does_not_exist(client, reg, iid):
   """SEC-05: personal access tokens are not a supported way to connect."""

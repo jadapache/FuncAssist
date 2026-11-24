@@ -16,6 +16,16 @@ router = APIRouter(
 )
 
 
+# Jira connections belong to each user. Every other integration is shared by the whole organization,
+# so only an administrator may connect, disconnect or change what it exposes.
+PERSONAL_INTEGRATIONS = frozenset({"jira"})
+
+
+def _require_admin_for_organization(integration_id: str, current_user: dict) -> None:
+  if integration_id not in PERSONAL_INTEGRATIONS and current_user.get("role") != "admin":
+    raise HTTPException(status_code=403, detail="Acceso restringido a administradores.")
+
+
 def _require_git_hosting(integration_id: str):
   if integration_id not in GIT_HOSTING_IDS:
     raise HTTPException(
@@ -123,6 +133,7 @@ async def start_oauth(
   integration_id: str,
   current_user: dict = Depends(get_current_user),
 ) -> dict:
+  _require_admin_for_organization(integration_id, current_user)
   try:
     integration = registry.get(integration_id)
     user_id = current_user["id"]
@@ -159,6 +170,7 @@ async def disconnect_integration(
   integration_id: str,
   current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
+  _require_admin_for_organization(integration_id, current_user)
   try:
     integration = registry.get(integration_id)
     user_id = current_user["id"]
@@ -296,7 +308,12 @@ async def get_repositories(integration_id: str) -> dict:
 
 
 @router.put("/{integration_id}/repositories", response_model=IntegrationInfo)
-async def update_repositories(integration_id: str, body: SelectedReposRequest) -> IntegrationInfo:
+async def update_repositories(
+  integration_id: str,
+  body: SelectedReposRequest,
+  current_user: dict = Depends(get_current_user),
+) -> IntegrationInfo:
+  _require_admin_for_organization(integration_id, current_user)
   try:
     integration = _require_git_hosting(integration_id)
     info = await integration.update_selected_repos(body.selected_repos)  # type: ignore[attr-defined]
