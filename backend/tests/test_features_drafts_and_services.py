@@ -16,7 +16,6 @@ def drafts_dir(tmp_path, monkeypatch):
   drafts = tmp_path / "Borradores"
   monkeypatch.setattr(ds, "USER_DRAFTS_DIR", drafts)
   monkeypatch.setattr(ds, "GENERATED_DIR", tmp_path / "generated")
-  monkeypatch.setattr(ds, "GENERATED_INDEX_FILE", tmp_path / "generated" / "index.json")
   monkeypatch.setattr(ds, "ensure_local_dirs", lambda: None)
   return drafts
 
@@ -137,7 +136,6 @@ def test_list_get_delete_roundtrip(drafts_dir):
   assert all_ids == ["id-b-00000", "id-a-00000", "id-c-00000"]  # sorted desc
   assert [i["id"] for i in ds.list_generated_drafts(user_id="u1")] == ["id-a-00000", "id-c-00000"]
   assert [i["id"] for i in ds.list_generated_drafts(specification="qa_analysis")] == ["id-b-00000"]
-  assert ds._load_generated_index() == ds._load_index_with_fs_sync()
 
   got = ds.get_generated_draft("id-a-00000")
   assert got["details"]["title"] == "A"
@@ -153,25 +151,6 @@ def test_list_get_delete_roundtrip(drafts_dir):
   assert a["id"] and b["id"]
 
 
-
-
-def test_save_generated_index_removes_legacy_file(drafts_dir, tmp_path, monkeypatch):
-  legacy = tmp_path / "generated" / "index.json"
-  legacy.parent.mkdir(parents=True)
-  legacy.write_text("[]")
-  ds._save_generated_index([])
-  assert not legacy.exists()
-  ds._save_generated_index([])  # no file: no-op
-
-  class Boom:
-    def exists(self):
-      return True
-
-    def unlink(self):
-      raise OSError("locked")
-
-  monkeypatch.setattr(ds, "GENERATED_INDEX_FILE", Boom())
-  ds._save_generated_index([])  # swallowed
 
 
 # --- thin service wrappers -------------------------------------------------

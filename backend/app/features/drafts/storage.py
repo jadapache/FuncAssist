@@ -7,13 +7,10 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from app.core.settings import (
   GENERATED_DIR,
-  GENERATED_INDEX_FILE,
-  USER_DATA_DIR,
-  USER_DOCUMENTS_DIR,
   USER_DRAFTS_DIR,
   ensure_local_dirs,
 )
@@ -59,47 +56,37 @@ def ensure_draft_dirs() -> None:
   GENERATED_DIR.mkdir(parents=True, exist_ok=True)
   USER_DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
   for spec in VALID_SPECS:
-    (USER_DRAFTS_DIR / spec).mkdir(parents=True, exist_ok=True)
+    (USER_DRAFTS_DIR / spec).mkdir(exist_ok=True)
+
+
+def _draft_folders() -> Iterator[Path]:
+  """Every folder inside a specification folder; loose files at either level are ignored."""
+  for spec_dir in USER_DRAFTS_DIR.iterdir():
+    if spec_dir.is_dir():
+      yield from (draft_dir for draft_dir in spec_dir.iterdir() if draft_dir.is_dir())
+
+
+def _read_metadata(draft_dir: Path) -> Optional[Dict[str, Any]]:
+  """The draft's metadata with its folder path, or None when the file is missing, unreadable or has no id."""
+  meta_file = draft_dir / "metadata.json"
+  if not meta_file.exists():
+    return None
+  try:
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+  except Exception:
+    return None
+  if not isinstance(meta, dict) or "id" not in meta:
+    return None
+  meta["folder_path"] = str(draft_dir)
+  return meta
 
 
 def _scan_drafts_from_disk() -> List[Dict[str, Any]]:
   """Scans metadata.json files directly from user documents Borradores folder."""
   ensure_draft_dirs()
-  items: List[Dict[str, Any]] = []
-  if not USER_DRAFTS_DIR.exists():
-    return items
-
-  for spec_dir in USER_DRAFTS_DIR.iterdir():
-    if not spec_dir.is_dir():
-      continue
-    for draft_dir in spec_dir.iterdir():
-      if not draft_dir.is_dir():
-        continue
-      meta_file = draft_dir / "metadata.json"
-      if meta_file.exists():
-        try:
-          meta = json.loads(meta_file.read_text(encoding="utf-8"))
-          if isinstance(meta, dict) and "id" in meta:
-            meta["folder_path"] = str(draft_dir)
-            items.append(meta)
-        except Exception:
-          pass
-
+  items = [meta for meta in map(_read_metadata, _draft_folders()) if meta]
   items.sort(key=lambda x: x.get("last_interaction", x.get("updated_at", "")), reverse=True)
   return items
-
-
-def _load_generated_index() -> List[Dict[str, Any]]:
-  return _scan_drafts_from_disk()
-
-
-def _save_generated_index(items: List[Dict[str, Any]]) -> None:
-  # Deprecated: index files in AppData are no longer written
-  if GENERATED_INDEX_FILE.exists():
-    try:
-      GENERATED_INDEX_FILE.unlink()
-    except Exception:
-      pass
 
 
 def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any]]) -> str:
@@ -122,6 +109,62 @@ def _format_chat_as_markdown(title: str, spec: str, messages: List[Dict[str, Any
   return "\n".join(lines)
 
 
+def _build_docx(content: str, title: str) -> bytes:
+  from app.features.levantamiento.docx_builder import create_levantamiento_docx
+  return create_levantamiento_docx(content, title=title)
+
+
+def _build_xlsx(content: str, title: str) -> bytes:
+  from app.features.inventario.xlsx_builder import create_inventario_xlsx
+  return create_inventario_xlsx(content, title=title)
+
+
+_BINARY_BUILDERS: Dict[str, Callable[[str, str], bytes]] = {"docx": _build_docx, "xlsx": _build_xlsx}
+
+
+def _save_artifact(draft_folder: Path, art: Dict[str, Any]) -> Dict[str, Any]:
+  """Writes the markdown source of an artifact and, for docx and xlsx, the binary file next to it."""
+  art_title = art.get("title") or "Documento"
+  art_ext = (art.get("extension") or "docx").lower()
+  art_content = art.get("content", "")
+  safe_title = sanitize_folder_name(art_title)
+
+  md_path = draft_folder / f"{safe_title}.md"
+  md_path.write_text(art_content, encoding="utf-8")
+
+  target_file_path = str(md_path)
+  build = _BINARY_BUILDERS.get(art_ext)
+  if build:
+    try:
+      binary_path = draft_folder / f"{safe_title}.{art_ext}"
+      binary_path.write_bytes(build(art_content, art_title))
+      target_file_path = str(binary_path)
+    except Exception as exc:
+      logger.warning(f"Could not build {art_ext.upper()} for {art_title}: {exc}")
+
+  return {
+    "id": art.get("id", str(uuid.uuid4())),
+    "title": art_title,
+    "extension": art_ext,
+    "path": target_file_path,
+    "md_path": str(md_path),
+    "created_at": art.get("createdAt", ""),
+    "updated_at": art.get("updatedAt", ""),
+  }
+
+
+def _save_standalone_document(draft_folder: Path, safe_name: str, title: str, content: str) -> Dict[str, Any]:
+  doc_path = draft_folder / f"{safe_name}.md"
+  doc_path.write_text(content, encoding="utf-8")
+  return {
+    "id": str(uuid.uuid4()),
+    "title": title,
+    "extension": "md",
+    "path": str(doc_path),
+    "md_path": str(doc_path),
+  }
+
+
 def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
   """Persist a chat session and its generated artifacts into Documents/FuncAssist/Borradores/{Specification}/."""
   ensure_draft_dirs()
@@ -134,81 +177,27 @@ def save_draft_session(session_data: Dict[str, Any]) -> Dict[str, Any]:
   doc_content = session_data.get("documentContent", "")
 
   safe_name = sanitize_folder_name(title)
-  folder_name = f"{safe_name}_{session_id[:8]}"
-  draft_folder = USER_DRAFTS_DIR / spec / folder_name
+  draft_folder = USER_DRAFTS_DIR / spec / f"{safe_name}_{session_id[:8]}"
   draft_folder.mkdir(parents=True, exist_ok=True)
 
-  # 1. Save chat.json and human-readable chat.md
-  chat_json_path = draft_folder / "chat.json"
-  chat_json_path.write_text(json.dumps({
+  chat = {
     "id": session_id,
     "title": title,
     "specification": spec,
     "last_interaction": last_interaction,
     "messages": messages,
     "documentContent": doc_content,
-  }, indent=2, ensure_ascii=False), encoding="utf-8")
+  }
+  (draft_folder / "chat.json").write_text(json.dumps(chat, indent=2, ensure_ascii=False), encoding="utf-8")
+  (draft_folder / "chat.md").write_text(_format_chat_as_markdown(title, spec, messages), encoding="utf-8")
 
-  chat_md_path = draft_folder / "chat.md"
-  chat_md_content = _format_chat_as_markdown(title, spec, messages)
-  chat_md_path.write_text(chat_md_content, encoding="utf-8")
-
-  # 2. Save document/artifacts
-  saved_artifact_meta = []
   if artifacts:
-    for art in artifacts:
-      art_title = art.get("title") or "Documento"
-      art_ext = (art.get("extension") or "docx").lower()
-      art_content = art.get("content", "")
-      safe_art_title = sanitize_folder_name(art_title)
-
-      # Write markdown source
-      md_path = draft_folder / f"{safe_art_title}.md"
-      md_path.write_text(art_content, encoding="utf-8")
-
-      target_file_path = str(md_path)
-      # If binary format like docx or xlsx, generate binary file alongside .md
-      if art_ext == "docx":
-        try:
-          from app.features.levantamiento.docx_builder import create_levantamiento_docx
-          docx_bytes = create_levantamiento_docx(art_content, title=art_title)
-          docx_path = draft_folder / f"{safe_art_title}.docx"
-          docx_path.write_bytes(docx_bytes)
-          target_file_path = str(docx_path)
-        except Exception as exc:
-          logger.warning(f"Could not build DOCX for {art_title}: {exc}")
-      elif art_ext == "xlsx":
-        try:
-          from app.features.inventario.xlsx_builder import create_inventario_xlsx
-          xlsx_bytes = create_inventario_xlsx(art_content, title=art_title)
-          xlsx_path = draft_folder / f"{safe_art_title}.xlsx"
-          xlsx_path.write_bytes(xlsx_bytes)
-          target_file_path = str(xlsx_path)
-        except Exception as exc:
-          logger.warning(f"Could not build XLSX for {art_title}: {exc}")
-
-      saved_artifact_meta.append({
-        "id": art.get("id", str(uuid.uuid4())),
-        "title": art_title,
-        "extension": art_ext,
-        "path": target_file_path,
-        "md_path": str(md_path),
-        "created_at": art.get("createdAt", ""),
-        "updated_at": art.get("updatedAt", ""),
-      })
+    saved_artifact_meta = [_save_artifact(draft_folder, art) for art in artifacts]
   elif doc_content:
-    # Save standalone documentContent
-    doc_path = draft_folder / f"{safe_name}.md"
-    doc_path.write_text(doc_content, encoding="utf-8")
-    saved_artifact_meta.append({
-      "id": str(uuid.uuid4()),
-      "title": title,
-      "extension": "md",
-      "path": str(doc_path),
-      "md_path": str(doc_path),
-    })
+    saved_artifact_meta = [_save_standalone_document(draft_folder, safe_name, title, doc_content)]
+  else:
+    saved_artifact_meta = []
 
-  # 3. Save metadata.json in the draft subfolder
   meta_entry = {
     "id": session_id,
     "user_id": session_data.get("user_id"),
@@ -238,10 +227,6 @@ def list_generated_drafts(
   return items
 
 
-def _load_index_with_fs_sync() -> List[Dict[str, Any]]:
-  return _scan_drafts_from_disk()
-
-
 def get_generated_draft(draft_id: str) -> Optional[Dict[str, Any]]:
   items = _scan_drafts_from_disk()
   for item in items:
@@ -261,11 +246,7 @@ def get_generated_draft(draft_id: str) -> Optional[Dict[str, Any]]:
 def delete_generated_draft(draft_id: str) -> bool:
   items = _scan_drafts_from_disk()
   target = next((item for item in items if item.get("id") == draft_id), None)
-  if target:
-    folder_str = target.get("folder_path")
-    if folder_str:
-      folder = Path(folder_str)
-      if folder.exists() and folder.is_dir():
-        shutil.rmtree(folder, ignore_errors=True)
-    return True
-  return False
+  if not target:
+    return False
+  shutil.rmtree(target["folder_path"], ignore_errors=True)
+  return True
