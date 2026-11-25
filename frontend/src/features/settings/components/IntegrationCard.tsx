@@ -1,23 +1,18 @@
-import { useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { IntegrationInfo } from '../../../types'
 import { GitHostingReposPanel } from '../../../features/integrations'
-import { JiraIssuesPreview } from '../../../features/integrations'
-import { JiraOAuthSetup } from '../../../features/integrations'
-import { JiraProjectsPanel } from '../../../features/integrations'
-import { GitOAuthSetup as OAuthSetup } from '../../../features/integrations'
 import { StatusPill } from './StatusPill'
 import { ServiceAccountForm } from './ServiceAccountForm'
 import { ServiceAccountStatus } from './ServiceAccountStatus'
+import { GitHubAppForm } from './GitHubAppForm'
+import { GitHubAppStatus } from './GitHubAppStatus'
 
 export type IntegrationCardProps = {
   integration: IntegrationInfo
   busy: boolean
-  onOAuth: () => void
   onDisconnect: () => void
   onTest: () => void
   onConnected: () => Promise<void>
-  onOAuthSaved: () => Promise<void>
   onError: (message: string) => void
   /** Organization integrations (GitHub, GitLab) can only be managed by an administrator. */
   canManage?: boolean
@@ -26,19 +21,15 @@ export type IntegrationCardProps = {
 export const IntegrationCard = ({
   integration,
   busy,
-  onOAuth,
   onDisconnect,
   onTest,
   onConnected,
-  onOAuthSaved,
   onError,
   canManage = true,
 }: IntegrationCardProps) => {
   const connected = integration.status === 'connected'
-  const [showConnectForm, setShowConnectForm] = useState(false)
-  // Jira connections are personal, so every user manages their own.
-  const manageable = canManage || integration.id === 'jira'
   const isGitlab = integration.id === 'gitlab'
+  const isGithub = integration.id === 'github'
   const isServiceAccount = integration.details?.auth_method === 'service_account'
 
   return (
@@ -61,31 +52,18 @@ export const IntegrationCard = ({
           ) : null}
           {isGitlab && isServiceAccount ? (
             <ServiceAccountStatus integration={integration} />
+          ) : isGithub && isServiceAccount ? (
+            <GitHubAppStatus integration={integration} />
           ) : integration.account_label ? (
             <p>
               <span className="font-semibold text-slate-500">Cuenta vinculada: </span>
               <span className="font-medium text-slate-800">{integration.account_label}</span>
             </p>
           ) : null}
-          {isGitlab && isServiceAccount ? null : integration.details?.auth_method ? (
-            <p>
-              <span className="font-semibold text-slate-500">Método de autenticación: </span>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 uppercase">
-                {String(integration.details.auth_method)}
-              </span>
-            </p>
-          ) : null}
         </div>
       ) : null}
 
-      {isGitlab && connected && !isServiceAccount ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Esta conexión usa la autorización personal de quien la hizo. Sustitúyela por una cuenta de
-          servicio de solo lectura.
-        </p>
-      ) : null}
-
-      {!manageable ? (
+      {!canManage ? (
         <p className="text-xs text-[var(--color-ink-muted)]">
           {connected
             ? 'Esta integración es de la organización y la gestiona un administrador.'
@@ -93,64 +71,31 @@ export const IntegrationCard = ({
         </p>
       ) : null}
 
-      <div className={manageable ? 'flex flex-wrap gap-3' : 'hidden'}>
-        {connected ? (
-          <>
-            <button
-              type="button"
-              onClick={onTest}
-              disabled={busy}
-              className="btn-primary text-xs py-2 px-4 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-              aria-label={`Probar conexión ${integration.name}`}
-            >
-              {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
-              <span>Probar conexión</span>
-            </button>
-            <button
-              type="button"
-              onClick={onDisconnect}
-              disabled={busy}
-              className="rounded-lg border border-[var(--color-bad)] px-4 py-2 text-xs font-semibold text-[var(--color-bad)] hover:bg-red-50 disabled:opacity-50 transition cursor-pointer"
-              aria-label={`Desconectar ${integration.name}`}
-            >
-              Desconectar
-            </button>
-            {isGitlab ? null : (
-              <button
-                type="button"
-                onClick={() => setShowConnectForm(true)}
-                disabled={busy}
-                className="btn-secondary text-xs py-2 px-4 disabled:opacity-50 cursor-pointer"
-                aria-label={`Cambiar cuenta ${integration.name}`}
-              >
-                Cambiar cuenta
-              </button>
-            )}
-          </>
-        ) : isGitlab ? null : (
+      {canManage && connected ? (
+        <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={() => setShowConnectForm(true)}
-            className="btn-primary text-xs py-2.5 px-5 cursor-pointer"
-            aria-label={`Conectar ${integration.name}`}
+            onClick={onTest}
+            disabled={busy}
+            className="btn-primary text-xs py-2 px-4 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+            aria-label={`Probar conexión ${integration.name}`}
           >
-            Conectar {integration.name}
+            {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : null}
+            <span>Probar conexión</span>
           </button>
-        )}
-      </div>
-
-      {connected && integration.id === 'jira' ? (
-        <div className="pt-2 border-t border-[var(--color-border)] space-y-4">
-          <JiraProjectsPanel
-            siteUrl={integration.workspace_label}
-            onSaved={() => void onConnected()}
-            onError={onError}
-          />
-          <JiraIssuesPreview onError={onError} />
+          <button
+            type="button"
+            onClick={onDisconnect}
+            disabled={busy}
+            className="rounded-lg border border-[var(--color-bad)] px-4 py-2 text-xs font-semibold text-[var(--color-bad)] hover:bg-red-50 disabled:opacity-50 transition cursor-pointer"
+            aria-label={`Desconectar ${integration.name}`}
+          >
+            Desconectar
+          </button>
         </div>
       ) : null}
 
-      {manageable && connected && integration.id === 'github' ? (
+      {canManage && connected && isGithub ? (
         <div className="pt-2 border-t border-[var(--color-border)]">
           <GitHostingReposPanel
             integrationId="github"
@@ -162,7 +107,7 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
-      {manageable && connected && integration.id === 'gitlab' ? (
+      {canManage && connected && isGitlab ? (
         <div className="pt-2 border-t border-[var(--color-border)]">
           <GitHostingReposPanel
             integrationId="gitlab"
@@ -174,57 +119,15 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
-      {manageable && isGitlab ? (
-        <div className="pt-2 border-t border-[var(--color-border)] space-y-4">
+      {canManage && isGitlab ? (
+        <div className="pt-2 border-t border-[var(--color-border)]">
           <ServiceAccountForm onConnected={onConnected} onError={onError} />
-          <details className="text-xs">
-            <summary className="cursor-pointer font-semibold text-[var(--color-ink-muted)]">
-              Usar OAuth (no recomendado)
-            </summary>
-            <div className="mt-4">
-              <OAuthSetup
-                provider="gitlab"
-                title="GitLab OAuth"
-                docsUrl="https://gitlab.com/-/user_settings/applications"
-                docsLabel="gitlab.com user applications"
-                defaultRedirect="http://127.0.0.1:6728/api/integrations/gitlab/callback"
-                showBaseUrl
-                onSaved={onOAuthSaved}
-                onContinueOAuth={onOAuth}
-              />
-            </div>
-          </details>
         </div>
       ) : null}
 
-      {manageable && integration.id === 'github' ? (
-        <p className="text-xs text-[var(--color-ink-muted)]">
-          GitHub requerirá una GitHub App con permisos de solo lectura; aún no está disponible.
-        </p>
-      ) : null}
-
-      {manageable && showConnectForm ? (
-        <div className="mt-6 border-t border-[var(--color-border)] pt-5 space-y-4">
-          <div className="mt-4">
-            {integration.id === 'jira' ? (
-              <JiraOAuthSetup
-                onSaved={onOAuthSaved}
-                onContinueOAuth={onOAuth}
-                onCancel={() => setShowConnectForm(false)}
-              />
-            ) : integration.id === 'github' ? (
-              <OAuthSetup
-                provider="github"
-                title="GitHub OAuth"
-                docsUrl="https://github.com/settings/developers"
-                docsLabel="github.com/settings/developers"
-                defaultRedirect="http://127.0.0.1:6728/api/integrations/github/callback"
-                onSaved={onOAuthSaved}
-                onContinueOAuth={onOAuth}
-                onCancel={() => setShowConnectForm(false)}
-              />
-            ) : null}
-          </div>
+      {canManage && isGithub ? (
+        <div className="pt-2 border-t border-[var(--color-border)]">
+          <GitHubAppForm onConnected={onConnected} onError={onError} />
         </div>
       ) : null}
     </article>

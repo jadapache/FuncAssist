@@ -32,10 +32,10 @@ export function useIntegrationsManager(options?: { enabled?: boolean }) {
     void loadIntegrations()
   }, [loadIntegrations, isEnabled])
 
-  // OAuth callbacks listener
+  // Jira OAuth callback listener (GitHub and GitLab no longer use redirects)
   useEffect(() => {
     if (!isEnabled) return
-    const handleCallback = (key: 'jira' | 'github' | 'gitlab', label: string) => {
+    const handleCallback = (key: 'jira', label: string) => {
       const status = searchParams.get(key)
       const rawMessage = searchParams.get('message')
       if (status === 'connected') {
@@ -44,17 +44,11 @@ export function useIntegrationsManager(options?: { enabled?: boolean }) {
         void loadIntegrations()
       } else if (status === 'error') {
         const decoded = rawMessage ? decodeURIComponent(rawMessage) : `Error en OAuth de ${label}.`
-        const err =
-          key === 'jira'
-            ? `${decoded} Si Atlassian mostró "Something went wrong" al aceptar, verifica los permisos en la consola de desarrollador de Atlassian o conéctate con Personal Access Token.`
-            : decoded
-        toast.error(err)
+        toast.error(`${decoded} Si Atlassian mostró "Something went wrong" al aceptar, verifica los permisos en la consola de desarrollador de Atlassian.`)
         setSearchParams({ tab: 'integrations' }, { replace: true })
       }
     }
     handleCallback('jira', 'Jira')
-    handleCallback('github', 'GitHub')
-    handleCallback('gitlab', 'GitLab')
   }, [searchParams, setSearchParams, loadIntegrations, toast])
 
   const handleConnected = async (id: string, label: string) => {

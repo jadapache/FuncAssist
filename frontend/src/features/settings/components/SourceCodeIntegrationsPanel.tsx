@@ -18,7 +18,6 @@ export const SourceCodeIntegrationsPanel = ({
     loadingIntegrations,
     loadIntegrations,
     busyIntegrationId,
-    handleOAuthConnect,
     handleDisconnect,
     handleTest,
     handleConnected,
@@ -60,14 +59,9 @@ export const SourceCodeIntegrationsPanel = ({
               integration={github}
               busy={busyIntegrationId === 'github'}
               canManage={isAdmin}
-              onOAuth={() => void handleOAuthConnect('github')}
               onDisconnect={() => void handleDisconnect('github')}
               onTest={() => void handleTest('github')}
               onConnected={() => handleConnected('github', 'GitHub')}
-              onOAuthSaved={async () => {
-                await loadIntegrations()
-                toast.success('Credenciales OAuth de GitHub guardadas con éxito.')
-              }}
               onError={(err) => toast.error(err)}
             />
           ) : null}
@@ -77,14 +71,9 @@ export const SourceCodeIntegrationsPanel = ({
               integration={gitlab}
               busy={busyIntegrationId === 'gitlab'}
               canManage={isAdmin}
-              onOAuth={() => void handleOAuthConnect('gitlab')}
               onDisconnect={() => void handleDisconnect('gitlab')}
               onTest={() => void handleTest('gitlab')}
               onConnected={() => handleConnected('gitlab', 'GitLab')}
-              onOAuthSaved={async () => {
-                await loadIntegrations()
-                toast.success('Credenciales OAuth de GitLab guardadas con éxito.')
-              }}
               onError={(err) => toast.error(err)}
             />
           ) : null}
