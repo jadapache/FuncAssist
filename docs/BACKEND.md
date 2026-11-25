@@ -454,6 +454,33 @@ Iniciar flujo OAuth 2.0 (Jira personal; GitHub y GitLab de organización).
 #### `GET /api/integrations/{id}/oauth/callback`
 Receiver para redirect de OAuth (internal, llamado por navegador).
 
+#### `POST /api/integrations/{id}/service-account`
+Solo administradores. Conecta la organización con un token de bot de solo lectura (GitLab). Responde 501 para GitHub (requiere una GitHub App) y para Jira (cada usuario conecta la suya por OAuth).
+
+**Request:**
+```json
+{
+  "token": "glpat-...",
+  "base_url": "https://gitlab.example.com",
+  "selected_repos": ["grupo/proyecto"]
+}
+```
+
+Antes de guardar nada se comprueba que el token esté activo, no haya caducado y tenga solo los permisos `read_api` (obligatorio), `read_repository` y `read_user`; cualquier permiso de escritura o administración se rechaza con 400. `POST /api/integrations/{id}/test` repite la comprobación y devuelve alcances, caducidad y días restantes. Conectar, desconectar y elegir repositorios de GitHub y GitLab exigen rol de administrador.
+
+#### Servidores MCP (administradores)
+
+| Método | Ruta | Uso |
+|---|---|---|
+| `GET` | `/api/mcp-servers` | Lista los servidores con sus herramientas y aprobaciones |
+| `POST` | `/api/mcp-servers` | Registra un servidor; nace sin ninguna herramienta aprobada |
+| `PATCH` | `/api/mcp-servers/{id}` | Edita; cambiar el endpoint borra las aprobaciones |
+| `DELETE` | `/api/mcp-servers/{id}` | Elimina el servidor |
+| `PUT` | `/api/mcp-servers/{id}/tools` | Aprueba o revoca herramientas (`name`, `description`, `input_schema`, `read_only`, `approved`) |
+| `POST` | `/api/mcp-servers/{id}/test` | Comprueba el endpoint |
+
+`GET /api/me/mcp-servers` devuelve a los usuarios solo los servidores habilitados y sus herramientas aprobadas, sin endpoint ni credenciales. Cada aprobación queda fijada a un hash del nombre, la descripción y el esquema revisados: si el servidor los cambia, la herramienta deja de estar autorizada hasta que se apruebe de nuevo. Las herramientas que no son de solo lectura exigen la confirmación del usuario en cada ejecución.
+
 #### `POST /api/integrations/{id}/test`
 Probar conexión.
 
