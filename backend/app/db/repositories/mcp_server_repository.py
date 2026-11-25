@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.interfaces.mcp_server_repository import IMcpServerRepository
 from app.db.models import McpServerModel
-from app.integrations.mcp_policy import approved_names, normalize_tools
+from app.integrations.mcp_policy import approved_names, normalize_domains, normalize_tools
 
 
 class McpServerRepository(IMcpServerRepository):
@@ -25,6 +25,14 @@ class McpServerRepository(IMcpServerRepository):
       raw = []
     return normalize_tools(raw)
 
+  @staticmethod
+  def _metadata(model: McpServerModel) -> Dict[str, Any]:
+    try:
+      meta = json.loads(model.metadata_json) if model.metadata_json else {}
+    except (TypeError, ValueError):
+      meta = {}
+    return meta if isinstance(meta, dict) else {}
+
   def _to_dto(self, model: McpServerModel) -> Dict[str, Any]:
     tools = self._tools(model)
     return {
@@ -38,6 +46,7 @@ class McpServerRepository(IMcpServerRepository):
       "status": model.status,
       "tools": tools,
       "allowed_tools": approved_names(tools),
+      "allowed_domains": list(self._metadata(model).get("allowed_domains") or []),
       "created_at": model.created_at.isoformat() if model.created_at else None,
       "updated_at": model.updated_at.isoformat() if model.updated_at else None,
     }
@@ -119,6 +128,10 @@ class McpServerRepository(IMcpServerRepository):
       server.status = updates["status"]
     if "tools" in updates and updates["tools"] is not None:
       server.allowed_tools_json = json.dumps(normalize_tools(updates["tools"]))
+    if "allowed_domains" in updates and updates["allowed_domains"] is not None:
+      meta = self._metadata(server)
+      meta["allowed_domains"] = normalize_domains(updates["allowed_domains"])
+      server.metadata_json = json.dumps(meta)
 
     await self.session.flush()
     if hasattr(self.session, "refresh"):

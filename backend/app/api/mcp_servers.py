@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_admin_user, get_mcp_server_repository
 from app.db.interfaces.mcp_server_repository import IMcpServerRepository
 from app.integrations.executor import validate_mcp_endpoint_url
-from app.integrations.mcp_policy import ToolDescriptor, approve_tool, revoke_tool
+from app.integrations.mcp_policy import ToolDescriptor, approve_tool, normalize_domains, revoke_tool
 
 logger = logging.getLogger("funcassist.tool_audit")
 
@@ -45,6 +45,8 @@ class McpServerUpdate(BaseModel):
   transport_type: Optional[str] = None
   auth_type: Optional[str] = None
   status: Optional[str] = None
+  # Hosts that tools of this server may be pointed at (navigation, fetching). Empty means none.
+  allowed_domains: Optional[List[str]] = Field(default=None, max_length=100)
 
 
 class ToolApproval(BaseModel):
@@ -76,6 +78,7 @@ class McpServerAdminInfo(BaseModel):
   status: str = "configured"
   tools: List[ToolEntry] = Field(default_factory=list)
   allowed_tools: List[str] = Field(default_factory=list)
+  allowed_domains: List[str] = Field(default_factory=list)
   created_at: Optional[str] = None
   updated_at: Optional[str] = None
 
@@ -128,11 +131,19 @@ async def update_mcp_server(
   if not current:
     raise HTTPException(status_code=404, detail=NOT_FOUND)
 
+  if updates.get("allowed_domains") is not None:
+    try:
+      updates["allowed_domains"] = normalize_domains(updates["allowed_domains"])
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
+
   new_url = updates.get("endpoint_url")
   if new_url is not None:
     _check_endpoint(new_url)
     if new_url.strip() != current["endpoint_url"]:
+      # A different endpoint is a different server: neither the approvals nor the domains carry over.
       updates["tools"] = []
+      updates.setdefault("allowed_domains", [])
       logger.info("mcp_server_endpoint_changed admin=%s server=%s approvals_cleared=true", admin["id"], server_id)
 
   updated = await mcp_repo.update(server_id, None, updates)

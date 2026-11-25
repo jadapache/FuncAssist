@@ -7,6 +7,7 @@ and SSRF prevention for remote MCP server endpoints.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import ipaddress
@@ -18,7 +19,15 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.integrations.mcp_policy import ToolDescriptor, authorize_call, normalize_tools, validate_arguments
+from app.ai.logging import log_security_event
+from app.integrations.mcp_policy import (
+  ToolDescriptor,
+  authorize_call,
+  check_destinations,
+  extract_destinations,
+  normalize_tools,
+  validate_arguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,14 +179,22 @@ class IntegrationToolExecutor:
     return bool(allowed_tools) and tool_name in allowed_tools
 
   def _audit(self, provider: str, tool_name: str, arguments: Any, decision: str, reason: str = "") -> None:
+    digest = _arguments_digest(arguments)
     _AUDIT.info(
       "tool_call user=%s org=%s provider=%s tool=%s args=%s decision=%s%s",
-      self.user_id, self.organization_id, provider, tool_name, _arguments_digest(arguments), decision,
+      self.user_id, self.organization_id, provider, tool_name, digest, decision,
       f" reason={reason}" if reason else "",
     )
+    log_security_event(
+      "tool_call", user=self.user_id, org=self.organization_id, provider=provider, tool=tool_name,
+      args=digest, decision=decision, reason=reason or None,
+    )
 
-  def _deny(self, provider: str, tool_name: str, arguments: Any, error: str) -> dict[str, Any]:
-    self._audit(provider, tool_name, arguments, "denied", error)
+  def _deny(
+    self, provider: str, tool_name: str, arguments: Any, error: str, *, audit_reason: str | None = None
+  ) -> dict[str, Any]:
+    """`error` goes back to the caller; the audit log gets `audit_reason` when the error quotes values."""
+    self._audit(provider, tool_name, arguments, "denied", audit_reason or error)
     return {"ok": False, "error": error}
 
   async def execute_tool(
@@ -266,7 +283,25 @@ class IntegrationToolExecutor:
     entry = next(e for e in normalize_tools(server.get("tools")) if e["name"] == descriptor.name)
     problems = validate_arguments(entry.get("input_schema"), arguments)
     if problems:
-      return self._deny(provider, descriptor.name, arguments, "Invalid arguments: " + "; ".join(problems))
+      return self._deny(
+        provider, descriptor.name, arguments, "Invalid arguments: " + "; ".join(problems), audit_reason="invalid_arguments"
+      )
+
+    # A tool that navigates or fetches can send data out in the URL: every destination must be on the
+    # server's allowed domains and must not point into the internal network.
+    problems = check_destinations(arguments, server.get("allowed_domains"))
+    if problems:
+      return self._deny(
+        provider, descriptor.name, arguments, "Destination not allowed: " + "; ".join(problems),
+        audit_reason="destination_not_allowed",
+      )
+    for destination in extract_destinations(arguments):
+      url = destination if "://" in destination else "https://" + destination.lstrip("/")
+      if not await asyncio.to_thread(validate_mcp_endpoint_url, url, True):
+        return self._deny(
+          provider, descriptor.name, arguments, "Destination not allowed: it points to a private or unsafe address.",
+          audit_reason="destination_private_address",
+        )
 
     return self._deny(
       provider, descriptor.name, arguments,
