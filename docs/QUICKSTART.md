@@ -177,7 +177,15 @@ curl -X POST http://127.0.0.1:8000/api/knowledge/retrieve \
 
 1. Un administrador abre **Configuración** → **Integraciones** → **GitHub**
 2. Click en "Conectar" y autoriza con OAuth. La conexión queda disponible para todos los usuarios.
-3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una cuenta de servicio de solo lectura.
+3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una GitHub App de solo lectura, que aún no está disponible.
+
+### GitLab (cuenta de servicio)
+
+1. En GitLab, crea un **token de acceso de proyecto o de grupo** (o una cuenta de servicio) con rol **Reporter** y solo estos permisos: `read_api` (obligatorio), `read_repository` y `read_user`. Ponle una fecha de caducidad.
+2. Un administrador abre **Configuración** → **Integraciones** → **GitLab**, pega el token y, si tu GitLab es propio, su URL (debe ser `https`).
+3. Antes de guardarlo se comprueba que el token esté activo, no haya caducado y no tenga permisos de escritura; si los tiene, se rechaza. Después elige los proyectos que quedarán disponibles: solo esos se consultan.
+4. **Rotación**: crea un token nuevo con los mismos permisos, conéctalo (sustituye al anterior) y revoca el antiguo en GitLab. La conexión avisa cuando el token está a menos de 14 días de caducar.
+5. **Revocación**: revoca el token en GitLab y pulsa **Desconectar** en la integración. Si alguien amplía sus permisos más tarde, **Probar conexión** lo detecta y lo rechaza.
 
 ### Ollama (Local, Recomendado para Desarrollo)
 
