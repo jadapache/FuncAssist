@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.ai.errors import AIError
 from app.ai.events import AgentEvent
-from app.api import document_agent
+from app.core.document_agent import chat_run
 from app.api.document_agent import (
   router,
 )
@@ -58,8 +58,8 @@ async def _failing_run(cfg):
 
 class TestStreamProtocolV2:
   def test_v2_stream_emits_named_events(self, client):
-    with patch.object(document_agent, "run_agentic_chat_stream", _fake_run), \
-         patch.object(document_agent, "_load_active_template_info", AsyncMock(return_value=("", "docx"))):
+    with patch.object(chat_run, "run_agentic_chat_stream", _fake_run), \
+         patch.object(chat_run, "load_active_template_info", AsyncMock(return_value=("", "docx"))):
       resp = client.post(
         "/api/doc-agent/agentic-prompt-stream?protocol=v2", json={"query": "genera un plan de pruebas"},
       )
@@ -75,9 +75,9 @@ class TestStreamProtocolV2:
     assert done["assistant_message"] == "Hola" and done["route"] == "plain"
 
   def test_v2_errors_carry_the_typed_code(self, client):
-    with patch.object(document_agent, "run_agentic_chat_stream", _failing_run), \
-         patch.object(document_agent, "_load_active_template_info", AsyncMock(return_value=("", "docx"))), \
-         patch.object(document_agent, "log_ai_call") as log:
+    with patch.object(chat_run, "run_agentic_chat_stream", _failing_run), \
+         patch.object(chat_run, "load_active_template_info", AsyncMock(return_value=("", "docx"))), \
+         patch.object(chat_run, "log_ai_call") as log:
       resp = client.post("/api/doc-agent/agentic-prompt-stream?protocol=v2", json={"query": "hola"})
     error = next(d for n, d in _sse_events(resp.text) if n == "error")
     assert error["code"] == "model_not_found" and error["message"] == "El modelo configurado no existe."

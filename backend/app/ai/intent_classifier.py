@@ -1,7 +1,7 @@
 """Fast-model intent classification for chat messages the keyword rules cannot decide.
 
 Only called for undecided messages that plausibly concern a document (see
-`document_agent._needs_model_classification`), so ordinary chat pays no extra latency.
+`document_agent.intent.needs_model_classification`), so ordinary chat pays no extra latency.
 Results are cached per message (prompt + context), so retries and repeated messages are free.
 """
 
