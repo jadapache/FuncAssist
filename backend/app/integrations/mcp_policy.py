@@ -15,9 +15,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
+from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
@@ -166,3 +168,92 @@ def validate_arguments(schema: Optional[dict[str, Any]], arguments: Any) -> list
     (f"{'.'.join(str(p) for p in e.path)}: " if e.path else "") + e.message
     for e in errors[:MAX_ERRORS_REPORTED]
   ]
+
+
+# ----------------------------------------------------------------- destinations (browser-like tools)
+
+# Argument names that carry a place to go to. A tool that navigates can send data out in the URL, so
+# every destination must be on the server's allowed domains. With none configured, none is allowed.
+DESTINATION_ARGUMENTS = frozenset({
+  "url", "uri", "href", "link", "target", "endpoint", "address", "page", "website", "origin", "destination", "to",
+})
+_URL_LIKE = re.compile(r"^(?:https?:)?//[^\s/]+", re.IGNORECASE)
+_DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def normalize_domain(value: Any) -> str:
+  """A bare lowercase host name, or raises ValueError. Schemes, paths, ports and wildcards are not domains."""
+  text = str(value or "").strip().lower().rstrip(".")
+  if not _DOMAIN.match(text):
+    raise ValueError(f"'{value}' is not a valid domain name. Use a bare host such as docs.example.com.")
+  return text
+
+
+def normalize_domains(values: Iterable[Any]) -> list[str]:
+  out: list[str] = []
+  for value in values or []:
+    domain = normalize_domain(value)
+    if domain not in out:
+      out.append(domain)
+  return out
+
+
+def extract_destinations(arguments: Any) -> list[str]:
+  """Every URL-like value in the arguments: under a destination-like name or written as a URL."""
+  found: list[str] = []
+  if not isinstance(arguments, dict):
+    return found
+
+  def walk(value: Any, key: str = "") -> None:
+    if isinstance(value, dict):
+      for k, v in value.items():
+        walk(v, str(k).lower())
+    elif isinstance(value, (list, tuple)):
+      for item in value:
+        walk(item, key)
+    elif isinstance(value, str):
+      text = value.strip()
+      if key in DESTINATION_ARGUMENTS and text or _URL_LIKE.match(text):
+        found.append(text)
+
+  walk(arguments)
+  return found
+
+
+def destination_host(value: str) -> Optional[str]:
+  """The host of a destination, or None when it is not a plain http(s) URL."""
+  text = value.strip()
+  if text.startswith("//"):
+    text = "https:" + text
+  elif "://" not in text:
+    # "javascript:alert(1)" or "mailto:x" carry a scheme; "docs.example.com:8080" is a host and a port.
+    if re.match(r"^[a-z][a-z0-9+.-]*:(?!\d)", text, re.IGNORECASE):
+      return None
+    text = "https://" + text
+  parsed = urlparse(text)
+  if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+    return None
+  try:
+    return (parsed.hostname or "").lower().rstrip(".") or None
+  except ValueError:
+    return None
+
+
+def host_allowed(host: str, allowed_domains: Iterable[str]) -> bool:
+  """Exact match or a subdomain of an allowed domain (never a look-alike suffix)."""
+  return any(host == domain or host.endswith("." + domain) for domain in allowed_domains)
+
+
+def check_destinations(arguments: Any, allowed_domains: Optional[Iterable[str]]) -> list[str]:
+  """Problems with the places the arguments point to (empty when there is nothing to object to)."""
+  allowed = normalize_domains(allowed_domains or [])
+  problems: list[str] = []
+  for destination in extract_destinations(arguments):
+    host = destination_host(destination)
+    if host is None:
+      problems.append(f"'{destination[:80]}' is not an acceptable destination.")
+    elif not allowed:
+      problems.append(f"No destination is allowed for this server; '{host}' was requested.")
+    elif not host_allowed(host, allowed):
+      problems.append(f"'{host}' is not among the domains allowed for this server.")
+  return problems

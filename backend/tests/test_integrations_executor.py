@@ -8,6 +8,7 @@ import pytest
 
 from app.integrations import executor as ex
 from app.integrations.base import Capability
+from app.integrations import executor as ex_module
 from app.integrations.executor import IntegrationToolExecutor
 from app.integrations.mcp_policy import ToolDescriptor, approve_tool
 
@@ -200,16 +201,22 @@ NAVIGATE = ToolDescriptor("navigate", "Open a page", SCHEMA)
 SNAPSHOT = ToolDescriptor("snapshot", "Page snapshot", {"type": "object", "properties": {}})
 
 
+@pytest.fixture(autouse=True)
+def public_network(monkeypatch):
+  """Allowed destinations are resolved before use; keep these tests off the network."""
+  monkeypatch.setattr(ex_module, "validate_mcp_endpoint_url", lambda url, resolve_dns=True: True)
+
+
 def server_with(*pairs):
   tools: list = []
   for descriptor, read_only in pairs:
     tools = approve_tool(tools, descriptor, read_only=read_only, approved_by="admin")
-  return {"id": "srv-1", "name": "Playwright", "tools": tools}
+  return {"id": "srv-1", "name": "Playwright", "tools": tools, "allowed_domains": ["docs.example.com", "secret.example"]}
 
 
 @pytest.mark.asyncio
 async def test_mcp_tool_that_is_not_approved_is_denied(adapters):
-  res = await executor().execute_mcp_tool({"id": "srv-1", "tools": []}, NAVIGATE, {"url": "https://x"})
+  res = await executor().execute_mcp_tool({"id": "srv-1", "tools": []}, NAVIGATE, {"url": "https://docs.example.com"})
   assert res["ok"] is False and "not approved" in res["error"]
 
 
@@ -224,15 +231,15 @@ async def test_mcp_tool_changed_after_approval_is_denied(adapters):
 @pytest.mark.asyncio
 async def test_mcp_write_tool_needs_the_users_confirmation(adapters):
   server = server_with((NAVIGATE, False))
-  res = await executor().execute_mcp_tool(server, NAVIGATE, {"url": "https://x"})
+  res = await executor().execute_mcp_tool(server, NAVIGATE, {"url": "https://docs.example.com"})
   assert res["ok"] is False and res["requires_confirmation"] is True
-  confirmed = await executor().execute_mcp_tool(server, NAVIGATE, {"url": "https://x"}, user_confirmed=True)
+  confirmed = await executor().execute_mcp_tool(server, NAVIGATE, {"url": "https://docs.example.com"}, user_confirmed=True)
   assert "requires_confirmation" not in confirmed
   assert "transport is not enabled" in confirmed["error"]  # authorized, but nothing is sent yet
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("arguments", [{}, {"url": 5}, {"url": "https://x", "extra": 1}, ["x"]])
+@pytest.mark.parametrize("arguments", [{}, {"url": 5}, {"url": "https://docs.example.com", "extra": 1}, ["x"]])
 async def test_mcp_arguments_must_match_the_approved_schema(adapters, arguments):
   server = server_with((NAVIGATE, True))
   res = await executor().execute_mcp_tool(server, NAVIGATE, arguments)
@@ -242,7 +249,7 @@ async def test_mcp_arguments_must_match_the_approved_schema(adapters, arguments)
 @pytest.mark.asyncio
 async def test_mcp_authorized_call_does_not_reach_a_transport_yet(adapters):
   server = server_with((NAVIGATE, True))
-  res = await executor().execute_mcp_tool(server, NAVIGATE, {"url": "https://x"})
+  res = await executor().execute_mcp_tool(server, NAVIGATE, {"url": "https://docs.example.com"})
   assert res["ok"] is False and "transport is not enabled" in res["error"]
 
 
