@@ -1,19 +1,16 @@
-"""GitLab integration: a read-only service account token (preferred) or OAuth, with project selection."""
+"""GitLab integration: a read-only service account token (bot), with project selection."""
 
 from __future__ import annotations
 
-import secrets
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 import httpx
 
-from app.core.integration_config import get_gitlab_oauth_config
 from app.core.storage import delete_connection, load_connection, save_connection
 from app.integrations.base import (
   AuthMethod,
-  AuthStartResponse,
   Capability,
   ConnectionStatus,
   Integration,
@@ -55,16 +52,14 @@ class GitLabIntegration(Integration):
 
   def get_info(self) -> IntegrationInfo:
     data = load_connection(self.id)
-    oauth_configured = get_gitlab_oauth_config()["configured"]
     if not self._is_connected(data):
       return IntegrationInfo(
         id=self.id,
         name=self.name,
         description=self.description,
         status=ConnectionStatus.NOT_CONNECTED,
-        auth_methods=[AuthMethod.SERVICE_ACCOUNT, AuthMethod.OAUTH],
+        auth_methods=[AuthMethod.SERVICE_ACCOUNT],
         capabilities=self.get_capabilities(),
-        oauth_configured=oauth_configured,
       )
 
     assert data is not None
@@ -74,7 +69,7 @@ class GitLabIntegration(Integration):
       name=self.name,
       description=self.description,
       status=ConnectionStatus.CONNECTED,
-      auth_methods=[AuthMethod.SERVICE_ACCOUNT, AuthMethod.OAUTH],
+      auth_methods=[AuthMethod.SERVICE_ACCOUNT],
       capabilities=self.get_capabilities(),
       account_label=data.get("account_login"),
       workspace_label=host,
@@ -88,18 +83,12 @@ class GitLabIntegration(Integration):
         "configured_by": data.get("configured_by"),
         "configured_at": data.get("configured_at"),
       },
-      oauth_configured=oauth_configured,
     )
 
   def _is_connected(self, data: dict[str, Any] | None) -> bool:
     if not data:
       return False
-    method = data.get("auth_method")
-    if method == AuthMethod.OAUTH.value:
-      return bool(data.get("access_token"))
-    if method == AuthMethod.SERVICE_ACCOUNT.value:
-      return bool(data.get("service_token"))
-    return False
+    return data.get("auth_method") == AuthMethod.SERVICE_ACCOUNT.value and bool(data.get("service_token"))
 
   @staticmethod
   def _normalize_base_url(base_url: str | None) -> str:
@@ -167,85 +156,6 @@ class GitLabIntegration(Integration):
     save_connection(self.id, payload)
     return self.get_info()
 
-  async def start_oauth(self) -> AuthStartResponse:
-    oauth = get_gitlab_oauth_config()
-    if not oauth["configured"]:
-      raise ValueError(
-        "GitLab OAuth is not configured. Add Application ID and Secret in Integrations → GitLab OAuth setup."
-      )
-
-    state = secrets.token_urlsafe(24)
-    pending = load_connection(self.id) or {}
-    pending["oauth_state"] = state
-    save_connection(self.id, pending)
-
-    base_url = oauth.get("base_url") or DEFAULT_HOST
-    params = urlencode(
-      {
-        "client_id": oauth["client_id"],
-        "redirect_uri": oauth["redirect_uri"],
-        "response_type": "code",
-        "scope": "read_api read_user",
-        "state": state,
-      }
-    )
-    return AuthStartResponse(
-      authorization_url=f"{base_url.rstrip('/')}/oauth/authorize?{params}",
-      state=state,
-      auth_method=AuthMethod.OAUTH,
-    )
-
-  async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    oauth = get_gitlab_oauth_config()
-    pending = load_connection(self.id) or {}
-    expected = pending.get("oauth_state")
-    if not expected or expected != state:
-      raise ValueError("Invalid OAuth state. Restart the GitLab connection flow.")
-
-    base_url = oauth.get("base_url") or DEFAULT_HOST
-    api_base = f"{base_url.rstrip('/')}/api/v4"
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      token_response = await client.post(
-        f"{base_url.rstrip('/')}/oauth/token",
-        data={
-          "client_id": oauth["client_id"],
-          "client_secret": oauth["client_secret"],
-          "code": code,
-          "grant_type": "authorization_code",
-          "redirect_uri": oauth["redirect_uri"],
-        },
-      )
-      if token_response.status_code >= 400:
-        raise ValueError(f"GitLab token exchange failed ({token_response.status_code}): {token_response.text}")
-      tokens = token_response.json()
-      access_token = tokens.get("access_token")
-      if not access_token:
-        raise ValueError("GitLab token exchange did not return an access token.")
-
-      user_response = await client.get(
-        f"{api_base}/user",
-        headers={"Authorization": f"Bearer {access_token}"},
-      )
-      user_response.raise_for_status()
-      user = user_response.json()
-
-    existing = load_connection(self.id) or {}
-    payload = {
-      "auth_method": AuthMethod.OAUTH.value,
-      "access_token": access_token,
-      "refresh_token": tokens.get("refresh_token"),
-      "token_type": tokens.get("token_type", "Bearer"),
-      "base_url": base_url.rstrip("/"),
-      "api_base": api_base,
-      "account_login": user.get("username"),
-      "account_label": user.get("username"),
-      "account_name": user.get("name"),
-      "selected_repos": existing.get("selected_repos") or [],
-    }
-    save_connection(self.id, payload)
-    return self.get_info()
-
   async def disconnect(self) -> None:
     delete_connection(self.id)
 
@@ -288,8 +198,6 @@ class GitLabIntegration(Integration):
     data = load_connection(self.id)
     if not data:
       raise ValueError("GitLab is not connected.")
-    if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
-      return {"Authorization": f"Bearer {data['access_token']}"}
     if data.get("auth_method") == AuthMethod.SERVICE_ACCOUNT.value and data.get("service_token"):
       return {"PRIVATE-TOKEN": str(data["service_token"])}
     raise ValueError("GitLab is not connected.")

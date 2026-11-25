@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
-from app.integrations.base import AuthMethod, ConnectionStatus
+from app.integrations.base import ConnectionStatus
 from app.integrations.gitlab import integration as gl
 
 REAL_CLIENT = httpx.AsyncClient
-OAUTH_CFG = {
-  "configured": True, "client_id": "cid", "client_secret": "sec",
-  "redirect_uri": "http://x/cb", "base_url": "https://git.example.com/",
-}
-CONNECTED = {"auth_method": "oauth", "access_token": "glat", "base_url": "https://gitlab.com"}
+CONNECTED = {"auth_method": "service_account", "service_token": "glpat-bot", "base_url": "https://gitlab.com"}
 
 
 @pytest.fixture
@@ -22,7 +20,6 @@ def store(monkeypatch):
   monkeypatch.setattr(gl, "load_connection", lambda _id: dict(data[_id]) if data.get(_id) else None)
   monkeypatch.setattr(gl, "save_connection", lambda _id, payload: data.__setitem__(_id, dict(payload)))
   monkeypatch.setattr(gl, "delete_connection", lambda _id: data.pop(_id, None))
-  monkeypatch.setattr(gl, "get_gitlab_oauth_config", lambda: OAUTH_CFG)
   return data
 
 
@@ -46,49 +43,11 @@ def test_info_and_is_connected(store):
   info = integ.get_info()
   assert info.status == ConnectionStatus.CONNECTED and info.workspace_label == "git.example.com"
   assert info.details["selected_repos"] == ["g/p"]
-  assert integ._is_connected({"auth_method": "oauth", "access_token": "t"}) is True
-  assert integ._is_connected({"auth_method": "oauth"}) is False
+  assert integ._is_connected({"auth_method": "service_account", "service_token": "t"}) is True
+  assert integ._is_connected({"auth_method": "service_account"}) is False
+  assert integ._is_connected({"auth_method": "oauth", "access_token": "t"}) is False  # OAuth is no longer accepted
   assert integ._is_connected({"auth_method": "pat", "pat_token": "x"}) is False  # PATs are no longer accepted
   assert integ._is_connected(None) is False
-
-
-@pytest.mark.asyncio
-async def test_start_oauth(store, monkeypatch):
-  res = await gl.GitLabIntegration().start_oauth()
-  assert res.authorization_url.startswith("https://git.example.com/oauth/authorize?") and res.auth_method == AuthMethod.OAUTH
-  assert store["gitlab"]["oauth_state"] == res.state
-  monkeypatch.setattr(gl, "get_gitlab_oauth_config", lambda: {"configured": False})
-  with pytest.raises(ValueError, match="not configured"):
-    await gl.GitLabIntegration().start_oauth()
-
-
-@pytest.mark.asyncio
-async def test_oauth_callback(store, monkeypatch):
-  integ = gl.GitLabIntegration()
-  with pytest.raises(ValueError, match="Invalid OAuth state"):
-    await integ.handle_oauth_callback("c", "s")
-
-  store["gitlab"] = {"oauth_state": "st", "selected_repos": ["g/p"]}
-
-  def ok(req: httpx.Request):
-    if req.url.path == "/oauth/token":
-      return httpx.Response(200, json={"access_token": "tok", "refresh_token": "r"})
-    assert req.headers["authorization"] == "Bearer tok"
-    return httpx.Response(200, json={"username": "ana", "name": "Ana"})
-
-  mock_http(monkeypatch, ok)
-  info = await integ.handle_oauth_callback("code", "st")
-  assert info.account_label == "ana"
-  assert store["gitlab"]["api_base"] == "https://git.example.com/api/v4" and store["gitlab"]["selected_repos"] == ["g/p"]
-  assert store["gitlab"]["refresh_token"] == "r"
-
-  store["gitlab"] = {"oauth_state": "st"}
-  mock_http(monkeypatch, lambda req: httpx.Response(400, text="bad"))
-  with pytest.raises(ValueError, match="token exchange failed"):
-    await integ.handle_oauth_callback("c", "st")
-  mock_http(monkeypatch, lambda req: httpx.Response(200, json={}))
-  with pytest.raises(ValueError, match="did not return an access token"):
-    await integ.handle_oauth_callback("c", "st")
 
 
 @pytest.mark.asyncio
@@ -104,8 +63,13 @@ async def test_connection_lifecycle(store, monkeypatch):
     await integ.get_repositories()
 
   store["gitlab"] = dict(CONNECTED)
-  assert integ._headers() == {"Authorization": "Bearer glat"}
-  mock_http(monkeypatch, lambda req: httpx.Response(200, json={"username": "ana"}))
+  assert integ._headers() == {"PRIVATE-TOKEN": "glpat-bot"}
+  def healthy(req: httpx.Request):
+    if req.url.path.endswith("/personal_access_tokens/self"):
+      return httpx.Response(200, json={"active": True, "scopes": ["read_api"], "expires_at": None})
+    return httpx.Response(200, json={"username": "ana"})
+
+  mock_http(monkeypatch, healthy)
   assert (await integ.test_connection()).details["username"] == "ana"
   mock_http(monkeypatch, lambda req: httpx.Response(500))
   assert (await integ.test_connection()).ok is False
@@ -113,9 +77,10 @@ async def test_connection_lifecycle(store, monkeypatch):
   info = await integ.update_selected_repos(["g/p"])
   assert info.details["selected_repos"] == ["g/p"]
 
-  store["gitlab"] = {"auth_method": "oauth", "access_token": "o"}
-  assert integ._headers() == {"Authorization": "Bearer o"}
-  store["gitlab"] = {"auth_method": "oauth"}
+  store["gitlab"] = {"auth_method": "oauth", "access_token": "o"}  # legacy OAuth data is ignored
+  with pytest.raises(ValueError):
+    integ._headers()
+  store["gitlab"] = {"auth_method": "service_account"}
   with pytest.raises(ValueError):
     integ._headers()
 
@@ -191,10 +156,14 @@ async def test_files_changed(store, monkeypatch):
   assert [(f["filename"], f["status"]) for f in files] == [("b.py", "renamed"), ("c.py", "modified")]
 
 
-def test_personal_access_tokens_are_not_supported():
+def test_only_service_accounts_are_supported():
   integ = gl.GitLabIntegration()
   assert not hasattr(integ, "connect_with_pat")
-  assert [m.value for m in integ.get_info().auth_methods] == ["service_account", "oauth"]
+  assert [m.value for m in integ.get_info().auth_methods] == ["service_account"]
+  with pytest.raises(NotImplementedError):
+    asyncio.run(integ.start_oauth())
+  with pytest.raises(NotImplementedError):
+    asyncio.run(integ.handle_oauth_callback("c", "s"))
   with pytest.raises(ValueError):
     gl.GitLabIntegration()._headers()
 
