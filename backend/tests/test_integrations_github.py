@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -57,7 +58,8 @@ def expires_in(seconds: int) -> str:
   return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def github_app(inner=None, *, permissions=None, selection="selected", expires=3600, seen=None, installs=None):
+def github_app(inner=None, *, permissions=None, selection="selected", expires=3600, seen=None, installs=None,
+               omit_from_token=(), expires_at=None):
   """A fake GitHub: App endpoints plus token minting, delegating everything else to `inner`."""
   minted = {"count": 0}
   installs = installs if installs is not None else [
@@ -74,10 +76,11 @@ def github_app(inner=None, *, permissions=None, selection="selected", expires=36
       return httpx.Response(200, json=installs)
     if path.endswith("/access_tokens"):
       minted["count"] += 1
-      return httpx.Response(201, json={
-        "token": f"ghs_token{minted['count']}", "expires_at": expires_in(expires),
+      body = {
+        "token": f"ghs_token{minted['count']}", "expires_at": expires_at or expires_in(expires),
         "permissions": permissions if permissions is not None else READ_ONLY, "repository_selection": selection,
-      })
+      }
+      return httpx.Response(201, json={k: v for k, v in body.items() if k not in omit_from_token})
     return inner(req) if inner else httpx.Response(404)
 
   handler.minted = minted
@@ -407,3 +410,82 @@ async def test_files_changed_only_for_enabled_repositories(store, monkeypatch):
     with pytest.raises(ValueError, match="not enabled"):
       await integ.get_files_changed(pr_number=1, repo=repo)
   assert requests == []  # nothing reached GitHub
+
+@pytest.mark.asyncio
+async def test_a_connection_that_is_not_a_github_app_cannot_be_updated(store):
+  legacy = {"auth_method": "oauth", "access_token": "x", "selected_repos": ["old/repo"]}
+  store["github"] = dict(legacy)
+  with pytest.raises(ValueError, match="not connected"):
+    await gh.GitHubIntegration().update_selected_repos(["new/repo"])
+  assert store["github"] == legacy
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----", "my PRIVATE KEY text"])
+async def test_only_a_pem_private_key_is_accepted(store, monkeypatch, key):
+  mock_http(monkeypatch, github_app())
+  with pytest.raises(ValueError, match="PEM"):
+    await gh.GitHubIntegration().connect_with_github_app("123", key)
+
+
+@pytest.mark.asyncio
+async def test_the_installation_permissions_are_used_when_the_token_reports_none(store, monkeypatch):
+  installs = [{"id": 77, "account": {"login": "acme"}, "permissions": READ_ONLY, "repository_selection": "all"}]
+  mock_http(monkeypatch, github_app(installs=installs, omit_from_token=("permissions", "repository_selection")))
+  await gh.GitHubIntegration().connect_with_github_app("123", PRIVATE_KEY)
+  assert store["github"]["permissions"] == READ_ONLY and store["github"]["repository_selection"] == "all"
+
+
+@pytest.mark.asyncio
+async def test_a_first_connection_starts_with_no_enabled_repositories(store, monkeypatch):
+  mock_http(monkeypatch, github_app())
+  await gh.GitHubIntegration().connect_with_github_app("123", PRIVATE_KEY)
+  assert store["github"]["selected_repos"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_token_expiring_inside_the_refresh_margin_is_renewed(store, monkeypatch):
+  store["github"] = connected()
+  monkeypatch.setattr(gh, "time", SimpleNamespace(time=lambda: 1000.0))
+  mock_http(monkeypatch, github_app())
+  gh._TOKEN_CACHE["77"] = ("ghs_old", 1000.0 + gh.TOKEN_REFRESH_MARGIN)
+  assert await gh.GitHubIntegration()._installation_token() == "ghs_token1"
+  gh._TOKEN_CACHE["77"] = ("ghs_old", 1000.0 + gh.TOKEN_REFRESH_MARGIN + 1)
+  assert await gh.GitHubIntegration()._installation_token() == "ghs_old"
+
+
+@pytest.mark.asyncio
+async def test_a_token_with_an_unreadable_expiry_is_kept_for_a_while(store, monkeypatch):
+  store["github"] = connected()
+  app = github_app(expires_at="not-a-date")
+  mock_http(monkeypatch, app)
+  integ = gh.GitHubIntegration()
+  await integ._installation_token()
+  await integ._installation_token()
+  assert app.minted["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_testing_a_legacy_connection_reports_it_as_not_connected(store, monkeypatch):
+  requests: list = []
+  mock_http(monkeypatch, lambda req: requests.append(req) or httpx.Response(200, json={}))
+  store["github"] = {"auth_method": "oauth", "access_token": "x"}
+  res = await gh.GitHubIntegration().test_connection()
+  assert res.ok is False and "not connected" in res.message and requests == []
+
+
+@pytest.mark.asyncio
+async def test_testing_the_connection_asks_github_for_a_single_repository(store, monkeypatch):
+  store["github"] = connected()
+  seen: list = []
+
+  def inner(req: httpx.Request):
+    seen.append(req.url.params["per_page"])
+    return httpx.Response(200, json={"total_count": 0, "repositories": []})
+
+  mock_http(monkeypatch, github_app(inner))
+  res = await gh.GitHubIntegration().test_connection()
+  assert seen == ["1"] and res.details["permissions"] == READ_ONLY
+
+  store["github"] = {k: v for k, v in connected().items() if k != "permissions"}
+  assert (await gh.GitHubIntegration().test_connection()).details["permissions"] == {}
