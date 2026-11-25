@@ -7,6 +7,15 @@ import {
 } from '../../../api/client'
 import type { JiraConnectionStatus } from '../../settings/types'
 
+export type GitLabServiceAccountPayload = { token: string; base_url?: string; selected_repos?: string[] }
+
+export type GitHubAppPayload = {
+  app_id: string
+  private_key: string
+  installation_id?: string
+  selected_repos?: string[]
+}
+
 export const integrationsApi = {
   getIntegrations: () =>
     fetch(`${API_BASE}/api/integrations`, {
@@ -28,7 +37,7 @@ export const integrationsApi = {
 
   connectServiceAccount: (
     id: string,
-    payload: { token: string; base_url?: string; selected_repos?: string[] },
+    payload: GitLabServiceAccountPayload | GitHubAppPayload,
   ) =>
     fetch(`${API_BASE}/api/integrations/${id}/service-account`, {
       method: 'POST',

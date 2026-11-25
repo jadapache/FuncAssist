@@ -134,6 +134,13 @@ export const IntegrationConfigModal = ({
           /* Connection setup form */
           <div className="space-y-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+              {isGit ? (
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {integration.name} se conecta con una cuenta de servicio de solo lectura. Un administrador la configura en
+                  Ajustes → Integraciones.
+                </p>
+              ) : (
+                <>
               <p className="text-xs text-slate-600 leading-relaxed">
                 Conéctate directamente autorizando a FuncAssist a través de la interfaz web de {integration.name}.
               </p>
@@ -146,6 +153,8 @@ export const IntegrationConfigModal = ({
                 <ExternalLink className="h-4 w-4" />
                 <span>Conectar con {integration.name} (OAuth)</span>
               </button>
+                </>
+              )}
             </div>
           </div>
         )}
