@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class AuthMethod(str, Enum):
   OAUTH = "oauth"
+  SERVICE_ACCOUNT = "service_account"
 
 
 class ConnectionStatus(str, Enum):

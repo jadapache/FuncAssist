@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.ai.logging import log_security_event
 from app.api.deps import get_current_user
 from app.core.settings import get_settings
 from app.integrations.base import AuthMethod, IntegrationInfo, TestConnectionResult
@@ -148,6 +149,50 @@ async def start_oauth(
     raise HTTPException(status_code=501, detail=str(exc)) from exc
   except ValueError as exc:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class ServiceAccountRequest(BaseModel):
+  token: str = Field(min_length=1, max_length=512)
+  base_url: str | None = Field(default=None, max_length=300)
+  selected_repos: list[str] | None = None
+
+
+@router.post("/{integration_id}/service-account", response_model=IntegrationInfo)
+async def connect_service_account(
+  integration_id: str,
+  body: ServiceAccountRequest,
+  current_user: dict = Depends(get_current_user),
+) -> IntegrationInfo:
+  """Connect an organization integration with a dedicated read-only bot credential (administrators only)."""
+  _require_admin_for_organization(integration_id, current_user)
+  try:
+    integration = registry.get(integration_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  if integration_id == "github":
+    raise HTTPException(status_code=501, detail="GitHub requires a GitHub App, which is not available yet.")
+  if integration_id != "gitlab":
+    raise HTTPException(status_code=501, detail="Service accounts are only available for GitLab.")
+
+  try:
+    info = await integration.connect_with_service_account(  # type: ignore[attr-defined]
+      body.token,
+      base_url=body.base_url,
+      selected_repos=body.selected_repos,
+      configured_by=str(current_user["id"]),
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  log_security_event(
+    "service_account_connected",
+    admin=str(current_user["id"]), provider=integration_id,
+    scopes=info.details.get("scopes"), expires_at=info.details.get("expires_at"),
+  )
+  try:
+    await sync_integration(integration_id)
+  except Exception:
+    pass
+  return info
 
 
 @router.post("/{integration_id}/test", response_model=TestConnectionResult)
