@@ -12,6 +12,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from app.integrations import git_hosting
 from app.integrations.base import AuthMethod, ConnectionStatus
 from app.integrations.github import integration as gh
 
@@ -34,7 +35,11 @@ def connected(**extra) -> dict:
 @pytest.fixture
 def store(monkeypatch):
   data: dict = {}
-  monkeypatch.setattr(gh, "load_connection", lambda _id: dict(data[_id]) if data.get(_id) else None)
+  load = lambda _id: dict(data[_id]) if data.get(_id) else None  # noqa: E731
+  save = lambda _id, payload: data.__setitem__(_id, dict(payload))  # noqa: E731
+  monkeypatch.setattr(gh, "load_connection", load)
+  monkeypatch.setattr(git_hosting, "load_connection", load)
+  monkeypatch.setattr(git_hosting, "save_connection", save)
   monkeypatch.setattr(gh, "save_connection", lambda _id, payload: data.__setitem__(_id, dict(payload)))
   monkeypatch.setattr(gh, "delete_connection", lambda _id: data.pop(_id, None))
   gh.clear_token_cache()

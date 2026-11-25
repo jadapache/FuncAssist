@@ -7,6 +7,7 @@ import asyncio
 import httpx
 import pytest
 
+from app.integrations import git_hosting
 from app.integrations.base import ConnectionStatus
 from app.integrations.gitlab import integration as gl
 
@@ -17,7 +18,11 @@ CONNECTED = {"auth_method": "service_account", "service_token": "glpat-bot", "ba
 @pytest.fixture
 def store(monkeypatch):
   data: dict = {}
-  monkeypatch.setattr(gl, "load_connection", lambda _id: dict(data[_id]) if data.get(_id) else None)
+  load = lambda _id: dict(data[_id]) if data.get(_id) else None  # noqa: E731
+  save = lambda _id, payload: data.__setitem__(_id, dict(payload))  # noqa: E731
+  monkeypatch.setattr(gl, "load_connection", load)
+  monkeypatch.setattr(git_hosting, "load_connection", load)
+  monkeypatch.setattr(git_hosting, "save_connection", save)
   monkeypatch.setattr(gl, "save_connection", lambda _id, payload: data.__setitem__(_id, dict(payload)))
   monkeypatch.setattr(gl, "delete_connection", lambda _id: data.pop(_id, None))
   return data
