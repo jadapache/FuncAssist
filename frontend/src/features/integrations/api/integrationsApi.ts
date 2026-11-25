@@ -26,6 +26,16 @@ export const integrationsApi = {
       handleResponse<{ authorization_url: string; state: string; auth_method: string }>(r),
     ),
 
+  connectServiceAccount: (
+    id: string,
+    payload: { token: string; base_url?: string; selected_repos?: string[] },
+  ) =>
+    fetch(`${API_BASE}/api/integrations/${id}/service-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<IntegrationInfo>(r)),
+
   testIntegration: (id: string) =>
     fetch(`${API_BASE}/api/integrations/${id}/test`, {
       method: 'POST',

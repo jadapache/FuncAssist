@@ -1,4 +1,4 @@
-export type AuthMethod = 'oauth' | 'api_key' | 'none'
+export type AuthMethod = 'oauth' | 'api_key' | 'service_account' | 'none'
 
 export type IntegrationInfo = {
   id: string
@@ -38,6 +38,7 @@ export type TestConnectionResult = {
   error_code?: string
   suggested_action?: string
   requires_reconnect?: boolean
+  details?: Record<string, unknown>
 }
 
 export type AppSettings = {

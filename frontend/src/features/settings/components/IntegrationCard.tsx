@@ -7,6 +7,8 @@ import { JiraOAuthSetup } from '../../../features/integrations'
 import { JiraProjectsPanel } from '../../../features/integrations'
 import { GitOAuthSetup as OAuthSetup } from '../../../features/integrations'
 import { StatusPill } from './StatusPill'
+import { ServiceAccountForm } from './ServiceAccountForm'
+import { ServiceAccountStatus } from './ServiceAccountStatus'
 
 export type IntegrationCardProps = {
   integration: IntegrationInfo
@@ -36,6 +38,8 @@ export const IntegrationCard = ({
   const [showConnectForm, setShowConnectForm] = useState(false)
   // Jira connections are personal, so every user manages their own.
   const manageable = canManage || integration.id === 'jira'
+  const isGitlab = integration.id === 'gitlab'
+  const isServiceAccount = integration.details?.auth_method === 'service_account'
 
   return (
     <article className="card border border-[var(--color-border)] p-6 space-y-5">
@@ -55,13 +59,15 @@ export const IntegrationCard = ({
               <span className="font-mono text-slate-800">{integration.workspace_label}</span>
             </p>
           ) : null}
-          {integration.account_label ? (
+          {isGitlab && isServiceAccount ? (
+            <ServiceAccountStatus integration={integration} />
+          ) : integration.account_label ? (
             <p>
               <span className="font-semibold text-slate-500">Cuenta vinculada: </span>
               <span className="font-medium text-slate-800">{integration.account_label}</span>
             </p>
           ) : null}
-          {integration.details?.auth_method ? (
+          {isGitlab && isServiceAccount ? null : integration.details?.auth_method ? (
             <p>
               <span className="font-semibold text-slate-500">Método de autenticación: </span>
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 uppercase">
@@ -70,6 +76,13 @@ export const IntegrationCard = ({
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {isGitlab && connected && !isServiceAccount ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Esta conexión usa la autorización personal de quien la hizo. Sustitúyela por una cuenta de
+          servicio de solo lectura.
+        </p>
       ) : null}
 
       {!manageable ? (
@@ -102,17 +115,19 @@ export const IntegrationCard = ({
             >
               Desconectar
             </button>
-            <button
-              type="button"
-              onClick={() => setShowConnectForm(true)}
-              disabled={busy}
-              className="btn-secondary text-xs py-2 px-4 disabled:opacity-50 cursor-pointer"
-              aria-label={`Cambiar cuenta ${integration.name}`}
-            >
-              Cambiar cuenta
-            </button>
+            {isGitlab ? null : (
+              <button
+                type="button"
+                onClick={() => setShowConnectForm(true)}
+                disabled={busy}
+                className="btn-secondary text-xs py-2 px-4 disabled:opacity-50 cursor-pointer"
+                aria-label={`Cambiar cuenta ${integration.name}`}
+              >
+                Cambiar cuenta
+              </button>
+            )}
           </>
-        ) : (
+        ) : isGitlab ? null : (
           <button
             type="button"
             onClick={() => setShowConnectForm(true)}
@@ -159,6 +174,35 @@ export const IntegrationCard = ({
         </div>
       ) : null}
 
+      {manageable && isGitlab ? (
+        <div className="pt-2 border-t border-[var(--color-border)] space-y-4">
+          <ServiceAccountForm onConnected={onConnected} onError={onError} />
+          <details className="text-xs">
+            <summary className="cursor-pointer font-semibold text-[var(--color-ink-muted)]">
+              Usar OAuth (no recomendado)
+            </summary>
+            <div className="mt-4">
+              <OAuthSetup
+                provider="gitlab"
+                title="GitLab OAuth"
+                docsUrl="https://gitlab.com/-/user_settings/applications"
+                docsLabel="gitlab.com user applications"
+                defaultRedirect="http://127.0.0.1:6728/api/integrations/gitlab/callback"
+                showBaseUrl
+                onSaved={onOAuthSaved}
+                onContinueOAuth={onOAuth}
+              />
+            </div>
+          </details>
+        </div>
+      ) : null}
+
+      {manageable && integration.id === 'github' ? (
+        <p className="text-xs text-[var(--color-ink-muted)]">
+          GitHub requerirá una GitHub App con permisos de solo lectura; aún no está disponible.
+        </p>
+      ) : null}
+
       {manageable && showConnectForm ? (
         <div className="mt-6 border-t border-[var(--color-border)] pt-5 space-y-4">
           <div className="mt-4">
@@ -175,18 +219,6 @@ export const IntegrationCard = ({
                 docsUrl="https://github.com/settings/developers"
                 docsLabel="github.com/settings/developers"
                 defaultRedirect="http://127.0.0.1:6728/api/integrations/github/callback"
-                onSaved={onOAuthSaved}
-                onContinueOAuth={onOAuth}
-                onCancel={() => setShowConnectForm(false)}
-              />
-            ) : integration.id === 'gitlab' ? (
-              <OAuthSetup
-                provider="gitlab"
-                title="GitLab OAuth"
-                docsUrl="https://gitlab.com/-/user_settings/applications"
-                docsLabel="gitlab.com user applications"
-                defaultRedirect="http://127.0.0.1:6728/api/integrations/gitlab/callback"
-                showBaseUrl
                 onSaved={onOAuthSaved}
                 onContinueOAuth={onOAuth}
                 onCancel={() => setShowConnectForm(false)}
