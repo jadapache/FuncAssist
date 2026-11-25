@@ -284,3 +284,76 @@ async def test_delete_template(sandbox):
   assert await ts.delete_template(item["id"]) is True
   assert not path.exists() and ts._load_index() == []
   assert await ts.delete_template(item["id"]) is False
+
+
+# ------------------------------------------------------------------ behaviours pinned by mutation testing
+
+
+def test_template_dirs_are_created_with_their_parents_and_can_be_ensured_twice(sandbox, monkeypatch):
+  nested = sandbox / "deep" / "nested" / "templates"
+  monkeypatch.setattr(ts, "TEMPLATES_DIR", nested)
+  ts.ensure_template_dirs()
+  ts.ensure_template_dirs()
+  assert nested.is_dir()
+
+
+def test_a_table_gets_its_separator_only_after_the_first_row(tmp_path):
+  d = docx.Document()
+  table = d.add_table(rows=3, cols=2)
+  for r, values in enumerate([("A", "B"), ("1", "2"), ("3", "4")]):
+    for c, value in enumerate(values):
+      table.cell(r, c).text = value
+  path = tmp_path / "t.docx"
+  d.save(path)
+  assert "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |" in ts.extract_docx_structure(path)["content"]
+
+
+def test_a_table_whose_first_row_is_empty_has_no_separator(tmp_path):
+  d = docx.Document()
+  table = d.add_table(rows=3, cols=2)
+  for r, values in enumerate([("", ""), ("x", "y"), ("p", "q")]):
+    for c, value in enumerate(values):
+      table.cell(r, c).text = value
+  path = tmp_path / "t.docx"
+  d.save(path)
+  content = ts.extract_docx_structure(path)["content"]
+  assert "| x | y |\n| p | q |" in content and "---" not in content
+
+
+@pytest.mark.parametrize("raw,expected", [
+  (b"\x00\x01 abc \x02\x03", "Plantilla binaria (.doc) almacenada correctamente."),  # three characters are not enough
+  (b"\x00\x01 abcd \x02\x03", " abcd "),
+])
+def test_binary_templates_show_only_strings_of_more_than_three_characters(sandbox, raw, expected):
+  assert ts.extract_template_content(_put("b.doc", raw)) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename,title,module,expected_title,expected_module", [
+  ("Mi Formato.docx", "", "", "Mi Formato", "general"),
+  ("Mi Formato.docx", "  Título propio  ", "ventas", "Título propio", "ventas"),
+  ("otro.md", "   ", "general", "otro", "general"),
+])
+async def test_saved_templates_get_a_default_title_and_module(sandbox, filename, title, module, expected_title, expected_module):
+  item = await ts.save_template_file(filename, b"x", title=title, module=module)
+  assert (item["title"], item["module"]) == (expected_title, expected_module)
+  assert (await ts.get_template(item["id"]))["title"] == expected_title
+
+
+@pytest.mark.asyncio
+async def test_edited_content_does_not_hide_the_header_and_footer_of_a_word_template(sandbox):
+  d = ts.TEMPLATES_DIR / "w.docx"
+  ts.ensure_template_dirs()
+  _make_docx(d)
+  ts._save_index([{"id": "dx", "stored_filename": "w.docx", "custom_content": "editado {{AREA}}"}])
+  detail = await ts.get_template_detail("dx")
+  assert detail["content"] == "editado {{AREA}}"
+  assert (detail["header_content"], detail["footer_content"]) == ("Encabezado {{PAGINA}}", "Pie")
+  assert set(detail["detected_tags"]) == {"AREA", "PAGINA"}
+
+
+@pytest.mark.asyncio
+async def test_only_word_templates_have_a_header_and_footer(sandbox):
+  item = await ts.save_template_file("a.md", b"texto")
+  detail = await ts.get_template_detail(item["id"])
+  assert (detail["header_content"], detail["footer_content"]) == ("", "")
