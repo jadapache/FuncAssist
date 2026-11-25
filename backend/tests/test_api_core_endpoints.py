@@ -62,9 +62,8 @@ class TestSettingsAPI:
       return dict(store)
 
     monkeypatch.setattr(settings_api, "save_app_settings", save)
-    for kind in ("jira", "github", "gitlab"):
-      monkeypatch.setattr(settings_api, f"get_{kind}_oauth_public", lambda kind=kind: {"provider": kind})
-      monkeypatch.setattr(settings_api, f"save_{kind}_oauth_config", lambda kind=kind, **kw: {"provider": kind, **kw})
+    monkeypatch.setattr(settings_api, "get_jira_oauth_public", lambda: {"provider": "jira"})
+    monkeypatch.setattr(settings_api, "save_jira_oauth_config", lambda **kw: {"provider": "jira", **kw})
     self.c = _client(settings_api.router)
 
   def test_get_and_update(self):
@@ -72,13 +71,17 @@ class TestSettingsAPI:
     r = self.c.put("/api/settings", json={"theme": "light", "selected_repos": ["a/b"]})
     assert r.json() == {"theme": "light", "selected_repos": ["a/b"]}
 
-  @pytest.mark.parametrize("kind", ["jira", "github", "gitlab"])
-  def test_oauth_endpoints(self, kind):
-    assert self.c.get(f"/api/settings/{kind}-oauth").json() == {"provider": kind}
-    r = self.c.put(f"/api/settings/{kind}-oauth", json={"client_id": "cid", "client_secret": "s"})
+  def test_oauth_endpoints(self):
+    assert self.c.get("/api/settings/jira-oauth").json() == {"provider": "jira"}
+    r = self.c.put("/api/settings/jira-oauth", json={"client_id": "cid", "client_secret": "s"})
     body = r.json()
-    assert body["provider"] == kind and body["client_id"] == "cid" and body["client_secret"] == "s"
-    assert self.c.put(f"/api/settings/{kind}-oauth", json={"client_id": ""}).status_code == 422
+    assert body["provider"] == "jira" and body["client_id"] == "cid" and body["client_secret"] == "s"
+    assert self.c.put("/api/settings/jira-oauth", json={"client_id": ""}).status_code == 422
+
+  @pytest.mark.parametrize("kind", ["github", "gitlab"])
+  def test_github_and_gitlab_have_no_oauth_settings(self, kind):
+    assert self.c.get(f"/api/settings/{kind}-oauth").status_code == 404
+    assert self.c.put(f"/api/settings/{kind}-oauth", json={"client_id": "cid"}).status_code in (404, 405)
 
   def test_health(self, monkeypatch):
     monkeypatch.setenv("APP_BUILD_ID", "b42")

@@ -1,5 +1,6 @@
 from urllib.parse import quote
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -76,44 +77,6 @@ async def jira_oauth_callback(code: str | None = None, state: str | None = None,
   return RedirectResponse(f"{frontend}/integrations?jira=connected")
 
 
-@router.get("/github/callback")
-async def github_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
-  settings = get_settings()
-  frontend = settings.frontend_url.rstrip("/")
-
-  if error:
-    return RedirectResponse(f"{frontend}/integrations?github=error&message={quote(error)}")
-  if not code or not state:
-    return RedirectResponse(f"{frontend}/integrations?github=error&message=missing_code")
-
-  try:
-    await registry.get("github").handle_oauth_callback(code, state)
-    await sync_integration("github")
-  except Exception as exc:
-    return RedirectResponse(f"{frontend}/integrations?github=error&message={quote(str(exc))}")
-
-  return RedirectResponse(f"{frontend}/integrations?github=connected")
-
-
-@router.get("/gitlab/callback")
-async def gitlab_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
-  settings = get_settings()
-  frontend = settings.frontend_url.rstrip("/")
-
-  if error:
-    return RedirectResponse(f"{frontend}/integrations?gitlab=error&message={quote(error)}")
-  if not code or not state:
-    return RedirectResponse(f"{frontend}/integrations?gitlab=error&message=missing_code")
-
-  try:
-    await registry.get("gitlab").handle_oauth_callback(code, state)
-    await sync_integration("gitlab")
-  except Exception as exc:
-    return RedirectResponse(f"{frontend}/integrations?gitlab=error&message={quote(str(exc))}")
-
-  return RedirectResponse(f"{frontend}/integrations?gitlab=connected")
-
-
 @router.get("/{integration_id}", response_model=IntegrationInfo)
 async def get_integration(
   integration_id: str,
@@ -135,13 +98,11 @@ async def start_oauth(
   current_user: dict = Depends(get_current_user),
 ) -> dict:
   _require_admin_for_organization(integration_id, current_user)
+  if integration_id != "jira":
+    raise HTTPException(status_code=501, detail="OAuth is only used by Jira. GitHub and GitLab use service accounts.")
   try:
     integration = registry.get(integration_id)
-    user_id = current_user["id"]
-    if integration_id == "jira":
-      result = await integration.start_oauth(user_id=user_id)
-    else:
-      result = await integration.start_oauth()
+    result = await integration.start_oauth(user_id=current_user["id"])
     return result.model_dump()
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -157,22 +118,63 @@ class ServiceAccountRequest(BaseModel):
   selected_repos: list[str] | None = None
 
 
+class GitHubAppRequest(BaseModel):
+  app_id: str = Field(min_length=1, max_length=64)
+  private_key: str = Field(min_length=1, max_length=8192)
+  installation_id: str | None = Field(default=None, max_length=64)
+  selected_repos: list[str] | None = None
+
+
+async def _finish_service_account(integration_id: str, info: IntegrationInfo, current_user: dict) -> IntegrationInfo:
+  log_security_event(
+    "service_account_connected",
+    admin=str(current_user["id"]), provider=integration_id,
+    scopes=info.details.get("scopes"), permissions=info.details.get("permissions"),
+    expires_at=info.details.get("expires_at"),
+  )
+  try:
+    await sync_integration(integration_id)
+  except Exception:
+    pass
+  return info
+
+
+@router.post("/github/service-account", response_model=IntegrationInfo)
+async def connect_github_app(
+  body: GitHubAppRequest,
+  current_user: dict = Depends(get_current_user),
+) -> IntegrationInfo:
+  """Connect GitHub through a read-only GitHub App installation (administrators only)."""
+  _require_admin_for_organization("github", current_user)
+  try:
+    info = await registry.get("github").connect_with_github_app(  # type: ignore[attr-defined]
+      body.app_id,
+      body.private_key,
+      installation_id=body.installation_id,
+      selected_repos=body.selected_repos,
+      configured_by=str(current_user["id"]),
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except httpx.HTTPError as exc:
+    raise HTTPException(status_code=502, detail="Could not reach GitHub to validate the App.") from exc
+  return await _finish_service_account("github", info, current_user)
+
+
 @router.post("/{integration_id}/service-account", response_model=IntegrationInfo)
 async def connect_service_account(
   integration_id: str,
   body: ServiceAccountRequest,
   current_user: dict = Depends(get_current_user),
 ) -> IntegrationInfo:
-  """Connect an organization integration with a dedicated read-only bot credential (administrators only)."""
+  """Connect GitLab with a dedicated read-only bot credential (administrators only)."""
   _require_admin_for_organization(integration_id, current_user)
   try:
     integration = registry.get(integration_id)
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
-  if integration_id == "github":
-    raise HTTPException(status_code=501, detail="GitHub requires a GitHub App, which is not available yet.")
   if integration_id != "gitlab":
-    raise HTTPException(status_code=501, detail="Service accounts are only available for GitLab.")
+    raise HTTPException(status_code=501, detail="Token service accounts are only available for GitLab.")
 
   try:
     info = await integration.connect_with_service_account(  # type: ignore[attr-defined]
@@ -183,16 +185,7 @@ async def connect_service_account(
     )
   except ValueError as exc:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
-  log_security_event(
-    "service_account_connected",
-    admin=str(current_user["id"]), provider=integration_id,
-    scopes=info.details.get("scopes"), expires_at=info.details.get("expires_at"),
-  )
-  try:
-    await sync_integration(integration_id)
-  except Exception:
-    pass
-  return info
+  return await _finish_service_account(integration_id, info, current_user)
 
 
 @router.post("/{integration_id}/test", response_model=TestConnectionResult)
