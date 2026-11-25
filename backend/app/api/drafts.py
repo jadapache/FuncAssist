@@ -36,6 +36,37 @@ class SaveDraftRequest(BaseModel):
   activeArtifactId: Optional[str] = None
 
 
+async def _store_new_messages(
+  chat_repo: ChatRepository, messages: List[Dict[str, Any]], session_id: str, user_id: str
+) -> None:
+  """Messages with an id are upserted by id (save_message is idempotent), so repeated autosaves
+  and the agentic endpoint's own persistence never duplicate them, and legitimately repeated
+  texts ("sí", "ok") are kept. Only id-less messages fall back to content de-duplication."""
+  existing_messages = await chat_repo.get_session_messages(session_id=session_id, limit=0, user_id=user_id)
+  existing_contents = {(m.get("role"), (m.get("content") or "").strip()) for m in existing_messages}
+  existing_by_id = {m.get("id"): (m.get("content") or "").strip() for m in existing_messages if m.get("id")}
+
+  for msg in messages:
+    content = (msg.get("content") or "").strip()
+    msg_id = msg.get("id")
+    role = msg.get("role", "user")
+    already_stored = (
+      existing_by_id.get(msg_id) == content if msg_id else (role, content) in existing_contents
+    )
+    if not content or already_stored:
+      continue
+    await chat_repo.save_message(
+      session_id=session_id,
+      role=role,
+      content=content,
+      context_sources=msg.get("context_sources"),
+      attachments=msg.get("attachments"),
+      user_id=user_id,
+      id=msg_id,
+    )
+    existing_contents.add((role, content))
+
+
 @router.post("/save")
 async def save_draft(
   body: SaveDraftRequest,
@@ -52,35 +83,7 @@ async def save_draft(
     await chat_repo.save_session(payload)
 
     # 2. Save individual messages to PostgreSQL chat_messages.
-    # Messages with an id are upserted by id (save_message is idempotent), so repeated autosaves
-    # and the agentic endpoint's own persistence never duplicate them, and legitimately repeated
-    # texts ("sí", "ok") are kept. Only id-less messages fall back to content de-duplication.
-    session_id = payload.get("id") or "default"
-    existing_messages = await chat_repo.get_session_messages(session_id=session_id, limit=0, user_id=user_id)
-    existing_contents = {(m.get("role"), (m.get("content") or "").strip()) for m in existing_messages}
-    existing_by_id = {m.get("id"): (m.get("content") or "").strip() for m in existing_messages if m.get("id")}
-
-    for msg in body.messages:
-      content = (msg.get("content") or "").strip()
-      if not content:
-        continue
-      msg_id = msg.get("id")
-      role = msg.get("role", "user")
-      key = (role, content)
-      if not msg_id and key in existing_contents:
-        continue
-      if msg_id and existing_by_id.get(msg_id) == content:
-        continue  # already stored unchanged: skip the round-trip
-      await chat_repo.save_message(
-        session_id=session_id,
-        role=role,
-        content=content,
-        context_sources=msg.get("context_sources"),
-        attachments=msg.get("attachments"),
-        user_id=user_id,
-        id=msg_id,
-      )
-      existing_contents.add(key)
+    await _store_new_messages(chat_repo, body.messages, payload.get("id") or "default", user_id)
 
     # 3. Persist file-based draft backup
     saved = save_draft_session(payload)
@@ -119,5 +122,5 @@ async def delete_draft(
   """Delete a draft session from database and disk."""
   user_id = current_user["id"]
   await chat_repo.delete_session(draft_id, user_id=user_id)
-  deleted = delete_generated_draft(draft_id)
+  delete_generated_draft(draft_id)
   return {"ok": True, "message": "Borrador eliminado con éxito."}
