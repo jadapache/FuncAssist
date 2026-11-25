@@ -10,6 +10,44 @@ from app.db.interfaces.catalog_repository import IAIModelCatalogRepository
 from app.db.models import AIModelCatalogModel
 
 
+def _first(model: dict[str, Any], *keys: str) -> Any:
+  """The first truthy value among these keys, or the last value looked at when none is truthy."""
+  value = None
+  for key in keys:
+    value = model.get(key)
+    if value:
+      return value
+  return value
+
+
+def _lookup_names(model: dict[str, Any]) -> set[str]:
+  """Everything a model can be asked for besides its id, lower-cased."""
+  names = {str(alias).lower() for alias in model.get("aliases") or []}
+  names.update(str(model.get(key) or "").lower() for key in ("filename", "tag"))
+  names.discard("")
+  return names
+
+
+def _model_columns(model: dict[str, Any], model_id: str) -> dict[str, Any]:
+  """The catalog row for one incoming model, accepting both snake_case and camelCase field names."""
+  is_free = bool(model.get("is_free", False))
+  features = _first(model, "required_features", "requiredFeatures") or []
+  return {
+    "id": model_id,
+    "provider": model.get("provider", "groq"),
+    "task_type": model.get("task_type", "chat_writing"),
+    "name": model.get("name", model_id),
+    "is_free": is_free,
+    "tier_type": model.get("tier_type", "free" if is_free else "paid"),
+    "vram_required_mb": _first(model, "vram_required_mb", "vramRequiredMB"),
+    "context_window": _first(model, "context_window", "contextWindow", "tokens"),
+    "download_size": _first(model, "download_size", "downloadSize", "size"),
+    "tier": model.get("tier"),
+    "required_features": json.dumps(features) if features else None,
+    "payload_json": json.dumps(model, ensure_ascii=False),
+  }
+
+
 class AIModelCatalogRepository(IAIModelCatalogRepository):
   """PostgreSQL ORM repository for AI model catalog with injected Session."""
 
@@ -18,22 +56,19 @@ class AIModelCatalogRepository(IAIModelCatalogRepository):
 
   def get(self, model_id: str) -> Optional[dict[str, Any]]:
     clean = model_id.strip()
+    if not clean:
+      return None
     stmt = select(AIModelCatalogModel).where(AIModelCatalogModel.id == clean)
-    result = self.session.execute(stmt)
-    row = result.scalar_one_or_none()
+    row = self.session.execute(stmt).scalar_one_or_none()
     if row:
       return row.to_dict()
+    return self._find_by_alternative_name(clean.lower())
 
-    stmt_all = select(AIModelCatalogModel)
-    for r in self.session.execute(stmt_all).scalars().all():
-      d = r.to_dict()
-      aliases = [a.lower() for a in d.get("aliases", [])]
-      if (
-        clean.lower() in aliases
-        or clean.lower() == d.get("filename", "").lower()
-        or clean.lower() == d.get("tag", "").lower()
-      ):
-        return d
+  def _find_by_alternative_name(self, name: str) -> Optional[dict[str, Any]]:
+    for row in self.session.execute(select(AIModelCatalogModel)).scalars().all():
+      model = row.to_dict()
+      if name in _lookup_names(model):
+        return model
     return None
 
   def list(self, task_type: Optional[str] = None) -> List[dict[str, Any]]:
@@ -55,58 +90,23 @@ class AIModelCatalogRepository(IAIModelCatalogRepository):
 
   def bulk_upsert(self, models: List[dict[str, Any]]) -> int:
     count = 0
-    for m in models:
-      mid = m.get("id")
-      if not mid:
+    for model in models:
+      model_id = model.get("id")
+      if not model_id:
         continue
-      prov = m.get("provider", "groq")
-      task_type = m.get("task_type", "chat_writing")
-      name = m.get("name", mid)
-      is_free = bool(m.get("is_free", False))
-      tier_type = m.get("tier_type", "free" if is_free else "paid")
-      vram_mb = m.get("vram_required_mb") or m.get("vramRequiredMB")
-      context_win = m.get("context_window") or m.get("contextWindow") or m.get("tokens")
-      down_size = m.get("download_size") or m.get("downloadSize") or m.get("size")
-      tier = m.get("tier")
-      req_features = m.get("required_features") or m.get("requiredFeatures") or []
-      req_features_json = json.dumps(req_features) if req_features else None
-      payload_json = json.dumps(m, ensure_ascii=False)
-
-      stmt = select(AIModelCatalogModel).where(AIModelCatalogModel.id == mid)
-      result = self.session.execute(stmt)
-      row = result.scalar_one_or_none()
-
-      if row is None:
-        row = AIModelCatalogModel(
-          id=mid,
-          provider=prov,
-          task_type=task_type,
-          name=name,
-          is_free=is_free,
-          tier_type=tier_type,
-          vram_required_mb=vram_mb,
-          context_window=context_win,
-          download_size=down_size,
-          tier=tier,
-          required_features=req_features_json,
-          payload_json=payload_json,
-        )
-        self.session.add(row)
-      else:
-        row.provider = prov
-        row.task_type = task_type
-        row.name = name
-        row.is_free = is_free
-        row.tier_type = tier_type
-        row.vram_required_mb = vram_mb
-        row.context_window = context_win
-        row.download_size = down_size
-        row.tier = tier
-        row.required_features = req_features_json
-        row.payload_json = payload_json
+      self._upsert_one(_model_columns(model, model_id))
       count += 1
     self.session.flush()
     return count
+
+  def _upsert_one(self, columns: dict[str, Any]) -> None:
+    stmt = select(AIModelCatalogModel).where(AIModelCatalogModel.id == columns["id"])
+    row = self.session.execute(stmt).scalar_one_or_none()
+    if row is None:
+      self.session.add(AIModelCatalogModel(**columns))
+      return
+    for name, value in columns.items():
+      setattr(row, name, value)
 
   def replace_external(self, models: List[dict[str, Any]]) -> int:
     self.session.execute(delete(AIModelCatalogModel).where(

@@ -10,6 +10,21 @@ from app.db.interfaces.corporate_template_repository import ICorporateTemplateRe
 from app.db.models import CorporateTemplateModel
 
 
+def _template_columns(item: dict[str, Any], template_id: str) -> dict[str, Any]:
+  """The stored columns of a corporate template, with the defaults for whatever the item leaves out."""
+  filename = item.get("filename") or f"{template_id}.docx"
+  return {
+    "id": template_id,
+    "title": item.get("title") or "Plantilla Corporativa",
+    "filename": filename,
+    "stored_filename": item.get("stored_filename") or filename,
+    "file_type": item.get("file_type") or "docx",
+    "file_size": int(item.get("file_size") or 0),
+    "module": item.get("module") or "general",
+    "tags_json": json.dumps(item.get("tags") or [], ensure_ascii=False),
+  }
+
+
 class CorporateTemplateRepository(ICorporateTemplateRepository):
   """PostgreSQL ORM repository for corporate document templates with injected AsyncSession."""
 
@@ -33,49 +48,20 @@ class CorporateTemplateRepository(ICorporateTemplateRepository):
     if not tid:
       raise ValueError("La plantilla corporativa debe tener un 'id'")
 
-    title = item.get("title") or "Plantilla Corporativa"
-    filename = item.get("filename") or f"{tid}.docx"
-    stored_filename = item.get("stored_filename") or filename
-    file_type = item.get("file_type") or "docx"
-    file_size = int(item.get("file_size") or 0)
-    module = item.get("module") or "general"
-    tags = item.get("tags") or []
-    custom_content = item.get("custom_content")
-
+    columns = _template_columns(item, tid)
     stmt = select(CorporateTemplateModel).where(CorporateTemplateModel.id == tid)
-    result = await self.session.execute(stmt)
-    row = result.scalar_one_or_none()
-
+    row = (await self.session.execute(stmt)).scalar_one_or_none()
     if row is None:
-      row = CorporateTemplateModel(
-        id=tid,
-        title=title,
-        filename=filename,
-        stored_filename=stored_filename,
-        file_type=file_type,
-        file_size=file_size,
-        module=module,
-        tags_json=json.dumps(tags, ensure_ascii=False),
-        custom_content=custom_content,
-      )
+      row = CorporateTemplateModel(**columns, custom_content=item.get("custom_content"))
       self.session.add(row)
     else:
-      row.title = title
-      row.filename = filename
-      row.stored_filename = stored_filename
-      row.file_type = file_type
-      row.file_size = file_size
-      row.module = module
-      row.tags_json = json.dumps(tags, ensure_ascii=False)
-      if custom_content is not None:
-        row.custom_content = custom_content
+      for name, value in columns.items():
+        setattr(row, name, value)
+      if item.get("custom_content") is not None:
+        row.custom_content = item["custom_content"]
 
     await self.session.flush()
-    if hasattr(self.session, "refresh"):
-      res = self.session.refresh(row)
-      import inspect
-      if inspect.isawaitable(res):
-        await res
+    await self.session.refresh(row)
     return row.to_dict()
 
   async def delete(self, template_id: str) -> bool:
