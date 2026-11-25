@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from app.ai.injection import annotate_items
 from app.core.redis import get_redis_client
 from app.integrations.registry import GIT_HOSTING_IDS, registry
 
@@ -45,6 +46,7 @@ async def _fetch_integration_payload(integration_id: str, user_id: str | None = 
     payload["data"]["issues"] = await integration.get_issues(max_results=50, user_id=user_id)  # type: ignore[attr-defined]
     payload["data"]["projects"] = await integration.get_projects(user_id=user_id)  # type: ignore[attr-defined]
     payload["data"]["sprints"] = await integration.get_sprints(user_id=user_id)  # type: ignore[attr-defined]
+    annotate_items(payload["data"]["issues"], ("summary", "description"))
   elif integration_id in GIT_HOSTING_IDS:
     payload["data"]["repositories"] = await integration.get_repositories()  # type: ignore[attr-defined]
     payload["data"]["pull_requests"] = await integration.get_pull_requests(max_results=30)  # type: ignore[attr-defined]
@@ -52,7 +54,10 @@ async def _fetch_integration_payload(integration_id: str, user_id: str | None = 
 
     if integration_id == "gitlab":
       payload["data"]["issues"] = await integration.get_issues(max_results=30)  # type: ignore[attr-defined]
+      annotate_items(payload["data"]["issues"], ("title", "summary", "description"))
 
+    annotate_items(payload["data"]["pull_requests"], ("title", "body"))
+    annotate_items(payload["data"]["commits"], ("message",))
     prs = payload["data"].get("pull_requests") or []
     files_changed: list[dict[str, Any]] = []
     if prs and hasattr(integration, "get_files_changed"):

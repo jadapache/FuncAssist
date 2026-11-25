@@ -163,3 +163,12 @@ def test_bundle_prompt_block_wraps_chunks():
   block = bundle.to_prompt_block()
   assert block.startswith("[1] <<<DATOS_EXTERNOS") and "Título\nCuerpo del ticket" in block
   assert ContextBundle(query="q").to_prompt_block() == "No context chunks available."
+
+
+def test_contains_envelope_recognizes_real_envelopes_only():
+  assert untrusted.contains_envelope(wrap_untrusted("jira", "K-1", "x")) is True
+  assert untrusted.contains_envelope("prefijo " + wrap_untrusted("jira", "K-1", "x") + " sufijo") is True
+  # the fixed notice mentions the markers but is not an envelope
+  assert untrusted.contains_envelope(UNTRUSTED_NOTICE) is False
+  assert untrusted.contains_envelope("<<<DATOS_EXTERNOS id=zz fuente=x ref=y>>>") is False
+  assert untrusted.contains_envelope(None) is False and untrusted.contains_envelope("") is False

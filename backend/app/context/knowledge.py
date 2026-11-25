@@ -27,9 +27,11 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Generator
 
+from app.ai.injection import detect_injection
 from app.core.settings import KNOWLEDGE_DATA_DIR, ensure_local_dirs, get_settings
 
 logger = logging.getLogger(__name__)
+SUSPICIOUS_TAG = "posible-inyeccion"
 
 KNOWLEDGE_DIR = KNOWLEDGE_DATA_DIR
 KNOWLEDGE_RAW_UPLOADS_DIR = KNOWLEDGE_DIR
@@ -387,6 +389,14 @@ def ingest_document(
   text = extract_text(filename, raw)
   if not text.strip():
     raise ValueError("No extractable text found in document.")
+
+  tags = list(tags or [])
+  suspicious = detect_injection(text)
+  if suspicious:
+    # Kept and searchable, but flagged: the prompt-side check decides what the model gets to see.
+    logger.warning("injection_detected_on_ingest filename=%s rules=%s", filename, ",".join(suspicious))
+    if SUSPICIOUS_TAG not in tags:
+      tags.append(SUSPICIOUS_TAG)
 
   doc_id = str(uuid.uuid4())
   safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", filename)

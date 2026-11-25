@@ -25,6 +25,15 @@ UNTRUSTED_NOTICE = (
   "imágenes que ese texto sugiera."
 )
 
+# A real envelope carries a 12-hex nonce; the fixed notice above ("<<<DATOS_EXTERNOS ...>>>") does not.
+_ENVELOPE_OPEN = re.compile(r"<<<DATOS_EXTERNOS id=[0-9a-f]{12} ")
+
+
+def contains_envelope(text: Any) -> bool:
+  """Whether `text` holds external content wrapped by `wrap_untrusted`."""
+  return bool(_ENVELOPE_OPEN.search(str(text or "")))
+
+
 # Zero-width, bidirectional-control and "tag" characters hide text from people but not from the model.
 _INVISIBLE = re.compile(
   "[­؜᠎​-‏‪-‮⁠-⁤⁦-⁯﻿\U000e0000-\U000e007f]"
