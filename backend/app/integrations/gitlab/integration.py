@@ -1,8 +1,9 @@
-"""GitLab integration — OAuth with project selection."""
+"""GitLab integration: a read-only service account token (preferred) or OAuth, with project selection."""
 
 from __future__ import annotations
 
 import secrets
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -18,6 +19,13 @@ from app.integrations.base import (
   Integration,
   IntegrationInfo,
   TestConnectionResult,
+)
+from app.integrations.service_accounts import (
+  GITLAB_ALLOWED_SCOPES,
+  GITLAB_REQUIRED_SCOPES,
+  check_scopes,
+  days_until_expiry,
+  expiry_state,
 )
 
 DEFAULT_HOST = "https://gitlab.com"
@@ -54,7 +62,7 @@ class GitLabIntegration(Integration):
         name=self.name,
         description=self.description,
         status=ConnectionStatus.NOT_CONNECTED,
-        auth_methods=[AuthMethod.OAUTH],
+        auth_methods=[AuthMethod.SERVICE_ACCOUNT, AuthMethod.OAUTH],
         capabilities=self.get_capabilities(),
         oauth_configured=oauth_configured,
       )
@@ -66,7 +74,7 @@ class GitLabIntegration(Integration):
       name=self.name,
       description=self.description,
       status=ConnectionStatus.CONNECTED,
-      auth_methods=[AuthMethod.OAUTH],
+      auth_methods=[AuthMethod.SERVICE_ACCOUNT, AuthMethod.OAUTH],
       capabilities=self.get_capabilities(),
       account_label=data.get("account_login"),
       workspace_label=host,
@@ -74,6 +82,11 @@ class GitLabIntegration(Integration):
         "auth_method": data.get("auth_method"),
         "selected_repos": data.get("selected_repos", []),
         "base_url": data.get("base_url") or DEFAULT_HOST,
+        "scopes": data.get("scopes") or [],
+        "expires_at": data.get("expires_at"),
+        "expiry": expiry_state(data.get("expires_at")),
+        "configured_by": data.get("configured_by"),
+        "configured_at": data.get("configured_at"),
       },
       oauth_configured=oauth_configured,
     )
@@ -81,7 +94,78 @@ class GitLabIntegration(Integration):
   def _is_connected(self, data: dict[str, Any] | None) -> bool:
     if not data:
       return False
-    return data.get("auth_method") == AuthMethod.OAUTH.value and bool(data.get("access_token"))
+    method = data.get("auth_method")
+    if method == AuthMethod.OAUTH.value:
+      return bool(data.get("access_token"))
+    if method == AuthMethod.SERVICE_ACCOUNT.value:
+      return bool(data.get("service_token"))
+    return False
+
+  @staticmethod
+  def _normalize_base_url(base_url: str | None) -> str:
+    value = (base_url or DEFAULT_HOST).strip().rstrip("/")
+    if not value.lower().startswith("https://"):
+      raise ValueError("The GitLab URL must use HTTPS.")
+    return value
+
+  @staticmethod
+  async def _read_token_info(client: httpx.AsyncClient, api_base: str, token: str) -> dict[str, Any]:
+    """What GitLab says about the token itself, validated against the least-privilege policy."""
+    response = await client.get(f"{api_base}/personal_access_tokens/self", headers={"PRIVATE-TOKEN": token})
+    if response.status_code in (401, 403):
+      raise ValueError("GitLab rejected the token: it is invalid, revoked or expired.")
+    response.raise_for_status()
+    info = response.json()
+    if not info.get("active", True) or info.get("revoked"):
+      raise ValueError("The GitLab token is not active.")
+    if expiry_state(info.get("expires_at")) == "expired":
+      raise ValueError("The GitLab token has expired.")
+    scopes = check_scopes(info.get("scopes") or [], allowed=GITLAB_ALLOWED_SCOPES, required=GITLAB_REQUIRED_SCOPES)
+    return {"scopes": scopes, "expires_at": info.get("expires_at"), "token_name": info.get("name")}
+
+  async def connect_with_service_account(
+    self,
+    token: str,
+    *,
+    base_url: str | None = None,
+    selected_repos: list[str] | None = None,
+    configured_by: str | None = None,
+  ) -> IntegrationInfo:
+    """Connect the organization with a read-only bot token (project or group access token, service account).
+
+    The token is checked before anything is stored: it must be active, not expired, and carry only
+    read scopes. Whoever configures it is recorded.
+    """
+    token = (token or "").strip()
+    if not token:
+      raise ValueError("A service account token is required.")
+    host = self._normalize_base_url(base_url)
+    api_base = f"{host}/api/v4"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      token_info = await self._read_token_info(client, api_base, token)
+      user_response = await client.get(f"{api_base}/user", headers={"PRIVATE-TOKEN": token})
+      user_response.raise_for_status()
+      user = user_response.json()
+
+    existing = load_connection(self.id) or {}
+    payload = {
+      "auth_method": AuthMethod.SERVICE_ACCOUNT.value,
+      "service_token": token,
+      "base_url": host,
+      "api_base": api_base,
+      "account_login": user.get("username"),
+      "account_label": user.get("username"),
+      "account_name": user.get("name"),
+      "scopes": token_info["scopes"],
+      "expires_at": token_info["expires_at"],
+      "token_name": token_info["token_name"],
+      "configured_by": configured_by,
+      "configured_at": datetime.now(timezone.utc).isoformat(),
+      "selected_repos": selected_repos if selected_repos is not None else (existing.get("selected_repos") or []),
+    }
+    save_connection(self.id, payload)
+    return self.get_info()
 
   async def start_oauth(self) -> AuthStartResponse:
     oauth = get_gitlab_oauth_config()
@@ -182,15 +266,21 @@ class GitLabIntegration(Integration):
         )
         response.raise_for_status()
         user = response.json()
-      return TestConnectionResult(
-        ok=True,
-        message="GitLab connection is healthy.",
-        details={
+        details: dict[str, Any] = {
           "username": user.get("username"),
           "selected_repos": data.get("selected_repos", []),
           "base_url": data.get("base_url") or DEFAULT_HOST,
-        },
-      )
+        }
+        if data.get("auth_method") == AuthMethod.SERVICE_ACCOUNT.value:
+          # Permissions can grow after the token was connected: check them again every time.
+          info = await self._read_token_info(client, self._api_base(data), str(data["service_token"]))
+          details.update(
+            scopes=info["scopes"],
+            expires_at=info["expires_at"],
+            expiry=expiry_state(info["expires_at"]),
+            days_left=days_until_expiry(info["expires_at"]),
+          )
+      return TestConnectionResult(ok=True, message="GitLab connection is healthy.", details=details)
     except Exception as exc:
       return TestConnectionResult(ok=False, message=str(exc))
 
@@ -200,6 +290,8 @@ class GitLabIntegration(Integration):
       raise ValueError("GitLab is not connected.")
     if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
       return {"Authorization": f"Bearer {data['access_token']}"}
+    if data.get("auth_method") == AuthMethod.SERVICE_ACCOUNT.value and data.get("service_token"):
+      return {"PRIVATE-TOKEN": str(data["service_token"])}
     raise ValueError("GitLab is not connected.")
 
   def selected_repos(self) -> list[str]:

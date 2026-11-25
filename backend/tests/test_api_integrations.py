@@ -42,6 +42,13 @@ class FakeIntegration:
   def user_id_from_state(self, state):
     return f"user-of-{state}"
 
+  async def connect_with_service_account(self, token, **kw):
+    self._maybe("connect_with_service_account", token, **kw)
+    return IntegrationInfo(
+      id=self.id, name=self.id.title(), description="d", status="connected", auth_methods=[], capabilities=[],
+      details={"scopes": ["read_api"], "expires_at": "2027-01-01"},
+    )
+
   async def authenticate(self, **kw):
     self._maybe("authenticate", **kw)
     return self.auth_ok
@@ -217,6 +224,54 @@ def test_regular_users_can_still_read_organization_integrations(regular_client, 
   assert regular_client.get("/api/integrations/github").status_code == 200
   assert regular_client.get("/api/integrations/github/repositories").status_code == 200
   assert regular_client.post("/api/integrations/github/test").status_code == 200
+
+
+def test_administrators_connect_gitlab_with_a_service_account(client, reg):
+  r = client.post("/api/integrations/gitlab/service-account", json={
+    "token": "glpat-x", "base_url": "https://git.corp.io", "selected_repos": ["g/p"],
+  })
+  assert r.status_code == 200 and r.json()["details"]["scopes"] == ["read_api"]
+  name, args, kwargs = reg.items["gitlab"].calls[-1]
+  assert name == "connect_with_service_account" and args == ("glpat-x",)
+  assert kwargs == {"base_url": "https://git.corp.io", "selected_repos": ["g/p"], "configured_by": "test-user-id"}
+  assert reg.state["sync_calls"][-1][0] == "gitlab"
+
+
+def test_the_service_account_connection_is_recorded_without_the_token(client, reg):
+  from app.ai import logging as ai_logging
+
+  client.post("/api/integrations/gitlab/service-account", json={"token": "glpat-super-secret"})
+  events = ai_logging.list_security_events(kind="service_account_connected")
+  assert events and events[0]["admin"] == "test-user-id" and events[0]["provider"] == "gitlab"
+  assert events[0]["scopes"] == ["read_api"] and "glpat-super-secret" not in str(events)
+
+
+def test_a_rejected_credential_is_reported(client, reg):
+  reg.items["gitlab"].raise_exc["connect_with_service_account"] = ValueError("more access than needed: api")
+  r = client.post("/api/integrations/gitlab/service-account", json={"token": "glpat-x"})
+  assert r.status_code == 400 and "more access" in r.json()["detail"]
+  assert reg.state["sync_calls"] == []
+
+
+def test_a_failing_sync_does_not_undo_the_connection(client, reg):
+  reg.state["sync_exc"] = RuntimeError("redis down")
+  assert client.post("/api/integrations/gitlab/service-account", json={"token": "glpat-x"}).status_code == 200
+
+
+def test_regular_users_cannot_connect_service_accounts(regular_client, reg):
+  r = regular_client.post("/api/integrations/gitlab/service-account", json={"token": "glpat-x"})
+  assert r.status_code == 403
+  assert reg.items["gitlab"].calls == []
+
+
+@pytest.mark.parametrize("iid,status", [("github", 501), ("jira", 501), ("notion", 501), ("nope", 404)])
+def test_service_accounts_are_only_available_for_gitlab(client, reg, iid, status):
+  assert client.post(f"/api/integrations/{iid}/service-account", json={"token": "t"}).status_code == status
+
+
+@pytest.mark.parametrize("payload", [{}, {"token": ""}, {"token": "x" * 600}])
+def test_service_account_payload_is_validated(client, reg, payload):
+  assert client.post("/api/integrations/gitlab/service-account", json=payload).status_code == 422
 
 
 @pytest.mark.parametrize("iid", ["jira", "github", "gitlab", "nope"])

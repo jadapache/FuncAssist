@@ -194,7 +194,7 @@ async def test_files_changed(store, monkeypatch):
 def test_personal_access_tokens_are_not_supported():
   integ = gl.GitLabIntegration()
   assert not hasattr(integ, "connect_with_pat")
-  assert [m.value for m in integ.get_info().auth_methods] == ["oauth"]
+  assert [m.value for m in integ.get_info().auth_methods] == ["service_account", "oauth"]
   with pytest.raises(ValueError):
     gl.GitLabIntegration()._headers()
 
