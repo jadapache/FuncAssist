@@ -101,7 +101,7 @@ FuncAssist/
 │   │   ├── core/           # Settings, security, secrets (Fernet), storage
 │   │   ├── db/             # Repository pattern, interfaces, SQLAlchemy ORM, PostgreSQL
 │   │   ├── features/       # Servicios (standup, mejoras funcionales)
-│   │   ├── integrations/   # Adaptadores (Jira OAuth personal, GitHub y GitLab OAuth)
+│   │   ├── integrations/   # Adaptadores (Jira OAuth personal, GitHub App y GitLab con cuenta de servicio)
 │   │   ├── models/         # Pydantic models (AI catalog)
 │   │   ├── schemas/        # Schemas de validación (user, chat, prd, test_plan)
 │   │   └── main.py         # Entry point

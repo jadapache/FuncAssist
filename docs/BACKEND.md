@@ -440,7 +440,7 @@ Listar estado de todas las integraciones.
 > No existe un endpoint para conectar con Personal Access Token: los PAT no se admiten en ninguna integración.
 
 #### `POST /api/integrations/{id}/oauth/start`
-Iniciar flujo OAuth 2.0 (Jira personal; GitHub y GitLab de organización).
+Iniciar flujo OAuth 2.0. Solo Jira (conexión personal de cada usuario). Para GitHub y GitLab se conectan con cuenta de servicio.
 
 **Response:**
 ```json
@@ -451,11 +451,11 @@ Iniciar flujo OAuth 2.0 (Jira personal; GitHub y GitLab de organización).
 }
 ```
 
-#### `GET /api/integrations/{id}/oauth/callback`
-Receiver para redirect de OAuth (internal, llamado por navegador).
+#### `GET /api/integrations/jira/callback`
+Receptor del redirect de OAuth de Jira (lo llama el navegador). GitHub y GitLab ya no tienen callback.
 
 #### `POST /api/integrations/{id}/service-account`
-Solo administradores. Conecta la organización con un token de bot de solo lectura (GitLab). Responde 501 para GitHub (requiere una GitHub App) y para Jira (cada usuario conecta la suya por OAuth).
+Solo administrador. Conecta la organización con un token de bot de solo lectura (GitLab). Responde 501 para Jira (cada usuario conecta la suya por OAuth). GitHub tiene su propia ruta, `POST /api/integrations/github/service-account` (ver abajo).
 
 **Request:**
 ```json
@@ -467,6 +467,23 @@ Solo administradores. Conecta la organización con un token de bot de solo lectu
 ```
 
 Antes de guardar nada se comprueba que el token esté activo, no haya caducado y tenga solo los permisos `read_api` (obligatorio), `read_repository` y `read_user`; cualquier permiso de escritura o administración se rechaza con 400. `POST /api/integrations/{id}/test` repite la comprobación y devuelve alcances, caducidad y días restantes. Conectar, desconectar y elegir repositorios de GitHub y GitLab exigen rol de administrador.
+
+#### `POST /api/integrations/github/service-account`
+Solo administradores. Conecta la organización con una **GitHub App** instalada solo en los repositorios necesarios.
+
+**Request:**
+```json
+{
+  "app_id": "123456",
+  "private_key": "-----BEGIN RSA PRIVATE KEY-----
+...
+-----END RSA PRIVATE KEY-----",
+  "installation_id": "7890123",
+  "selected_repos": ["org/repo"]
+}
+```
+
+`installation_id` es opcional si la App tiene una sola instalación. El backend firma un JWT con la clave privada, comprueba la instalación (activa, no suspendida) y rechaza la App si algún permiso no es de solo lectura (`write` o `admin`), si tiene permisos fuera de `metadata`, `contents`, `pull_requests` e `issues`, o si falta alguno de los obligatorios (`metadata`, `contents`, `pull_requests`). Nada se guarda si la validación falla. La clave privada se guarda cifrada y nunca se devuelve. Los tokens de instalación duran 1 hora, se piden bajo demanda, se renuevan solos y no se almacenan. `POST /api/integrations/github/test` genera un token nuevo y repite la comprobación de permisos. Errores: 400 (credencial o permisos rechazados), 502 (GitHub no responde).
 
 #### Servidores MCP (administradores)
 

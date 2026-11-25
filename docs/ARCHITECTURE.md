@@ -193,7 +193,7 @@ Mismo patrón para `ask`, `prd-checker`, `change-impact` y `qa/{feature_key}`.
 ### Flujo 3: Integraciones (Jira / GitHub / GitLab)
 
 ```
-1. Jira: cada usuario conecta su cuenta por OAuth. GitHub y GitLab: el administrador conecta la organización por OAuth (no hay PAT)
+1. Jira: cada usuario conecta su cuenta por OAuth. GitHub y GitLab: el administrador conecta la organización con una cuenta de servicio de solo lectura (GitHub App y token de bot de GitLab; no hay OAuth ni PAT)
 2. Backend valida, cifra la credencial (SecretStore) y la guarda en
    user_integrations / user_jira_connections (o organization_integrations)
 3. Sync (integrations/sync.py) obtiene issues, PRs, commits; caché en Valkey

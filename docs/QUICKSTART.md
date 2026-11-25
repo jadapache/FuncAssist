@@ -179,6 +179,18 @@ curl -X POST http://127.0.0.1:8000/api/knowledge/retrieve \
 2. Click en "Conectar" y autoriza con OAuth. La conexión queda disponible para todos los usuarios.
 3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una GitHub App de solo lectura, que aún no está disponible.
 
+### GitHub (GitHub App)
+
+1. En GitHub, ve a **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App** (en la organización, no en una cuenta personal). Desactiva *Webhook*.
+2. En **Permissions** concede **solo lectura** a: *Metadata* (obligatorio), *Contents* (obligatorio), *Pull requests* (obligatorio) e *Issues* (opcional). Ningún otro permiso, y nada de escritura ni administración.
+3. En **Where can this GitHub App be installed?** elige *Only on this account*.
+4. Crea la App y apunta su **App ID**. En **Private keys** pulsa *Generate a private key* y guarda el `.pem`.
+5. En **Install App**, instálala en la organización eligiendo **Only select repositories** y marca solo los repositorios que FuncAssist debe ver. Apunta el ID de instalación (el número al final de la URL de la instalación) si la App tiene varias.
+6. Un administrador abre **Configuración** → **Integraciones** → **GitHub**, pega el App ID, la clave privada (el contenido completo del `.pem`) y, si hace falta, el ID de instalación. La conexión se rechaza si la App tiene permisos de escritura o de más.
+7. Elige los repositorios que expone FuncAssist (la lista blanca del administrador; siempre dentro de lo que la instalación permite).
+8. **Rotación de la clave**: genera una clave nueva en la App, conéctala de nuevo (sustituye a la anterior) y elimina la antigua en GitHub.
+9. **Revocación**: desinstala la App o elimina su clave en GitHub y pulsa **Desconectar** en la integración. Si alguien amplía los permisos de la App más tarde, **Probar conexión** lo detecta y lo rechaza.
+
 ### GitLab (cuenta de servicio)
 
 1. En GitLab, crea un **token de acceso de proyecto o de grupo** (o una cuenta de servicio) con rol **Reporter** y solo estos permisos: `read_api` (obligatorio), `read_repository` y `read_user`. Ponle una fecha de caducidad.
