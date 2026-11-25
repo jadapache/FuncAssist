@@ -1,33 +1,93 @@
-"""GitHub integration — OAuth with repo selection."""
+"""GitHub integration: a read-only GitHub App installation, with repository selection.
+
+The organization connects one GitHub App, installed only on the repositories it needs and holding
+read-only permissions. The application signs a short-lived JWT with the App's private key and exchanges
+it for an installation token that lasts one hour; that token is renewed automatically and never stored.
+There is no personal token and no OAuth flow: the credential belongs to the App, not to a person.
+"""
 
 from __future__ import annotations
 
-import secrets
+import time
+from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
 
 import httpx
+import jwt
 
-from app.core.integration_config import get_github_oauth_config
 from app.core.storage import delete_connection, load_connection, save_connection
 from app.integrations.base import (
   AuthMethod,
-  AuthStartResponse,
   Capability,
   ConnectionStatus,
   Integration,
   IntegrationInfo,
   TestConnectionResult,
 )
+from app.integrations.service_accounts import (
+  GITHUB_ALLOWED_PERMISSIONS,
+  GITHUB_REQUIRED_PERMISSIONS,
+  check_app_permissions,
+)
 
 API = "https://api.github.com"
-GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
-GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_SCOPES = "repo read:user"
 HEADERS_BASE = {
   "Accept": "application/vnd.github+json",
   "X-GitHub-Api-Version": "2022-11-28",
 }
+# Renew an installation token this many seconds before GitHub says it expires.
+TOKEN_REFRESH_MARGIN = 300
+
+# installation id -> (token, unix expiry). In memory only: a restart simply mints a new one.
+_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+
+
+def clear_token_cache() -> None:
+  _TOKEN_CACHE.clear()
+
+
+def _normalize_private_key(value: str) -> str:
+  key = (value or "").strip().replace("\\n", "\n")
+  if "BEGIN" not in key or "PRIVATE KEY" not in key:
+    raise ValueError("The private key must be the PEM file generated for the GitHub App.")
+  return key
+
+
+def _validate_app_id(app_id: str) -> str:
+  value = (app_id or "").strip()
+  if not value or not value.replace("-", "").replace("_", "").isalnum():
+    raise ValueError("A valid GitHub App ID is required.")
+  return value
+
+
+def _select_installation(installations: list[dict[str, Any]], wanted: str | None) -> dict[str, Any]:
+  """The installation to use: the requested one, or the only active one. Suspended installations never count."""
+  active = [i for i in installations if not i.get("suspended_at")]
+  if wanted:
+    match = next((i for i in active if str(i.get("id")) == wanted.strip()), None)
+    if match is None:
+      raise ValueError("That installation does not exist for this GitHub App, or it is suspended.")
+    return match
+  if not active:
+    raise ValueError("The GitHub App is not installed anywhere. Install it on the repositories to expose.")
+  if len(active) > 1:
+    raise ValueError("The GitHub App has several installations: provide the installation ID to use.")
+  return active[0]
+
+
+def _app_jwt(app_id: str, private_key: str) -> str:
+  now = int(time.time())
+  try:
+    return jwt.encode({"iat": now - 60, "exp": now + 540, "iss": str(app_id)}, private_key, algorithm="RS256")
+  except Exception as exc:
+    raise ValueError("The private key could not be used to sign requests. Check that it is the App's RSA key.") from exc
+
+
+def _expiry_epoch(value: Any) -> float:
+  try:
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
+  except ValueError:
+    return time.time() + 3000
 
 
 class GitHubIntegration(Integration):
@@ -45,16 +105,14 @@ class GitHubIntegration(Integration):
 
   def get_info(self) -> IntegrationInfo:
     data = load_connection(self.id)
-    oauth_configured = get_github_oauth_config()["configured"]
     if not self._is_connected(data):
       return IntegrationInfo(
         id=self.id,
         name=self.name,
         description=self.description,
         status=ConnectionStatus.NOT_CONNECTED,
-        auth_methods=[AuthMethod.OAUTH],
+        auth_methods=[AuthMethod.SERVICE_ACCOUNT],
         capabilities=self.get_capabilities(),
-        oauth_configured=oauth_configured,
       )
 
     assert data is not None
@@ -63,98 +121,132 @@ class GitHubIntegration(Integration):
       name=self.name,
       description=self.description,
       status=ConnectionStatus.CONNECTED,
-      auth_methods=[AuthMethod.OAUTH],
+      auth_methods=[AuthMethod.SERVICE_ACCOUNT],
       capabilities=self.get_capabilities(),
       account_label=data.get("account_login"),
       workspace_label="GitHub",
       details={
         "auth_method": data.get("auth_method"),
         "selected_repos": data.get("selected_repos", []),
+        "app_id": data.get("app_id"),
+        "app_name": data.get("app_name"),
+        "installation_id": data.get("installation_id"),
+        "permissions": data.get("permissions") or {},
+        "repository_selection": data.get("repository_selection"),
+        "configured_by": data.get("configured_by"),
+        "configured_at": data.get("configured_at"),
       },
-      oauth_configured=oauth_configured,
     )
 
   def _is_connected(self, data: dict[str, Any] | None) -> bool:
     if not data:
       return False
-    return data.get("auth_method") == AuthMethod.OAUTH.value and bool(data.get("access_token"))
-
-  async def start_oauth(self) -> AuthStartResponse:
-    oauth = get_github_oauth_config()
-    if not oauth["configured"]:
-      raise ValueError(
-        "GitHub OAuth is not configured. Add Client ID and Secret in Integrations → GitHub OAuth setup, "
-        "or set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in .env"
-      )
-
-    state = secrets.token_urlsafe(24)
-    pending = load_connection(self.id) or {}
-    pending["oauth_state"] = state
-    save_connection(self.id, pending)
-
-    params = urlencode(
-      {
-        "client_id": oauth["client_id"],
-        "redirect_uri": oauth["redirect_uri"],
-        "scope": GITHUB_SCOPES,
-        "state": state,
-      }
-    )
-    return AuthStartResponse(
-      authorization_url=f"{GITHUB_AUTHORIZE_URL}?{params}",
-      state=state,
-      auth_method=AuthMethod.OAUTH,
+    return (
+      data.get("auth_method") == AuthMethod.SERVICE_ACCOUNT.value
+      and bool(data.get("app_id"))
+      and bool(data.get("private_key"))
+      and bool(data.get("installation_id"))
     )
 
-  async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    oauth = get_github_oauth_config()
-    pending = load_connection(self.id) or {}
-    expected = pending.get("oauth_state")
-    if not expected or expected != state:
-      raise ValueError("Invalid OAuth state. Restart the GitHub connection flow.")
+  # -- GitHub App credential ------------------------------------------------------------------
+
+  @staticmethod
+  async def _mint_installation_token(
+    client: httpx.AsyncClient, app_id: str, private_key: str, installation_id: str
+  ) -> dict[str, Any]:
+    """Exchange the App JWT for an installation token. Returns GitHub's token response."""
+    response = await client.post(
+      f"{API}/app/installations/{installation_id}/access_tokens",
+      headers={**HEADERS_BASE, "Authorization": f"Bearer {_app_jwt(app_id, private_key)}"},
+    )
+    if response.status_code in (401, 403):
+      raise ValueError("GitHub rejected the App credentials: check the App ID and the private key.")
+    if response.status_code == 404:
+      raise ValueError("The GitHub App installation was not found. It may have been uninstalled.")
+    response.raise_for_status()
+    body = response.json()
+    if not body.get("token"):
+      raise ValueError("GitHub did not return an installation token.")
+    return body
+
+  async def connect_with_github_app(
+    self,
+    app_id: str,
+    private_key: str,
+    *,
+    installation_id: str | None = None,
+    selected_repos: list[str] | None = None,
+    configured_by: str | None = None,
+  ) -> IntegrationInfo:
+    """Connect the organization through a GitHub App installation.
+
+    Everything is checked before anything is stored: the key must sign, the installation must exist and be
+    active, and its permissions must be read-only and no more than the integration needs.
+    """
+    app_id = _validate_app_id(app_id)
+    key = _normalize_private_key(private_key)
+    app_jwt_headers = {**HEADERS_BASE, "Authorization": f"Bearer {_app_jwt(app_id, key)}"}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-      token_response = await client.post(
-        GITHUB_TOKEN_URL,
-        headers={"Accept": "application/json"},
-        json={
-          "client_id": oauth["client_id"],
-          "client_secret": oauth["client_secret"],
-          "code": code,
-          "redirect_uri": oauth["redirect_uri"],
-        },
-      )
-      if token_response.status_code >= 400:
-        raise ValueError(f"GitHub token exchange failed ({token_response.status_code}): {token_response.text}")
-      tokens = token_response.json()
-      access_token = tokens.get("access_token")
-      if not access_token:
-        raise ValueError("GitHub token exchange did not return an access token.")
+      app_response = await client.get(f"{API}/app", headers=app_jwt_headers)
+      if app_response.status_code in (401, 403):
+        raise ValueError("GitHub rejected the App credentials: check the App ID and the private key.")
+      app_response.raise_for_status()
+      app_info = app_response.json()
 
-      user_response = await client.get(
-        f"{API}/user",
-        headers={**HEADERS_BASE, "Authorization": f"Bearer {access_token}"},
+      installs_response = await client.get(
+        f"{API}/app/installations", headers=app_jwt_headers, params={"per_page": 100}
       )
-      user_response.raise_for_status()
-      user = user_response.json()
+      installs_response.raise_for_status()
+      installation = _select_installation(installs_response.json(), installation_id)
 
+      token_body = await self._mint_installation_token(client, app_id, key, str(installation["id"]))
+
+    permissions = check_app_permissions(token_body.get("permissions") or installation.get("permissions") or {})
+    account = installation.get("account") or {}
     existing = load_connection(self.id) or {}
-    selected_repos = existing.get("selected_repos") or []
     payload = {
-      "auth_method": AuthMethod.OAUTH.value,
-      "access_token": access_token,
-      "token_type": tokens.get("token_type", "bearer"),
-      "scope": tokens.get("scope"),
-      "account_login": user.get("login"),
-      "account_label": user.get("login"),
-      "account_name": user.get("name"),
-      "selected_repos": selected_repos,
+      "auth_method": AuthMethod.SERVICE_ACCOUNT.value,
+      "app_id": app_id,
+      "app_name": app_info.get("name") or app_info.get("slug"),
+      "private_key": key,
+      "installation_id": str(installation["id"]),
+      "account_login": account.get("login"),
+      "account_label": account.get("login"),
+      "permissions": permissions,
+      "repository_selection": token_body.get("repository_selection") or installation.get("repository_selection"),
+      "configured_by": configured_by,
+      "configured_at": datetime.now(timezone.utc).isoformat(),
+      "selected_repos": selected_repos if selected_repos is not None else (existing.get("selected_repos") or []),
     }
     save_connection(self.id, payload)
+    clear_token_cache()
     return self.get_info()
+
+  async def _installation_token(self, *, force_refresh: bool = False) -> str:
+    data = load_connection(self.id)
+    if not self._is_connected(data):
+      raise ValueError("GitHub is not connected.")
+    assert data is not None
+    installation_id = str(data["installation_id"])
+    cached = _TOKEN_CACHE.get(installation_id)
+    if cached and not force_refresh and cached[1] - TOKEN_REFRESH_MARGIN > time.time():
+      return cached[0]
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      body = await self._mint_installation_token(client, str(data["app_id"]), str(data["private_key"]), installation_id)
+    # A token whose permissions grew after connecting is not accepted.
+    check_app_permissions(body.get("permissions") or {})
+    _TOKEN_CACHE[installation_id] = (str(body["token"]), _expiry_epoch(body.get("expires_at")))
+    return str(body["token"])
+
+  async def _headers(self) -> dict[str, str]:
+    return {**HEADERS_BASE, "Authorization": f"Bearer {await self._installation_token()}"}
+
+  # -- contract ---------------------------------------------------------------------------------
 
   async def disconnect(self) -> None:
     delete_connection(self.id)
+    clear_token_cache()
 
   async def authenticate(self) -> bool:
     data = load_connection(self.id)
@@ -166,32 +258,32 @@ class GitHubIntegration(Integration):
       return TestConnectionResult(ok=False, message="GitHub is not connected.")
 
     try:
+      # Always mint a fresh token so permissions are re-checked on every test.
+      token = await self._installation_token(force_refresh=True)
       async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{API}/user", headers=self._headers())
+        response = await client.get(
+          f"{API}/installation/repositories",
+          headers={**HEADERS_BASE, "Authorization": f"Bearer {token}"},
+          params={"per_page": 1},
+        )
         response.raise_for_status()
-        user = response.json()
+        total = response.json().get("total_count")
       return TestConnectionResult(
         ok=True,
         message="GitHub connection is healthy.",
         details={
-          "login": user.get("login"),
+          "account": data.get("account_login"),
+          "installation_id": data.get("installation_id"),
+          "permissions": data.get("permissions") or {},
+          "accessible_repositories": total,
           "selected_repos": data.get("selected_repos", []),
           "auth_method": data.get("auth_method"),
+          "allowed_permissions": sorted(GITHUB_ALLOWED_PERMISSIONS),
+          "required_permissions": sorted(GITHUB_REQUIRED_PERMISSIONS),
         },
       )
     except Exception as exc:
       return TestConnectionResult(ok=False, message=str(exc))
-
-  def _token(self) -> str:
-    data = load_connection(self.id)
-    if not data:
-      raise ValueError("GitHub is not connected.")
-    if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
-      return str(data["access_token"])
-    raise ValueError("GitHub is not connected.")
-
-  def _headers(self) -> dict[str, str]:
-    return {**HEADERS_BASE, "Authorization": f"Bearer {self._token()}"}
 
   def selected_repos(self) -> list[str]:
     data = load_connection(self.id) or {}
@@ -211,16 +303,12 @@ class GitHubIntegration(Integration):
 
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.get(
-        f"{API}/user/repos",
-        headers=self._headers(),
-        params={
-          "per_page": min(max_results, 100),
-          "sort": "updated",
-          "affiliation": "owner,collaborator,organization_member",
-        },
+        f"{API}/installation/repositories",
+        headers=await self._headers(),
+        params={"per_page": min(max_results, 100)},
       )
       response.raise_for_status()
-      repos = response.json()
+      repos = response.json().get("repositories") or []
 
     selected = set(self.selected_repos())
     return [
@@ -246,12 +334,13 @@ class GitHubIntegration(Integration):
     if not repos:
       raise ValueError("No GitHub repositories selected. Choose repos in Integrations.")
 
+    headers = await self._headers()
     results: list[dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=30.0) as client:
       for repo in repos:
         response = await client.get(
           f"{API}/repos/{repo}/pulls",
-          headers=self._headers(),
+          headers=headers,
           params={"state": state, "per_page": min(max_results, 30), "sort": "updated"},
         )
         response.raise_for_status()
@@ -277,12 +366,13 @@ class GitHubIntegration(Integration):
     if not repos:
       raise ValueError("No GitHub repositories selected. Choose repos in Integrations.")
 
+    headers = await self._headers()
     results: list[dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=30.0) as client:
       for repo in repos:
         response = await client.get(
           f"{API}/repos/{repo}/commits",
-          headers=self._headers(),
+          headers=headers,
           params={"per_page": min(max_results, 30)},
         )
         response.raise_for_status()
@@ -313,7 +403,7 @@ class GitHubIntegration(Integration):
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.get(
         f"{API}/repos/{target_repo}/pulls/{pr_number}/files",
-        headers=self._headers(),
+        headers=await self._headers(),
         params={"per_page": 100},
       )
       response.raise_for_status()
