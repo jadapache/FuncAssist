@@ -1,5 +1,6 @@
 import React, { type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { canLoadImage, canOpenLink, classifyUrl, parseAllowedHosts } from './safeUrl'
 
 interface MarkdownMessageProps {
   content: string
@@ -10,6 +11,23 @@ interface ComponentProps {
   children?: ReactNode
   className?: string
 }
+
+interface ImageProps {
+  src?: string | Blob
+  alt?: string
+}
+
+interface LinkProps {
+  href?: string
+  children?: ReactNode
+}
+
+const ALLOWED_HOSTS = parseAllowedHosts(import.meta.env.VITE_MARKDOWN_ALLOWED_HOSTS as string | undefined)
+
+const URL_OPTIONS = () => ({
+  allowedHosts: ALLOWED_HOSTS,
+  currentHost: typeof window === 'undefined' ? undefined : window.location.host,
+})
 
 /**
  * Rich Markdown renderer with clean styling support.
@@ -124,6 +142,45 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
             </td>
           ),
           hr: () => <hr className="my-3 border-slate-200" />,
+          img: ({ src: rawSrc, alt }: ImageProps) => {
+            const src = typeof rawSrc === 'string' ? rawSrc : undefined
+            const verdict = classifyUrl(src, { ...URL_OPTIONS(), forImage: true })
+            if (src && canLoadImage(verdict)) {
+              return <img src={src} alt={alt ?? ''} referrerPolicy="no-referrer" loading="lazy" className="max-w-full rounded-lg" />
+            }
+            // An image URL is requested by the browser as soon as it is rendered, so remote ones are never loaded.
+            const host = verdict.kind === 'external' ? ` (${verdict.host})` : ''
+            return (
+              <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" title="Imagen externa bloqueada">
+                {`Imagen externa bloqueada${host}${alt ? `: ${alt}` : ''}`}
+              </span>
+            )
+          },
+          a: ({ href, children }: LinkProps) => {
+            const verdict = classifyUrl(href, URL_OPTIONS())
+            if (!canOpenLink(verdict)) {
+              const host = verdict.kind === 'external' ? ` (${verdict.host}, enlace con parámetros bloqueado)` : ' (enlace bloqueado)'
+              return (
+                <span className="text-slate-600" title="Enlace bloqueado por seguridad">
+                  {children}
+                  <span className="text-[11px] text-amber-800">{host}</span>
+                </span>
+              )
+            }
+            const external = verdict.kind === 'external' || verdict.kind === 'allowed'
+            return (
+              <a
+                href={href}
+                target={external ? '_blank' : undefined}
+                rel="noopener noreferrer nofollow"
+                title={href}
+                className="text-[#002777] underline underline-offset-2"
+              >
+                {children}
+                {verdict.kind === 'external' ? <span className="ml-1 text-[11px] text-slate-500">({verdict.host})</span> : null}
+              </a>
+            )
+          },
         }}
       >
         {content}
