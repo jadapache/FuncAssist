@@ -103,11 +103,7 @@ def is_artifact_follow_up(prompt: str) -> bool:
     return bool(text) and any(p.search(text) for p in _ARTIFACT_FOLLOW_UP_PATTERNS)
 
 
-def infer_active_artifact_intent(
-    artifacts: List[Dict[str, Any]] | None,
-    template_id: Optional[str] = None,
-    has_current_document: bool = False,
-) -> Optional[str]:
+def infer_active_artifact_intent(artifacts: List[Dict[str, Any]] | None, template_id: Optional[str] = None, has_current_document: bool = False) -> Optional[str]:
     """Intent that produced the conversation's active (latest) artifact, or None without one."""
     if artifacts:
         latest = artifacts[-1]
@@ -140,6 +136,84 @@ def classify_prompt_intent(
     return classify_prompt_intent_by_rules(prompt, mode, template_id, active_artifact_intent)[0]
 
 
+_QUESTION_STARTS = (
+    "¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ",
+    "explica", "cuéntame", "dime",
+)
+
+
+def _looks_like_question(text_lower: str) -> bool:
+    return text_lower.startswith(_QUESTION_STARTS) or "?" in text_lower
+
+
+_MODE_INTENTS = {
+    "plan": "generic_plan", "generic_plan": "generic_plan",
+    "report": "generic_report", "informe": "generic_report", "generic_report": "generic_report",
+    "chat": "chat", "qa": "chat",
+    "template": "template_mutation", "template_mutation": "template_mutation",
+}
+_COMMAND_INTENTS = {
+    "plan": "generic_plan", "generic_plan": "generic_plan",
+    "report": "generic_report", "informe": "generic_report", "generic_report": "generic_report",
+    "plantilla": "template_mutation", "template": "template_mutation", "template_mutation": "template_mutation",
+    "pregunta": "ask_product", "question": "ask_product", "ask": "ask_product",
+}
+_PLAN_PHRASES = (
+    "plan de prueba", "plan de implementaci", "plan de trabajo", "genera un plan", "crea un plan", "elabora un plan",
+)
+_REPORT_PHRASES = ("informe", "reporte", "resumen ejecutivo")
+_TEMPLATE_PHRASES = (
+    "completa la plantilla",
+    "llena la plantilla",
+    "genera el documento de mejora",
+    "genera el documento funcional",
+    "genera el levantamiento",
+    "genera el inventario",
+    "redacta el documento corporativo",
+    "actualiza la plantilla",
+    "generar artefacto",
+    "genera el artefacto",
+    "genera artefacto",
+    "crear artefacto",
+    "crea el artefacto",
+    "generar documento",
+    "genera el documento",
+    "genera documento",
+    "crear documento",
+    "crea el documento",
+    "redacta el documento",
+    "elabora el documento",
+    "regenera y completa",
+    "regenera el documento",
+    "regenerar documento",
+    "regenerar el documento",
+)
+
+
+def _command_intent(prompt: str) -> Optional[str]:
+    """Intent named by a leading "/command", the command itself when it is not a known one."""
+    first_token = prompt.split()[0][1:].lower()
+    return _COMMAND_INTENTS.get(first_token, first_token) or None
+
+
+def _explicit_intent(p_trimmed: str, mode: Optional[str]) -> Optional[str]:
+    """The intent the client asked for with a mode or a "/command", if it did."""
+    if mode and mode not in {"auto", "default"}:
+        return _MODE_INTENTS.get(mode, mode)
+    return _command_intent(p_trimmed) if p_trimmed.startswith("/") else None
+
+
+def _keyword_intent(p_lower: str) -> Optional[str]:
+    for intent, phrases in (
+        ("generic_plan", _PLAN_PHRASES),
+        ("generic_report", _REPORT_PHRASES),
+        ("template_mutation", _TEMPLATE_PHRASES),
+    ):
+        if any(phrase in p_lower for phrase in phrases):
+            return intent
+    return None
+
+
 def classify_prompt_intent_by_rules(
     prompt: str,
     mode: Optional[str] = None,
@@ -151,30 +225,10 @@ def classify_prompt_intent_by_rules(
     Undecided (False): the message fell through every rule to the default "chat", or it is a
     question while a document is active (it may ask to change that document).
     """
-    if mode and mode not in {"auto", "default"}:
-        if mode in {"plan", "generic_plan"}:
-            return "generic_plan", True
-        if mode in {"report", "informe", "generic_report"}:
-            return "generic_report", True
-        if mode in {"chat", "qa"}:
-            return "chat", True
-        if mode in {"template", "template_mutation"}:
-            return "template_mutation", True
-        return mode, True
-
     p_trimmed = prompt.strip()
-    if p_trimmed.startswith("/"):
-        first_token = p_trimmed.split()[0][1:].lower()
-        if first_token in {"plan", "generic_plan"}:
-            return "generic_plan", True
-        if first_token in {"report", "informe", "generic_report"}:
-            return "generic_report", True
-        if first_token in {"plantilla", "template", "template_mutation"}:
-            return "template_mutation", True
-        if first_token in {"pregunta", "question", "ask"}:
-            return "ask_product", True
-        if first_token:
-            return first_token, True
+    explicit = _explicit_intent(p_trimmed, mode)
+    if explicit:
+        return explicit, True
 
     if active_artifact_intent in ARTIFACT_INTENTS and is_artifact_follow_up(p_trimmed):
         return active_artifact_intent, True
@@ -182,11 +236,7 @@ def classify_prompt_intent_by_rules(
     p_lower = p_trimmed.lower()
 
     # Conversational inquiries and questions should always route to conversational chat
-    is_question = (
-        p_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
-        or "?" in p_lower
-    )
-    if is_question:
+    if _looks_like_question(p_lower):
         return "chat", active_artifact_intent not in ARTIFACT_INTENTS
 
     # If the user has an active corporate template selected and isn't asking a general question,
@@ -194,53 +244,8 @@ def classify_prompt_intent_by_rules(
     if template_id and template_id.strip():
         return "template_mutation", True
 
-    if (
-        "plan de prueba" in p_lower
-        or "plan de implementaci" in p_lower
-        or "plan de trabajo" in p_lower
-        or "genera un plan" in p_lower
-        or "crea un plan" in p_lower
-        or "elabora un plan" in p_lower
-    ):
-        return "generic_plan", True
-
-    if (
-        "informe" in p_lower
-        or "reporte" in p_lower
-        or "resumen ejecutivo" in p_lower
-    ):
-        return "generic_report", True
-
-    template_keywords = [
-        "completa la plantilla",
-        "llena la plantilla",
-        "genera el documento de mejora",
-        "genera el documento funcional",
-        "genera el levantamiento",
-        "genera el inventario",
-        "redacta el documento corporativo",
-        "actualiza la plantilla",
-        "generar artefacto",
-        "genera el artefacto",
-        "genera artefacto",
-        "crear artefacto",
-        "crea el artefacto",
-        "generar documento",
-        "genera el documento",
-        "genera documento",
-        "crear documento",
-        "crea el documento",
-        "redacta el documento",
-        "elabora el documento",
-        "regenera y completa",
-        "regenera el documento",
-        "regenerar documento",
-        "regenerar el documento",
-    ]
-    if any(kw in p_lower for kw in template_keywords):
-        return "template_mutation", True
-
-    return "chat", False
+    keyword_intent = _keyword_intent(p_lower)
+    return (keyword_intent, True) if keyword_intent else ("chat", False)
 
 
 # Undecided messages are sent to the fast model only when they plausibly concern a document, so
@@ -258,32 +263,38 @@ def needs_model_classification(prompt: str, decided: bool, active_artifact_inten
     return active_artifact_intent in ARTIFACT_INTENTS or bool(_DOCUMENT_HINT.search(prompt or ""))
 
 
+_DEFAULT_TEMPLATE_MODULES = ("mejora", "funcional", "requerimiento")
+
+
+def _content_and_extension(detail: Optional[Dict[str, Any]]) -> Optional[tuple[str, str]]:
+    """Content and file extension of a template that has text, None for one without."""
+    if not detail or not detail.get("content", "").strip():
+        return None
+    filename = detail.get("filename", "")
+    ext = filename.rpartition(".")[2].lower() if "." in filename else "docx"
+    return detail["content"].strip(), ext
+
+
 async def _load_active_template_info(template_id: str | None = None) -> tuple[str, str]:
     """Load the active template content and file extension (e.g. ('...content...', 'docx'/'xlsx'))."""
     try:
         from app.core.template_storage import list_templates, get_template_detail
 
         if template_id:
-            detail = await get_template_detail(template_id)
-            if detail and detail.get("content", "").strip():
-                filename = detail.get("filename", "")
-                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "docx"
-                return detail["content"].strip(), ext
+            found = _content_and_extension(await get_template_detail(template_id))
+            if found:
+                return found
 
         templates = await list_templates()
         candidates = [
             t for t in templates
-            if any(kw in (t.get("module") or "").lower() for kw in ("mejora", "funcional", "requerimiento"))
-        ]
-        if not candidates:
-            candidates = templates
+            if any(kw in (t.get("module") or "").lower() for kw in _DEFAULT_TEMPLATE_MODULES)
+        ] or templates
 
         for tmpl in candidates:
-            detail = await get_template_detail(tmpl["id"])
-            if detail and detail.get("content", "").strip():
-                filename = detail.get("filename", "")
-                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "docx"
-                return detail["content"].strip(), ext
+            found = _content_and_extension(await get_template_detail(tmpl["id"]))
+            if found:
+                return found
     except Exception:
         pass
     return "", "docx"
@@ -465,6 +476,153 @@ async def _resolve_chat_history(
         return req.chat_context if isinstance(req.chat_context, list) else [str(req.chat_context)]
     return None
 
+_IMAGE_WORDS = ("imágenes", "imagen", "imagenes", "image", "captura", "screenshot")
+_OBSERVACION_WORDS = ("observación", "observaciones", "observacion")
+_CORRECTION_WORDS = (
+    "corregir", "corrección", "correccion", "corrijas", "corregí", "corregi",
+    "cambia", "cambiar", "modifica", "modificar", "actualiza", "actualizar",
+    "no es", "erróneo", "erroneo", "incorrecto", "reemplaza", "sustituye",
+)
+_RESPONSABLES_WORDS = ("responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr")
+_SIGNATURE_WORDS = ("pepito", "lider", "líder", "funcional", "responsable", "rol", "firmas")
+_DEFAULT_ASSET_IDS = ["img_error_login", "img_flujo_alterno"]
+
+
+def _mentions(prompt_lower: str, words: tuple[str, ...]) -> bool:
+    return any(w in prompt_lower for w in words)
+
+
+def _asks_a_question(prompt_str: str, active_intent: Optional[str]) -> bool:
+    """A question, or a request to rebuild the open document: both go to the LLM, never to the fast handlers.
+
+    "regenera", "el documento está vacío"... would otherwise be taken by the keyword handlers
+    ("no es" or "corrige" read as a field correction).
+    """
+    follow_up = active_intent is not None and is_artifact_follow_up(prompt_str)
+    return follow_up or _looks_like_question(prompt_str.strip().lower())
+
+
+def _is_image_request(prompt_lower: str, is_question: bool) -> bool:
+    return not is_question and _mentions(prompt_lower, _IMAGE_WORDS) and _mentions(prompt_lower, _OBSERVACION_WORDS)
+
+
+def _is_correction_request(prompt_lower: str, is_question: bool) -> bool:
+    return not is_question and _mentions(prompt_lower, _CORRECTION_WORDS)
+
+
+def _is_responsables_request(prompt_lower: str, is_question: bool) -> bool:
+    return not is_question and _mentions(prompt_lower, _RESPONSABLES_WORDS)
+
+
+def _is_fast_operation(prompt_str: str, active_intent: Optional[str]) -> bool:
+    """Whether the message is one of the structured operations answered without the LLM."""
+    prompt_lower = prompt_str.strip().lower()
+    is_question = _asks_a_question(prompt_str, active_intent)
+    return (
+        _is_image_request(prompt_lower, is_question)
+        or _is_correction_request(prompt_lower, is_question)
+        or _is_responsables_request(prompt_lower, is_question)
+    )
+
+
+def _operations_response(
+    intent: str, knowledge: str, operations: list, validation: tuple[bool, list[str]], message: str,
+) -> AgenticPromptResponse:
+    ops_dump = [op.model_dump(by_alias=True) for op in operations]
+    is_valid, details = validation
+    return AgenticPromptResponse(
+        intent_detected=intent,
+        requires_document_mutation=True,
+        rag_knowledge_used=[knowledge],
+        planned_operations=ops_dump,
+        operations=ops_dump,
+        validation_status={"valid": is_valid, "details": details},
+        assistant_message=message,
+        answer=message,
+    )
+
+
+def _image_operation(position: int, asset_id: str) -> InsertImageOperation:
+    caption = f"Evidencia visual #{position} para Observaciones"
+    target = TargetLocator(
+        section_title="Observaciones", tag="{{OBSERVACIONES}}", position="inside_end", paragraph_index=position,
+    )
+    asset = AssetLocator(asset_id=asset_id, url=f"/assets/demo/{asset_id}.png", caption=caption, width=480)
+    return InsertImageOperation(operation="insert_image", target=target, asset=asset)
+
+
+def _image_response(req: "AgenticPromptRequest") -> AgenticPromptResponse:
+    """Plan the insertion of the attached images in the Observaciones section."""
+    asset_ids = req.attached_asset_ids or _DEFAULT_ASSET_IDS
+    planned_ops = [_image_operation(position, asset_id) for position, asset_id in enumerate(asset_ids, start=1)]
+    results = [DocumentOperationValidator.validate(op, req.doc_state, asset_ids) for op in planned_ops]
+    message = f"He procesado tu solicitud y planificado la inserción de {len(planned_ops)} imagen(es) en la sección de 'Observaciones'."
+    return _operations_response(
+        "insert_asset_in_section",
+        "Plantilla Corporativa: Sección Observaciones y Casos de Borde",
+        planned_ops,
+        (all(valid for valid, _ in results), [msg for _, msg in results]),
+        message,
+    )
+
+
+def _correction_operation(prompt_str: str, prompt_lower: str) -> tuple[ReplaceContentOperation, str]:
+    """The replacement a correction message asks for, with the message that tells the user."""
+    if _mentions(prompt_lower, ("pepito", "lider", "líder")):
+        op = ReplaceContentOperation(
+            operation="replace_content",
+            target=TargetLocator(section_title="Firmas y Responsables", tag="{{FIRMAS}}", position="replace_target"),
+            new_content="| Usuario Funcional | Dr. Pepito Pérez | Aprobado |",
+        )
+        return op, "He corregido el rol del Dr. Pepito Pérez en la sección de Responsables y Firmas, actualizándolo de 'Líder Funcional' a 'Usuario Funcional'."
+    section, tag_name = ("Firmas", "FIRMAS") if _mentions(prompt_lower, _SIGNATURE_WORDS) else ("Solución", "SOLUCION")
+    op = ReplaceContentOperation(
+        operation="replace_content",
+        target=TargetLocator(section_title=section, tag=f"{{{{{tag_name}}}}}"),
+        new_content=f"Corrección aplicada: {prompt_str}",
+    )
+    return op, f"He aplicado la corrección en la sección de '{section}'."
+
+
+def _correction_response(req: "AgenticPromptRequest", prompt_str: str, prompt_lower: str) -> AgenticPromptResponse:
+    op, message = _correction_operation(prompt_str, prompt_lower)
+    is_valid, detail = DocumentOperationValidator.validate(op, req.doc_state)
+    return _operations_response(
+        "correct_document_content", "Matriz de Roles y Responsabilidades QA MGMT", [op], (is_valid, [detail]), message,
+    )
+
+
+def _responsables_response(req: "AgenticPromptRequest", prompt_lower: str) -> AgenticPromptResponse:
+    role = "Usuario Funcional" if _mentions(prompt_lower, ("usuario", "funcional")) else "Líder Funcional"
+    named = _mentions(prompt_lower, ("pepito", "perez", "pérez"))
+    name = "Dr. Pepito Pérez" if named else "Participante Asignado"
+    op = InsertTextOperation(
+        operation="insert_text",
+        target=TargetLocator(section_title="Firmas y Responsables", tag="{{FIRMAS}}", position="inside_end"),
+        content=f"| {role} | {name} | Aprobado |",
+    )
+    is_valid, detail = DocumentOperationValidator.validate(op, req.doc_state)
+    message = f"He agregado exitosamente a {name} con el rol '{role}' en la tabla de Responsables y Firmas."
+    return _operations_response(
+        "add_responsables", "Estructura Organizacional del Proyecto", [op], (is_valid, [detail]), message,
+    )
+
+
+def _fast_operation_response(
+    req: "AgenticPromptRequest", prompt_str: str, active_intent: Optional[str]
+) -> Optional[AgenticPromptResponse]:
+    """Answer image, correction and responsables requests with structured operations, or None."""
+    prompt_lower = prompt_str.strip().lower()
+    is_question = _asks_a_question(prompt_str, active_intent)
+    if _is_image_request(prompt_lower, is_question):
+        return _image_response(req)
+    if _is_correction_request(prompt_lower, is_question):
+        return _correction_response(req, prompt_str, prompt_lower)
+    if _is_responsables_request(prompt_lower, is_question):
+        return _responsables_response(req, prompt_lower)
+    return None
+
+
 @router.post("/agentic-prompt", response_model=AgenticPromptResponse)
 async def handle_agentic_prompt(
     req: AgenticPromptRequest,
@@ -478,140 +636,13 @@ async def handle_agentic_prompt(
     """
     user_id = current_user["id"]
     prompt_str = req.prompt_text
-    prompt_lower = prompt_str.strip().lower()
-    active_doc_state = req.doc_state
     active_intent = await _resolve_active_artifact_intent(req, chat_repo, user_id)
-    # "regenera", "el documento está vacío"... go to the LLM to rebuild the document, never to
-    # the keyword handlers below (which would treat "no es" or "corrige" as a field correction).
-    follow_up = active_intent is not None and is_artifact_follow_up(prompt_str)
 
-    is_question = follow_up or (
-        prompt_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
-        or "?" in prompt_lower
-    )
+    fast_response = _fast_operation_response(req, prompt_str, active_intent)
+    if fast_response:
+        return fast_response
 
-    # Case 1: Image attachment intent ("Me gustó la propuesta, incluye en las observaciones estas imágenes")
-    is_image_intent = not is_question and any(w in prompt_lower for w in ["imágenes", "imagen", "imagenes", "image", "captura", "screenshot"])
-    has_observaciones = any(w in prompt_lower for w in ["observación", "observaciones", "observacion"])
-
-    if is_image_intent and has_observaciones:
-        asset_ids = req.attached_asset_ids or ["img_error_login", "img_flujo_alterno"]
-        planned_ops = []
-
-        for idx, a_id in enumerate(asset_ids):
-            op = InsertImageOperation(
-                operation="insert_image",
-                target=TargetLocator(
-                    section_title="Observaciones",
-                    tag="{{OBSERVACIONES}}",
-                    position="inside_end",
-                    paragraph_index=idx + 1,
-                ),
-                asset=AssetLocator(
-                    asset_id=a_id,
-                    url=f"/assets/demo/{a_id}.png",
-                    caption=f"Evidencia visual #{idx + 1} para Observaciones",
-                    width=480,
-                ),
-            )
-            planned_ops.append(op)
-
-        all_valid = True
-        val_messages = []
-        for p_op in planned_ops:
-            is_valid, msg = DocumentOperationValidator.validate(p_op, active_doc_state, asset_ids)
-            if not is_valid:
-                all_valid = False
-            val_messages.append(msg)
-
-        msg_text = f"He procesado tu solicitud y planificado la inserción de {len(planned_ops)} imagen(es) en la sección de 'Observaciones'."
-        ops_dump = [o.model_dump(by_alias=True) for o in planned_ops]
-        return AgenticPromptResponse(
-            intent_detected="insert_asset_in_section",
-            requires_document_mutation=True,
-            rag_knowledge_used=["Plantilla Corporativa: Sección Observaciones y Casos de Borde"],
-            planned_operations=ops_dump,
-            operations=ops_dump,
-            validation_status={"valid": all_valid, "details": val_messages},
-            assistant_message=msg_text,
-            answer=msg_text,
-        )
-
-    # Case 2: Correction / Modification Intent ("Corregir, Pepito Pérez no es líder funcional es usuario funcional")
-    is_correction_intent = not is_question and any(w in prompt_lower for w in [
-        "corregir", "corrección", "correccion", "corrijas", "corregí", "corregi",
-        "cambia", "cambiar", "modifica", "modificar", "actualiza", "actualizar",
-        "no es", "erróneo", "erroneo", "incorrecto", "reemplaza", "sustituye"
-    ])
-
-    if is_correction_intent:
-        target_section = "Firmas" if any(w in prompt_lower for w in ["pepito", "lider", "líder", "funcional", "responsable", "rol", "firmas"]) else "Solución"
-        tag_name = "FIRMAS" if target_section == "Firmas" else "SOLUCION"
-
-        if "pepito" in prompt_lower or "lider" in prompt_lower or "líder" in prompt_lower:
-            op = ReplaceContentOperation(
-                operation="replace_content",
-                target=TargetLocator(
-                    section_title="Firmas y Responsables",
-                    tag="{{FIRMAS}}",
-                    position="replace_target",
-                ),
-                new_content="| Usuario Funcional | Dr. Pepito Pérez | Aprobado |",
-            )
-            msg_text = "He corregido el rol del Dr. Pepito Pérez en la sección de Responsables y Firmas, actualizándolo de 'Líder Funcional' a 'Usuario Funcional'."
-        else:
-            op = ReplaceContentOperation(
-                operation="replace_content",
-                target=TargetLocator(section_title=target_section, tag=f"{{{{{tag_name}}}}}"),
-                new_content=f"Corrección aplicada: {prompt_str}",
-            )
-            msg_text = f"He aplicado la corrección en la sección de '{target_section}'."
-
-        is_valid, msg = DocumentOperationValidator.validate(op, active_doc_state)
-        ops_dump = [op.model_dump(by_alias=True)]
-
-        return AgenticPromptResponse(
-            intent_detected="correct_document_content",
-            requires_document_mutation=True,
-            rag_knowledge_used=["Matriz de Roles y Responsabilidades QA MGMT"],
-            planned_operations=ops_dump,
-            operations=ops_dump,
-            validation_status={"valid": is_valid, "details": [msg]},
-            assistant_message=msg_text,
-            answer=msg_text,
-        )
-
-    # Case 3: Responsables / Firmas Addition ("Agrega en los responsables al doctor Pepito Perez usuario funcional")
-    is_responsables_intent = not is_question and any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
-    if is_responsables_intent:
-        role = "Usuario Funcional" if "usuario" in prompt_lower or "funcional" in prompt_lower else "Líder Funcional"
-        name = "Dr. Pepito Pérez" if "pepito" in prompt_lower or "perez" in prompt_lower or "pérez" in prompt_lower else "Participante Asignado"
-
-        text_op = InsertTextOperation(
-            operation="insert_text",
-            target=TargetLocator(
-                section_title="Firmas y Responsables",
-                tag="{{FIRMAS}}",
-                position="inside_end",
-            ),
-            content=f"| {role} | {name} | Aprobado |",
-        )
-        is_valid, msg = DocumentOperationValidator.validate(text_op, active_doc_state)
-        ops_dump = [text_op.model_dump(by_alias=True)]
-        msg_text = f"He agregado exitosamente a {name} con el rol '{role}' en la tabla de Responsables y Firmas."
-
-        return AgenticPromptResponse(
-            intent_detected="add_responsables",
-            requires_document_mutation=True,
-            rag_knowledge_used=["Estructura Organizacional del Proyecto"],
-            planned_operations=ops_dump,
-            operations=ops_dump,
-            validation_status={"valid": is_valid, "details": [msg]},
-            assistant_message=msg_text,
-            answer=msg_text,
-        )
-
-    # Case 4: Intelligent Agentic Chat, Plan/Report Artifacts, or Template Generation
+    # Intelligent Agentic Chat, Plan/Report Artifacts, or Template Generation
     prepared = await _prepare_chat_run(req, chat_repo, user_id, active_intent)
     cfg = prepared.cfg
     cfg.run_info["protocol"] = "json"
@@ -627,11 +658,12 @@ async def handle_agentic_prompt(
 
     full_content = "".join(accumulated)
     outcome = _finalize_answer(full_content, prepared)
+    conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
     await _persist_turn(
         chat_repo,
         req=req,
         user_id=user_id,
-        conv_id=req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}",
+        conv_id=conv_id,
         user_text=prompt_str,
         prepared=prepared,
         outcome=outcome,
@@ -729,12 +761,10 @@ async def _resolve_intent(
         logger.info("Intent classifier skipped, no fast provider: %s", exc)
         return intent, info
 
+    has_template = bool((req.template_id or "").strip())
     t0 = time.perf_counter()
     decision = await classify_intent_with_model(
-        prompt_str,
-        provider=fast,
-        active_intent=active_intent,
-        has_template=bool((req.template_id or "").strip()),
+        prompt_str, provider=fast, active_intent=active_intent, has_template=has_template,
     )
     info["intent_classifier_ms"] = round((time.perf_counter() - t0) * 1000.0, 1)
     if decision is None:
@@ -745,13 +775,7 @@ async def _resolve_intent(
     return decision.intent, info
 
 
-async def _prepare_chat_run(
-    req: "AgenticPromptRequest",
-    chat_repo: ChatRepository,
-    user_id: str | None,
-    active_intent: Optional[str],
-) -> _PreparedRun:
-    """Validate the request and build the runner configuration (shared by both endpoints)."""
+def _reject_unsupported_model(req: "AgenticPromptRequest") -> None:
     from app.ai.providers.registry import FORBIDDEN_BACKEND_PROVIDERS
 
     if req.provider and req.provider.lower() in FORBIDDEN_BACKEND_PROVIDERS:
@@ -762,22 +786,37 @@ async def _prepare_chat_run(
     if req.model and req.model.lower().endswith(".gguf"):
         raise HTTPException(status_code=400, detail="Modelos GGUF no están admitidos en el backend.")
 
+
+def _chat_context_text(chat_context: Any) -> Optional[str]:
+    if not chat_context:
+        return None
+    return "\n".join(chat_context) if isinstance(chat_context, list) else str(chat_context)
+
+
+async def _prepare_chat_run(
+    req: "AgenticPromptRequest",
+    chat_repo: ChatRepository,
+    user_id: str | None,
+    active_intent: Optional[str],
+) -> _PreparedRun:
+    """Validate the request and build the runner configuration (shared by both endpoints)."""
+    _reject_unsupported_model(req)
     prompt_str = req.prompt_text
-    chat_ctx_str = None
-    if req.chat_context:
-        chat_ctx_str = "\n".join(req.chat_context) if isinstance(req.chat_context, list) else str(req.chat_context)
+    chat_ctx_str = _chat_context_text(req.chat_context)
     chat_history = await _resolve_chat_history(req, chat_repo, user_id)
 
     sources_to_use = req.sources or ["knowledge"]
     intent, intent_info = await _resolve_intent(req, user_id, active_intent)
     query_text = _strip_command(prompt_str)
     template_content, template_ext = await _load_active_template_info(req.template_id)
+    feature = req.feature or "mejoras_doc"
+    document_ids = req.document_ids or []
     cfg = AgenticChatConfig(
         query=query_text,
         intent=intent,
-        feature=req.feature or "mejoras_doc",
+        feature=feature,
         sources=sources_to_use,
-        document_ids=req.document_ids or [],
+        document_ids=document_ids,
         chat_context=chat_ctx_str,
         history=chat_history,
         conversation_id=req.conversation_id,
@@ -795,6 +834,22 @@ async def _prepare_chat_run(
     return _PreparedRun(cfg=cfg, intent=intent, query_text=query_text, sources=sources_to_use, template_ext=template_ext)
 
 
+_FALLBACK_TITLES = {"template_mutation": "Documento", "generic_plan": "Plan"}
+
+
+def _assistant_message(
+    full_content: str, clean_answer: str, has_artifacts: bool, is_template: bool, is_generative: bool,
+) -> str:
+    """What the chat shows: the text around the artifacts, or a note that the document is in the panel."""
+    if has_artifacts:
+        return clean_answer
+    if is_template:
+        return "He generado y estructurado el documento corporativo en el panel de artefactos."
+    if is_generative:
+        return "He elaborado el documento solicitado en el panel de artefactos."
+    return full_content
+
+
 def _finalize_answer(full_content: str, prepared: _PreparedRun) -> _AnswerOutcome:
     """Extract artifacts and the chat message from the raw answer."""
     intent = prepared.intent
@@ -803,19 +858,12 @@ def _finalize_answer(full_content: str, prepared: _PreparedRun) -> _AnswerOutcom
     is_generative = intent in ARTIFACT_INTENTS
 
     if not art_dicts and is_generative and full_content.strip():
-        fallback_title = "Documento" if intent == "template_mutation" else ("Plan" if intent == "generic_plan" else "Informe")
+        fallback_title = _FALLBACK_TITLES.get(intent, "Informe")
         fallback_art = build_fallback_artifact(full_content, default_title=fallback_title, default_extension=prepared.template_ext)
         art_dicts = artifacts_to_dict([fallback_art])
 
     is_template = intent == "template_mutation"
-    if parsed_arts:
-        asst_msg = clean_ans
-    elif is_template:
-        asst_msg = "He generado y estructurado el documento corporativo en el panel de artefactos."
-    elif is_generative:
-        asst_msg = "He elaborado el documento solicitado en el panel de artefactos."
-    else:
-        asst_msg = full_content
+    asst_msg = _assistant_message(full_content, clean_ans, bool(parsed_arts), is_template, is_generative)
     if prepared.cfg.run_info.get("truncated") and TRUNCATION_NOTICE not in asst_msg:
         asst_msg = f"{asst_msg}\n\n_({TRUNCATION_NOTICE})_".strip()
     for art in art_dicts:
@@ -897,15 +945,19 @@ def _log_request_failure(cfg: AgenticChatConfig, err: BaseException, *, streamed
     info = cfg.run_info
     if info.get("logged"):
         return
+    stage = stage or info.get("stage") or "endpoint"
+    provider = info.get("provider") or cfg.provider
+    model = info.get("model") or cfg.model
+    not_refused = {"refused": False}
     log_ai_call({
+        **not_refused,
         "feature": cfg.feature,
-        "refused": False,
         "intent": cfg.intent,
         "route": info.get("route"),
-        "stage": stage or info.get("stage") or "endpoint",
+        "stage": stage,
         "conversation_id": cfg.conversation_id,
-        "provider": info.get("provider") or cfg.provider,
-        "model": info.get("model") or cfg.model,
+        "provider": provider,
+        "model": model,
         "streamed": streamed,
         "protocol": info.get("protocol"),
         "intent_source": info.get("intent_source"),
@@ -921,78 +973,51 @@ def _error_code(err: BaseException) -> str:
 CANCEL_POLL_S = 0.5
 
 
-@router.post("/agentic-prompt-stream")
-async def handle_agentic_prompt_stream(
-    request: Request,
-    req: AgenticPromptRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    chat_repo: ChatRepository = Depends(get_streaming_chat_repository),
-    protocol: str = "v1",
-):
-    """
-    Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
+def _data_line(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
 
-    `protocol=v1` (default, legacy): `data:` lines with run.* envelopes plus `token`/`full` packets.
-    `protocol=v2`: named events — status, plan, delta, artifact_start/artifact_delta/artifact_end,
-    tool_call, tool_result, usage, error and a final `done` carrying the full response.
-    """
-    user_id = current_user["id"]
-    prompt_str = req.prompt_text
-    prompt_lower = prompt_str.strip().lower()
-    v2 = protocol == "v2"
 
-    active_intent = await _resolve_active_artifact_intent(req, chat_repo, user_id)
-    follow_up = active_intent is not None and is_artifact_follow_up(prompt_str)
+class _ChatStream:
+    """One streamed chat run: turns the runner's chunks into the v1 (legacy) or v2 (named events) wire format."""
 
-    # Conversational inquiries must always go to LLM runner, never mock fast-handlers
-    is_question = follow_up or (
-        prompt_lower.startswith(("¿", "que ", "qué ", "como ", "cómo ", "cual ", "cuál ", "por que", "por qué", "donde ", "dónde ", "explica", "cuéntame", "dime"))
-        or "?" in prompt_lower
-    )
+    def __init__(
+        self,
+        request: Request,
+        req: AgenticPromptRequest,
+        chat_repo: ChatRepository,
+        user_id: str | None,
+        prepared: _PreparedRun,
+        v2: bool,
+    ) -> None:
+        self.request = request
+        self.req = req
+        self.chat_repo = chat_repo
+        self.user_id = user_id
+        self.prepared = prepared
+        self.cfg = prepared.cfg
+        self.v2 = v2
+        self.run_id = req.run_id or f"run-{uuid.uuid4().hex[:12]}"
+        self.conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
+        self.emitter = AgentRunEmitter(run_id=self.run_id, conversation_id=self.conv_id)
+        run_registry.register(self.emitter)
+        self.last_disconnect_check = 0.0
+        self.accumulated: List[str] = []
+        self.splitter = ArtifactStreamSplitter()
 
-    # Fast non-LLM structured operations (image insertion, corrections, responsibles)
-    is_image_intent = not is_question and any(w in prompt_lower for w in ["imágenes", "imagen", "imagenes", "image", "captura", "screenshot"]) and any(w in prompt_lower for w in ["observación", "observaciones", "observacion"])
-    is_correction_intent = not is_question and any(w in prompt_lower for w in ["corregir", "corrección", "correccion", "corrijas", "corregí", "corregi", "cambia", "cambiar", "modifica", "modificar", "actualiza", "actualizar", "no es", "erróneo", "erroneo", "incorrecto", "reemplaza", "sustituye"])
-    is_responsables_intent = not is_question and any(w in prompt_lower for w in ["responsable", "responsables", "participante", "participantes", "firmas", "pepito", "doctor", "dr"])
-
-    if is_image_intent or is_correction_intent or is_responsables_intent:
-        res = await handle_agentic_prompt(req, current_user=current_user, chat_repo=chat_repo)
-        async def fast_gen():
-            payload = res.model_dump(by_alias=True)
-            if v2:
-                yield sse_event("done", payload)
-            else:
-                yield f"data: {json.dumps({'type': 'full', 'data': payload})}\n\n"
-        return StreamingResponse(fast_gen(), media_type="text/event-stream")
-
-    prepared = await _prepare_chat_run(req, chat_repo, user_id, active_intent)
-    cfg = prepared.cfg
-    cfg.run_info["protocol"] = "v2" if v2 else "v1"
-    intent = prepared.intent
-    query_text = prepared.query_text
-    sources_to_use = prepared.sources
-
-    run_id = req.run_id or f"run-{uuid.uuid4().hex[:12]}"
-    conv_id = req.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
-    emitter = AgentRunEmitter(run_id=run_id, conversation_id=conv_id)
-    run_registry.register(emitter)
-
-    last_disconnect_check = 0.0
-
-    async def should_stop() -> Optional[str]:
-        nonlocal last_disconnect_check
-        if emitter.is_cancelled:
+    async def should_stop(self) -> Optional[str]:
+        if self.emitter.is_cancelled:
             return "cancelled"
         now = time.monotonic()
-        if now - last_disconnect_check >= CANCEL_POLL_S:
-            last_disconnect_check = now
-            if await request.is_disconnected():
-                emitter.request_cancellation(reason="Client disconnected")
+        if now - self.last_disconnect_check >= CANCEL_POLL_S:
+            self.last_disconnect_check = now
+            if await self.request.is_disconnected():
+                self.emitter.request_cancellation(reason="Client disconnected")
                 return "disconnected"
         return None
 
-    def v1_packets_for(event: AIAgentEvent) -> List[str]:
+    def _v1_packets_for(self, event: AIAgentEvent) -> List[str]:
         """Map typed runner events onto the legacy step events the v1 client understands."""
+        emitter = self.emitter
         data = event.data
         if event.type == "tool_call":
             return [emitter.step_started(f"step-tool-{data.get('id', '')}", f"Usando herramienta: {data.get('name')}").to_sse_packet()]
@@ -1012,167 +1037,231 @@ async def handle_agentic_prompt_stream(
             return [emitter.step_completed(f"step-section-{index}", label).to_sse_packet()]
         return []
 
-    async def stream_generator():
-        accumulated_chunks: List[str] = []
-        splitter = ArtifactStreamSplitter()
+    def _opening_packets(self) -> List[str]:
+        intent = self.prepared.intent
+        if self.v2:
+            return [sse_event("status", {
+                "message": "Intención detectada",
+                "stage": "classify",
+                "intent": intent,
+                "run_id": self.run_id,
+                "conversation_id": self.conv_id,
+            })]
+        emitter = self.emitter
+        return [
+            emitter.started(task_profile=intent, prompt=self.prepared.query_text).to_sse_packet(),
+            emitter.step_started("step-classify", "Clasificando intención...").to_sse_packet(),
+            _data_line({"type": "intent", "intent": intent}),
+            emitter.step_completed("step-classify", f"Intención: {intent}").to_sse_packet(),
+            emitter.step_started("step-generate", "Generando contenido...").to_sse_packet(),
+        ]
+
+    def _chunk_packets(self, chunk: Any) -> List[str]:
+        if isinstance(chunk, AIAgentEvent):
+            return [chunk.to_sse()] if self.v2 else self._v1_packets_for(chunk)
+        self.accumulated.append(chunk)
+        if self.v2:
+            return [sse_event(event_type, data) for event_type, data in self.splitter.feed(chunk)]
+        return [self.emitter.message_delta(chunk).to_sse_packet(), _data_line({"type": "token", "text": chunk})]
+
+    def _splitter_close_packets(self) -> List[str]:
+        if not self.v2:
+            return []
+        return [sse_event(event_type, data) for event_type, data in self.splitter.close()]
+
+    def _empty_response_packets(self) -> List[str]:
+        err_text = "El modelo LLM no generó contenido. Verifica tu conexión o clave de API en Configuración."
+        if self.v2:
+            return [sse_event("error", {"code": "empty_response", "message": err_text})]
+        return [self.emitter.failed("EMPTY_RESPONSE", err_text).to_sse_packet(), _data_line({"type": "error", "message": err_text})]
+
+    def _artifact_packet(self, position: int, art: Dict[str, Any]) -> str:
+        artifact_id = art.get("id") or f"art-{position}"
+        return self.emitter.artifact_created(
+            artifact_id=artifact_id,
+            title=art.get("title", "Documento"),
+            content=art.get("content", ""),
+            extension=art.get("extension", "docx"),
+        ).to_sse_packet()
+
+    def _summary_packets(self, outcome: _AnswerOutcome) -> tuple[List[str], Optional[float]]:
+        """Artifact, rubric and completion packets of the legacy protocol, plus the artifacts' rubric score."""
+        art_dicts = outcome.artifacts
+        rubric_score = _evaluate_artifacts_rubric(art_dicts)[0] if art_dicts else None
+        if self.v2:
+            return [], rubric_score
+        emitter = self.emitter
+        packets = [self._artifact_packet(position, art) for position, art in enumerate(art_dicts, start=1)]
+        packets.append(emitter.step_completed("step-generate", "Generación completada").to_sse_packet())
+        if art_dicts:
+            packets.append(emitter.step_started("step-rubric", "Evaluando artefactos con rúbricas de calidad...").to_sse_packet())
+            packets.append(emitter.step_completed("step-rubric", f"Calidad de artefacto: {rubric_score}/100").to_sse_packet())
+        packets.append(emitter.completed(
+            final_message=outcome.assistant_message, artifacts=art_dicts, sources=self.prepared.sources,
+        ).to_sse_packet())
+        return packets, rubric_score
+
+    def _final_packets(self, full_content: str, outcome: _AnswerOutcome, rubric_score: Optional[float]) -> List[str]:
+        answer_clean = outcome.clean_answer or full_content
+        final_response = {
+            "answer": full_content,
+            "intent_detected": self.prepared.intent,
+            "requires_document_mutation": outcome.is_template,
+            "document_updates": full_content if outcome.is_template else None,
+            "answer_clean": answer_clean,
+            "assistant_message": outcome.assistant_message,
+            "artifacts": outcome.artifacts,
+            "run_id": self.run_id,
+            "conversation_id": self.conv_id,
+            "route": self.cfg.run_info.get("route"),
+            "truncated": bool(self.cfg.run_info.get("truncated")),
+            "rubric_score": rubric_score,
+        }
+        if self.v2:
+            return [sse_event("done", final_response)]
+        return [_data_line({"type": "full", "data": final_response}), _data_line({"type": "done"})]
+
+    def _stopped_packets(self, stop: StreamStopped) -> List[str]:
+        # The runner was cancelled inside its task and already logged the cancellation.
+        # "disconnected": nobody is listening, nothing to send.
+        if stop.reason != "cancelled":
+            return []
+        if self.v2:
+            return [sse_event("error", {"code": "cancelled", "message": "Cancelado por el usuario"})]
+        return [self.emitter.cancelled("Cancelado por el usuario").to_sse_packet()]
+
+    def _failure_packets(self, err: Exception) -> List[str]:
+        _log_request_failure(self.cfg, err, streamed=True)
+        err_msg = _format_stream_error(err)
+        if self.v2:
+            return [sse_event("error", {
+                "code": _error_code(err),
+                "message": err_msg,
+                "retry_after": getattr(err, "retry_after", None),
+            })]
+        return [self.emitter.failed("RUN_EXCEPTION", err_msg).to_sse_packet(), _data_line({"type": "error", "message": err_msg})]
+
+    async def _complete(self, full_content: str):
+        outcome = _finalize_answer(full_content, self.prepared)
+        packets, rubric_score = self._summary_packets(outcome)
+        for packet in packets:
+            yield packet
+        await _persist_turn(
+            self.chat_repo,
+            req=self.req,
+            user_id=self.user_id,
+            conv_id=self.conv_id,
+            user_text=self.prepared.query_text,
+            prepared=self.prepared,
+            outcome=outcome,
+            full_content=full_content,
+        )
+        for packet in self._final_packets(full_content, outcome, rubric_score):
+            yield packet
+
+    async def _run(self):
+        for packet in self._opening_packets():
+            yield packet
+        runner = run_agentic_chat_stream(self.cfg)
+        async for chunk in iterate_until_stopped(runner, self.should_stop, poll_s=CANCEL_POLL_S):
+            for packet in self._chunk_packets(chunk):
+                yield packet
+        for packet in self._splitter_close_packets():
+            yield packet
+
+        full_content = "".join(self.accumulated)
+        if not full_content.strip():
+            for packet in self._empty_response_packets():
+                yield packet
+            return
+        async for packet in self._complete(full_content):
+            yield packet
+
+    async def stream(self):
         try:
-            if v2:
-                yield sse_event("status", {
-                    "message": "Intención detectada",
-                    "stage": "classify",
-                    "intent": intent,
-                    "run_id": run_id,
-                    "conversation_id": conv_id,
-                })
-            else:
-                yield emitter.started(task_profile=intent, prompt=query_text).to_sse_packet()
-                yield emitter.step_started("step-classify", "Clasificando intención...").to_sse_packet()
-                yield f"data: {json.dumps({'type': 'intent', 'intent': intent})}\n\n"
-                yield emitter.step_completed("step-classify", f"Intención: {intent}").to_sse_packet()
-                yield emitter.step_started("step-generate", "Generando contenido...").to_sse_packet()
-
-            async for chunk in iterate_until_stopped(run_agentic_chat_stream(cfg), should_stop, poll_s=CANCEL_POLL_S):
-                if isinstance(chunk, AIAgentEvent):
-                    if v2:
-                        yield chunk.to_sse()
-                    else:
-                        for packet in v1_packets_for(chunk):
-                            yield packet
-                    continue
-                accumulated_chunks.append(chunk)
-                if v2:
-                    for event_type, data in splitter.feed(chunk):
-                        yield sse_event(event_type, data)
-                else:
-                    yield emitter.message_delta(chunk).to_sse_packet()
-                    yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
-
-            if v2:
-                for event_type, data in splitter.close():
-                    yield sse_event(event_type, data)
-
-            full_content = "".join(accumulated_chunks)
-            if not full_content.strip():
-                err_text = "El modelo LLM no generó contenido. Verifica tu conexión o clave de API en Configuración."
-                if v2:
-                    yield sse_event("error", {"code": "empty_response", "message": err_text})
-                else:
-                    yield emitter.failed("EMPTY_RESPONSE", err_text).to_sse_packet()
-                    yield f"data: {json.dumps({'type': 'error', 'message': err_text})}\n\n"
-                return
-
-            outcome = _finalize_answer(full_content, prepared)
-            art_dicts = outcome.artifacts
-
-            if not v2:
-                for idx, art in enumerate(art_dicts):
-                    yield emitter.artifact_created(
-                        artifact_id=art.get("id") or f"art-{idx + 1}",
-                        title=art.get("title", "Documento"),
-                        content=art.get("content", ""),
-                        extension=art.get("extension", "docx"),
-                    ).to_sse_packet()
-                yield emitter.step_completed("step-generate", "Generación completada").to_sse_packet()
-
-            rubric_score = None
-            if art_dicts:
-                if not v2:
-                    yield emitter.step_started("step-rubric", "Evaluando artefactos con rúbricas de calidad...").to_sse_packet()
-                rubric_score, _rubric_feedback = _evaluate_artifacts_rubric(art_dicts)
-                if not v2:
-                    yield emitter.step_completed("step-rubric", f"Calidad de artefacto: {rubric_score}/100").to_sse_packet()
-
-            if not v2:
-                yield emitter.completed(
-                    final_message=outcome.assistant_message,
-                    artifacts=art_dicts,
-                    sources=sources_to_use,
-                ).to_sse_packet()
-
-            await _persist_turn(
-                chat_repo,
-                req=req,
-                user_id=user_id,
-                conv_id=conv_id,
-                user_text=query_text,
-                prepared=prepared,
-                outcome=outcome,
-                full_content=full_content,
-            )
-
-            final_response = {
-                "answer": full_content,
-                "intent_detected": intent,
-                "requires_document_mutation": outcome.is_template,
-                "document_updates": full_content if outcome.is_template else None,
-                "answer_clean": outcome.clean_answer or full_content,
-                "assistant_message": outcome.assistant_message,
-                "artifacts": art_dicts,
-                "run_id": run_id,
-                "conversation_id": conv_id,
-                "route": cfg.run_info.get("route"),
-                "truncated": bool(cfg.run_info.get("truncated")),
-                "rubric_score": rubric_score,
-            }
-            if v2:
-                yield sse_event("done", final_response)
-            else:
-                yield f"data: {json.dumps({'type': 'full', 'data': final_response})}\n\n"
-                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            async for packet in self._run():
+                yield packet
         except StreamStopped as stop:
-            # The runner was cancelled inside its task and already logged the cancellation.
-            if stop.reason == "cancelled":
-                if v2:
-                    yield sse_event("error", {"code": "cancelled", "message": "Cancelado por el usuario"})
-                else:
-                    yield emitter.cancelled("Cancelado por el usuario").to_sse_packet()
-            # "disconnected": nobody is listening, nothing to send.
+            for packet in self._stopped_packets(stop):
+                yield packet
         except Exception as err:
-            _log_request_failure(cfg, err, streamed=True)
-            err_msg = _format_stream_error(err)
-            if v2:
-                yield sse_event("error", {
-                    "code": _error_code(err),
-                    "message": err_msg,
-                    "retry_after": getattr(err, "retry_after", None),
-                })
-            else:
-                yield emitter.failed("RUN_EXCEPTION", err_msg).to_sse_packet()
-                yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
+            for packet in self._failure_packets(err):
+                yield packet
         finally:
-            run_registry.unregister(run_id)
+            run_registry.unregister(self.run_id)
 
-    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+def _fast_operation_stream(response: AgenticPromptResponse, v2: bool) -> StreamingResponse:
+    async def fast_gen():
+        payload = response.model_dump(by_alias=True)
+        yield sse_event("done", payload) if v2 else _data_line({"type": "full", "data": payload})
+
+    return StreamingResponse(fast_gen(), media_type="text/event-stream")
+
+
+@router.post("/agentic-prompt-stream")
+async def handle_agentic_prompt_stream(
+    request: Request,
+    req: AgenticPromptRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    chat_repo: ChatRepository = Depends(get_streaming_chat_repository),
+    protocol: str = "v1",
+):
+    """
+    Streaming SSE endpoint for dynamic Agentic multimodal chat, Q&A, and artifacts.
+
+    `protocol=v1` (default, legacy): `data:` lines with run.* envelopes plus `token`/`full` packets.
+    `protocol=v2`: named events — status, plan, delta, artifact_start/artifact_delta/artifact_end,
+    tool_call, tool_result, usage, error and a final `done` carrying the full response.
+    """
+    user_id = current_user["id"]
+    v2 = protocol == "v2"
+    active_intent = await _resolve_active_artifact_intent(req, chat_repo, user_id)
+
+    # Fast non-LLM structured operations (image insertion, corrections, responsibles)
+    if _is_fast_operation(req.prompt_text, active_intent):
+        res = await handle_agentic_prompt(req, current_user=current_user, chat_repo=chat_repo)
+        return _fast_operation_stream(res, v2)
+
+    prepared = await _prepare_chat_run(req, chat_repo, user_id, active_intent)
+    prepared.cfg.run_info["protocol"] = "v2" if v2 else "v1"
+    return StreamingResponse(
+        _ChatStream(request, req, chat_repo, user_id, prepared, v2).stream(), media_type="text/event-stream",
+    )
 
 
 def _try_parse_structured_artifact(
     content: str, title: str
 ) -> Optional[Union[FunctionalImprovementArtifact, FunctionalInventoryArtifact]]:
-    trimmed = content.strip()
-    json_str = None
-    if trimmed.startswith("{") and trimmed.endswith("}"):
-        json_str = trimmed
-    elif "```json" in trimmed:
-        match = re.search(r"```json\s*(\{.*?\})\s*```", trimmed, re.DOTALL)
-        if match:
-            json_str = match.group(1)
-
+    json_str = _json_object_text(content)
     if not json_str:
         return None
 
     try:
         data = json.loads(json_str)
-        if not isinstance(data, dict):
-            return None
         data.setdefault("artifact_id", f"art-{uuid.uuid4().hex[:8]}")
         data.setdefault("title", title or "Documento")
-
-        if "problem_statement" in data or "acceptance_criteria" in data:
-            return FunctionalImprovementArtifact(**data)
-        if "modules" in data or "project_name" in data:
-            return FunctionalInventoryArtifact(**data)
+        return _structured_artifact_from(data)
     except Exception:
         return None
+
+
+def _json_object_text(content: str) -> Optional[str]:
+    """The JSON object a model answer is, or the one inside its ```json fence."""
+    trimmed = content.strip()
+    if trimmed.startswith("{") and trimmed.endswith("}"):
+        return trimmed
+    match = re.search(r"```json\s*(\{.*?\})\s*```", trimmed, re.DOTALL) if "```json" in trimmed else None
+    return match.group(1) if match else None
+
+
+def _structured_artifact_from(
+    data: Dict[str, Any],
+) -> Optional[Union[FunctionalImprovementArtifact, FunctionalInventoryArtifact]]:
+    if "problem_statement" in data or "acceptance_criteria" in data:
+        return FunctionalImprovementArtifact(**data)
+    if "modules" in data or "project_name" in data:
+        return FunctionalInventoryArtifact(**data)
     return None
 
 
@@ -1183,25 +1272,26 @@ def _evaluate_artifacts_rubric(art_dicts: List[Dict[str, Any]]) -> tuple[float, 
     scores: List[float] = []
     feedbacks: List[str] = []
     for art in art_dicts:
-        content = art.get("content", "")
-        title = art.get("title", "")
-        parsed = _try_parse_structured_artifact(content, title)
-        if isinstance(parsed, FunctionalImprovementArtifact):
-            res = RubricEvaluator.evaluate_improvement(parsed)
-            scores.append(res.score)
-            if not res.approved:
-                feedbacks.extend(res.missing_requirements)
-        elif isinstance(parsed, FunctionalInventoryArtifact):
-            res = RubricEvaluator.evaluate_inventory(parsed)
-            scores.append(res.score)
-            if not res.approved:
-                feedbacks.extend(res.missing_requirements)
-        else:
-            scores.append(85.0 if len(content.strip()) >= 50 else 50.0)
+        score, missing = _rubric_for_artifact(art)
+        scores.append(score)
+        feedbacks.extend(missing)
 
-    avg_score = round(sum(scores) / len(scores), 1) if scores else 100.0
+    avg_score = round(sum(scores) / len(scores), 1)
     feedback_str = "; ".join(feedbacks) if feedbacks else "Artefactos aprobados por rúbrica."
     return avg_score, feedback_str
+
+
+def _rubric_for_artifact(art: Dict[str, Any]) -> tuple[float, List[str]]:
+    """Rubric score of one artifact and what it is missing; free text only scores by its length."""
+    content = art.get("content", "")
+    parsed = _try_parse_structured_artifact(content, art.get("title", ""))
+    if isinstance(parsed, FunctionalImprovementArtifact):
+        res = RubricEvaluator.evaluate_improvement(parsed)
+    elif isinstance(parsed, FunctionalInventoryArtifact):
+        res = RubricEvaluator.evaluate_inventory(parsed)
+    else:
+        return (85.0 if len(content.strip()) >= 50 else 50.0), []
+    return res.score, ([] if res.approved else res.missing_requirements)
 
 
 def _resolve_export_data(
@@ -1212,15 +1302,13 @@ def _resolve_export_data(
         data.setdefault("title", title)
         return data
 
-    trimmed = (content or "").strip()
-    if trimmed.startswith("{") and trimmed.endswith("}"):
-        try:
-            parsed = json.loads(trimmed)
-            if isinstance(parsed, dict):
-                parsed.setdefault("title", title)
-                return parsed
-        except Exception:
-            pass
+    try:
+        parsed = json.loads((content or "").strip())
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        parsed.setdefault("title", title)
+        return parsed
 
     return {"title": title, "content": content, "markdown": content}
 
