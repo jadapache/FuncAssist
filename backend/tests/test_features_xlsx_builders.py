@@ -136,3 +136,60 @@ def test_qa_matrix_custom_rows():
   assert data[1][7] == "Pass"
   assert data[2][0] == "T2"
   assert wb.active["A2"].fill.start_color.rgb.endswith("F0F4FF")
+
+
+# -- behaviours pinned by mutation testing ---------------------------------------------------------------
+
+LAYOUT_MD = """| ID | Requerimiento | Prioridad |
+|---|---|---|
+| R1 | Un requerimiento bastante largo para medir | Alta |
+| R2 | Corto | Media |
+| R3 | Otro | Baja |
+
+| Stakeholder | Rol |
+|---|---|
+| Ana | Sponsor |
+| Beto | Analista |
+
+| Riesgo | Mitigación |
+|---|---|
+| Retraso | Plan B |
+"""
+
+
+def test_main_sheet_layout_header_height_zebra_and_column_widths():
+  ws = _wb(create_inventario_xlsx(LAYOUT_MD))["Requerimientos"]
+  assert ws.row_dimensions[1].height == 26
+  assert ws["A2"].fill.start_color.rgb.endswith("F0F4FF")
+  assert ws["A3"].fill.fill_type is None
+  assert ws["A4"].fill.start_color.rgb.endswith("F0F4FF")
+  assert ws.column_dimensions["A"].width == 12  # short content never goes below the minimum
+  assert ws.column_dimensions["B"].width == len("Un requerimiento bastante largo para medir") + 4
+  assert ws.column_dimensions["C"].width == 13
+
+
+def test_stakeholders_sheet_places_each_section_after_the_previous_rows():
+  ws = _wb(create_inventario_xlsx(LAYOUT_MD))["Stakeholders y Riesgos"]
+  assert [ws.cell(row=r, column=1).value for r in range(1, 5)] == ["MATRIZ DE STAKEHOLDERS", "Stakeholder", "Ana", "Beto"]
+  assert ws.row_dimensions[1].height == 22
+  assert ws["A7"].value == "MATRIZ DE RIESGOS Y SUPUESTOS" and ws.row_dimensions[7].height == 22
+  assert [ws.cell(row=r, column=1).value for r in (8, 9)] == ["Riesgo", "Retraso"]
+  assert ws.column_dimensions["A"].width == len("MATRIZ DE RIESGOS Y SUPUESTOS") + 4
+  assert ws.column_dimensions["B"].width == 14
+
+
+def test_the_generated_file_is_a_complete_xlsx_archive():
+  assert create_inventario_xlsx().startswith(b"PK")
+
+
+def test_only_lines_that_start_and_end_with_a_pipe_are_table_rows():
+  md = "| H1 | H2 |\n| v1 | v2 |\n| orphan without closing\ntrailing text |\n| X | Y |\n| 1 | 2 |"
+  assert _extract_tables_from_markdown(md) == [
+    {"headers": ["H1", "H2"], "rows": [["v1", "v2"]]},
+    {"headers": ["X", "Y"], "rows": [["1", "2"]]},
+  ]
+
+
+def test_a_table_that_ends_the_text_is_kept():
+  assert _extract_tables_from_markdown("| A |\n| 1 |") == [{"headers": ["A"], "rows": [["1"]]}]
+  assert _extract_tables_from_markdown("| A |") == []
