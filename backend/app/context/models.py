@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.ai.untrusted import wrap_untrusted
+from app.ai.injection import prepare_untrusted
 
 
 class SourceType(str, Enum):
@@ -42,5 +42,5 @@ class ContextBundle(BaseModel):
       return "No context chunks available."
     parts: list[str] = []
     for index, chunk in enumerate(self.chunks, start=1):
-      parts.append(f"[{index}] " + wrap_untrusted(chunk.source_type, chunk.source_label, f"{chunk.title}\n{chunk.text}", max_chars=None))
+      parts.append(f"[{index}] " + prepare_untrusted(chunk.source_type, chunk.source_label, f"{chunk.title}\n{chunk.text}", max_chars=None))
     return "\n\n".join(parts)

@@ -9,24 +9,45 @@ from typing import Any, AsyncIterator
 from app.ai.events import AgentEvent
 from app.ai.providers.base import AIMessage, AIProvider, ToolCall
 from app.ai.tools.registry import ToolContext, get_tool, get_tools_openai_schema
-from app.ai.untrusted import wrap_untrusted
+from app.ai.injection import prepare_untrusted
+from app.ai.logging import log_security_event
+from app.ai.untrusted import contains_envelope
 
 logger = logging.getLogger(__name__)
 
 TOOL_TIMEOUT_S = 30.0
 TOOL_RESULT_MAX_CHARS = 8000
+MAX_TOOL_CALLS_PER_TURN = 12
 
 
 def _wrap_tool_output(name: str, output: str) -> str:
     """Delimit tool output as untrusted data (mitigates prompt injection from documents)."""
-    return wrap_untrusted("tool", name, output, max_chars=TOOL_RESULT_MAX_CHARS)
+    return prepare_untrusted("tool", name, output, max_chars=TOOL_RESULT_MAX_CHARS)
 
 
-async def _exec_tool(tc: ToolCall, ctx: ToolContext) -> tuple[ToolCall, str, bool]:
+def _has_untrusted_content(convo: list[AIMessage]) -> bool:
+    """Whether any message of the conversation carries external content inside an envelope."""
+    for message in convo:
+        content = message.content
+        parts = [content] if isinstance(content, str) else [p.get("text", "") for p in (content or []) if isinstance(p, dict)]
+        if any(contains_envelope(part) for part in parts):
+            return True
+    return False
+
+
+async def _exec_tool(tc: ToolCall, ctx: ToolContext, *, untrusted_present: bool = False) -> tuple[ToolCall, str, bool]:
     tool = get_tool(tc.name)
     if not tool:
         logger.warning("Model requested unknown tool %s", tc.name)
         return tc, f"[Error]: Herramienta '{tc.name}' no encontrada.", True
+    if untrusted_present and tool.external_effect:
+        logger.warning("Tool %s refused: it acts outside the conversation and the context has external content", tc.name)
+        log_security_event("tool_call", user=ctx.user_id, provider="agent", tool=tc.name, decision="denied",
+                           reason="external_effect_with_untrusted_context")
+        return tc, (
+            f"[Error]: La herramienta '{tc.name}' actúa fuera de la conversación y no puede ejecutarse "
+            "mientras el contexto incluya contenido externo."
+        ), True
     try:
         res = await asyncio.wait_for(tool.handler(tc.arguments, ctx), timeout=TOOL_TIMEOUT_S)
         text = str(res)
@@ -62,6 +83,7 @@ async def run_agent(
         "cost_usd": 0.0,
     }
     iterations = 0
+    tool_calls_made = 0
     delivered_artifacts = 0
     last_finish_reason: str | None = None
     fallback_used = False
@@ -103,7 +125,16 @@ async def run_agent(
 
         convo.append(AIMessage(role="assistant", content=text, tool_calls=tool_calls))
 
-        results = await asyncio.gather(*[_exec_tool(tc, ctx) for tc in tool_calls])
+        # A model that loops on tools is capped: calls beyond the limit get an error instead of running.
+        room = max(0, MAX_TOOL_CALLS_PER_TURN - tool_calls_made)
+        to_run, refused = tool_calls[:room], tool_calls[room:]
+        tool_calls_made += len(to_run)
+        untrusted_present = _has_untrusted_content(convo)
+        results = list(await asyncio.gather(*[_exec_tool(tc, ctx, untrusted_present=untrusted_present) for tc in to_run]))
+        results += [
+            (tc, f"[Error]: Se alcanzó el límite de {MAX_TOOL_CALLS_PER_TURN} llamadas a herramientas en este turno.", True)
+            for tc in refused
+        ]
 
         for tc, output, is_err in results:
             yield AgentEvent(
