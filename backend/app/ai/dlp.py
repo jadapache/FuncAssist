@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from app.ai.errors import AIError
+from app.ai.untrusted import contains_envelope
 
 # Markers that classify a text as confidential (case-insensitive).
 CONFIDENTIAL_MARKERS = re.compile(
@@ -70,9 +71,10 @@ def _sanitize_content(content: Any) -> Any:
 def enforce_cloud_policy(messages: list[dict[str, Any]], provider_name: str) -> list[dict[str, Any]]:
   """Block confidential content and sanitize the rest before a cloud provider call."""
   for message in messages:
-    if message.get("role") == "system":
-      continue  # system prompts are application-authored templates
-    if any(is_confidential(text) for text in _iter_text_parts(message.get("content"))):
+    texts = list(_iter_text_parts(message.get("content")))
+    if message.get("role") == "system" and not any(contains_envelope(t) for t in texts):
+      continue  # system prompts are application-authored templates, unless external content ended up in one
+    if any(is_confidential(text) for text in texts):
       raise AIError(
         "confidential_data_blocked",
         f"El contenido está clasificado como confidencial y no puede enviarse a {provider_name}. "

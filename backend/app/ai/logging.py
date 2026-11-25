@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -116,6 +117,67 @@ def list_logs(limit: int = 20) -> list[dict[str, Any]]:
         continue
 
   return logs
+
+
+SECURITY_DIR = USER_DATA_DIR / "ai" / "security"
+# Writes run in worker threads; serializing them keeps concurrent events from colliding on the file.
+_SECURITY_WRITE_LOCK = threading.Lock()
+
+
+def _write_security_entry(payload: dict[str, Any]) -> None:
+  try:
+    ensure_local_dirs()
+    SECURITY_DIR.mkdir(parents=True, exist_ok=True)
+    path = SECURITY_DIR / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+    with _SECURITY_WRITE_LOCK, open(path, "a", encoding="utf-8") as f:
+      f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+  except Exception as exc:  # the audit log must never break a request
+    logger.warning("Could not write security log entry %s: %s", payload.get("id"), exc, exc_info=True)
+
+
+def log_security_event(kind: str, **fields: Any) -> dict[str, Any]:
+  """Append a security decision (a detected injection, an allowed or denied tool call) to its own daily JSONL.
+
+  Kept apart from the call log so it does not distort its metrics. Callers pass identifiers and hashes,
+  never the content of what was inspected.
+  """
+  payload = {
+    "id": str(uuid.uuid4()),
+    "created_at": datetime.now(timezone.utc).isoformat(),
+    "kind": kind,
+    **fields,
+  }
+  try:
+    loop = asyncio.get_running_loop()
+  except RuntimeError:
+    _write_security_entry(payload)
+    return payload
+  task = loop.create_task(asyncio.to_thread(_write_security_entry, payload))
+  _PENDING_WRITES.add(task)
+  task.add_done_callback(_PENDING_WRITES.discard)
+  return payload
+
+
+def list_security_events(limit: int = 50, kind: str | None = None) -> list[dict[str, Any]]:
+  """Latest security events, newest first."""
+  if not SECURITY_DIR.exists():
+    return []
+  events: list[dict[str, Any]] = []
+  for jf in sorted(SECURITY_DIR.glob("*.jsonl"), reverse=True):
+    try:
+      for line in _iter_lines_reversed(jf):
+        try:
+          event = json.loads(line)
+        except json.JSONDecodeError:
+          continue
+        if kind and event.get("kind") != kind:
+          continue
+        events.append(event)
+        if len(events) >= limit:
+          return events
+    except OSError:
+      continue
+  return events
 
 
 def percentile(values: list[float], pct: float) -> float | None:
