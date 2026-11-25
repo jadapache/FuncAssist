@@ -132,3 +132,60 @@ def test_mejoras_dot_bullet_is_plain_paragraph():
   doc = _open(create_mejoras_docx("• No es viñeta"))
   p = next(p for p in doc.paragraphs if "No es viñeta" in p.text)
   assert p.style.name != "List Bullet"
+
+
+# -- each document applies its own style ----------------------------------------------------------------
+
+import io as _io
+
+from docx import Document as _Document
+from docx.shared import RGBColor as _RGB
+
+_STYLES = {
+  "inventario": (create_inventario_docx, _RGB(0, 39, 119), 18, "Generado a partir de Minutas", "002777", "F1F5F9"),
+  "levantamiento": (create_levantamiento_docx, _RGB(0, 39, 119), 18, "Documentación Funcional", "002777", "F8FAFC"),
+  "mejoras": (create_mejoras_docx, _RGB(30, 58, 138), 20, "Generado automáticamente", "1E3A8A", "F8FAFC"),
+}
+
+
+@pytest.mark.parametrize("name", list(_STYLES))
+def test_each_document_uses_its_own_colors_sizes_and_subtitle(name):
+  build, color, title_size, subtitle, header_hex, alt_hex = _STYLES[name]
+  doc = _Document(_io.BytesIO(build("| A |\n| 1 |\n| 2 |\n| 3 |", title="Mi Documento")))
+  title, sub = doc.paragraphs[:2]
+  assert title.text == "MI DOCUMENTO" and title.runs[0].font.color.rgb == color
+  assert title.runs[0].font.size.pt == title_size
+  assert sub.text.startswith(subtitle)
+  (table,) = doc.tables
+  fills = [row.cells[0]._tc.xpath("./w:tcPr/w:shd/@w:fill") for row in table.rows]
+  assert fills == [[header_hex], [alt_hex], [], [alt_hex]]
+
+
+def _numbered(build, markdown):
+  doc = _Document(_io.BytesIO(build(markdown)))
+  return {p.text: p.style.name for p in doc.paragraphs[2:]}
+
+
+def test_mejoras_keeps_action_steps_and_placeholders_as_list_items():
+  styles = _numbered(create_mejoras_docx, "1. Validar el acceso al sistema\n2. {{CAMPO}} DEL FORMULARIO\n3. Alcance General")
+  assert styles["Validar el acceso al sistema"] == "List Number"
+  assert styles["{{CAMPO}} DEL FORMULARIO"] == "List Number"
+  assert styles["3. Alcance General"] == "Normal"
+
+
+@pytest.mark.parametrize("word", ["Validar", "Verificar", "Confirmar", "Comprobar", "VERIFICAR"])
+def test_mejoras_action_words_are_matched_ignoring_case(word):
+  assert _numbered(create_mejoras_docx, f"1. {word} los datos de entrada")[f"{word} los datos de entrada"] == "List Number"
+
+
+@pytest.mark.parametrize("build", [create_inventario_docx, create_levantamiento_docx])
+def test_other_documents_turn_the_same_lines_into_titles(build):
+  styles = _numbered(build, "1. Validar el acceso al sistema\n2. {{CAMPO}} DEL FORMULARIO")
+  assert styles == {"1. Validar el acceso al sistema": "Normal", "2. {{CAMPO}} DEL FORMULARIO": "Normal"}
+
+
+def test_only_levantamiento_draws_check_boxes_and_mejoras_has_no_dot_bullets():
+  assert _Document(_io.BytesIO(create_levantamiento_docx("- [x] hecho"))).paragraphs[2].runs[0].text == "[✓] "
+  assert _Document(_io.BytesIO(create_inventario_docx("- [x] hecho"))).paragraphs[2].text == "[x] hecho"
+  assert _Document(_io.BytesIO(create_mejoras_docx("• punto"))).paragraphs[2].style.name == "Normal"
+  assert _Document(_io.BytesIO(create_inventario_docx("• punto"))).paragraphs[2].style.name == "List Bullet"
