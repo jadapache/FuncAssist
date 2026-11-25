@@ -215,15 +215,12 @@ class GitHubIntegration(GitHostingIntegration):
     app_id = _validate_app_id(app_id)
     key = _normalize_private_key(private_key)
     app_info, installation, token_body = await self._discover_installation(app_id, key, installation_id)
-    existing = load_connection(self.id) or {}
-    save_connection(
-      self.id,
-      _connection_record(
-        app_id, key, app_info, installation, token_body,
-        selected_repos=selected_repos if selected_repos is not None else existing.get("selected_repos") or [],
-        configured_by=configured_by,
-      ),
+    if selected_repos is None:
+      selected_repos = self.selected_repos()
+    record = _connection_record(
+      app_id, key, app_info, installation, token_body, selected_repos=selected_repos, configured_by=configured_by
     )
+    save_connection(self.id, record)
     clear_token_cache()
     return self.get_info()
 
@@ -276,8 +273,9 @@ class GitHubIntegration(GitHostingIntegration):
 
   async def test_connection(self) -> TestConnectionResult:
     data = load_connection(self.id)
-    if not data or not self._is_connected(data):
+    if not self._is_connected(data):
       return TestConnectionResult(ok=False, message="GitHub is not connected.")
+    assert data is not None
 
     try:
       # Always mint a fresh token so permissions are re-checked on every test.
