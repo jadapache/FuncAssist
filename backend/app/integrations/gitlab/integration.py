@@ -13,10 +13,10 @@ from app.integrations.base import (
   AuthMethod,
   Capability,
   ConnectionStatus,
-  Integration,
   IntegrationInfo,
   TestConnectionResult,
 )
+from app.integrations.git_hosting import GitHostingIntegration
 from app.integrations.service_accounts import (
   GITLAB_ALLOWED_SCOPES,
   GITLAB_REQUIRED_SCOPES,
@@ -28,7 +28,7 @@ from app.integrations.service_accounts import (
 DEFAULT_HOST = "https://gitlab.com"
 
 
-class GitLabIntegration(Integration):
+class GitLabIntegration(GitHostingIntegration):
   id = "gitlab"
   name = "GitLab"
   description = "Connect GitLab projects for merge requests, commits, and issues."
@@ -201,18 +201,6 @@ class GitLabIntegration(Integration):
     if data.get("auth_method") == AuthMethod.SERVICE_ACCOUNT.value and data.get("service_token"):
       return {"PRIVATE-TOKEN": str(data["service_token"])}
     raise ValueError("GitLab is not connected.")
-
-  def selected_repos(self) -> list[str]:
-    data = load_connection(self.id) or {}
-    return list(data.get("selected_repos") or [])
-
-  async def update_selected_repos(self, repos: list[str]) -> IntegrationInfo:
-    data = load_connection(self.id)
-    if not data or not self._is_connected(data):
-      raise ValueError("GitLab is not connected.")
-    data["selected_repos"] = repos
-    save_connection(self.id, data)
-    return self.get_info()
 
   def _encode_project(self, path: str) -> str:
     return quote(path, safe="")
