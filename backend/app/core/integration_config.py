@@ -11,22 +11,34 @@ def _oauth_block(key: str) -> dict:
   return dict(app.get(key) or {})
 
 
+DEFAULT_JIRA_REDIRECT_URI = "http://127.0.0.1:6728/api/integrations/jira/callback"
+
+
+def _first_set(*values: object) -> str:
+  """The first value that is set, as trimmed text (empty when none is)."""
+  return str(next((value for value in values if value), "")).strip()
+
+
+def _source(local: dict, env_client_id: str | None) -> str:
+  if local.get("client_id"):
+    return "local"
+  return "env" if env_client_id else "none"
+
+
 def get_jira_oauth_config() -> dict[str, str]:
   settings = get_settings()
   jira = _oauth_block("jira_oauth")
 
-  client_id = str(jira.get("client_id") or settings.jira_client_id or "").strip()
-  client_secret = str(jira.get("client_secret") or settings.jira_client_secret or "").strip()
-  redirect_uri = str(
-    jira.get("redirect_uri") or settings.jira_redirect_uri or "http://127.0.0.1:6728/api/integrations/jira/callback"
-  ).strip()
+  client_id = _first_set(jira.get("client_id"), settings.jira_client_id)
+  client_secret = _first_set(jira.get("client_secret"), settings.jira_client_secret)
+  redirect_uri = _first_set(jira.get("redirect_uri"), settings.jira_redirect_uri, DEFAULT_JIRA_REDIRECT_URI)
 
   return {
     "client_id": client_id,
     "client_secret": client_secret,
     "redirect_uri": redirect_uri,
     "configured": bool(client_id and client_secret),
-    "source": "local" if jira.get("client_id") else ("env" if settings.jira_client_id else "none"),
+    "source": _source(jira, settings.jira_client_id),
   }
 
 

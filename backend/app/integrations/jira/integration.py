@@ -55,7 +55,7 @@ def match_project_for_hint(projects: list[dict[str, Any]], hint: str) -> dict[st
     name = str(project.get("name") or "").lower()
     if key == hint_upper:
       return project
-    if hint_lower in name or hint_upper in key or hint_lower in key.lower():
+    if hint_lower in name or hint_upper in key:
       return project
 
   return None
@@ -118,6 +118,57 @@ def get_jira_oauth_scopes() -> list[str]:
       if item not in scopes:
         scopes.append(item)
   return scopes
+
+
+_INVALID_STATE = "Invalid OAuth state. Restart the Jira connection flow."
+OAUTH_STATE_TTL_SECONDS = 600
+
+
+def _expiry(tokens: dict[str, Any]) -> float:
+  """When an access token stops being usable: a minute before the provider says, to never send it expired."""
+  return time.time() + int(tokens.get("expires_in", 3600)) - 60
+
+
+def _oauth_payload(tokens: dict[str, Any], resources: list[dict[str, Any]], me: dict[str, Any]) -> dict[str, Any]:
+  """What is stored for a user once Atlassian granted access to the first of the sites they can use."""
+  site = resources[0]
+  return {
+    "auth_method": AuthMethod.OAUTH.value,
+    "access_token": tokens["access_token"],
+    "refresh_token": tokens.get("refresh_token"),
+    "expires_at": _expiry(tokens),
+    "token_type": tokens.get("token_type", "Bearer"),
+    "scope": tokens.get("scope"),
+    "cloud_id": site.get("id"),
+    "site_url": site.get("url"),
+    "site_name": site.get("name"),
+    "account_email": me.get("email"),
+    "account_name": me.get("name"),
+    "account_label": me.get("email") or me.get("name"),
+    "workspace_label": site.get("url"),
+    "accessible_resources": [{"id": r.get("id"), "name": r.get("name"), "url": r.get("url")} for r in resources],
+  }
+
+
+def _normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
+  fields = issue.get("fields") or {}
+  assignee = fields.get("assignee") or {}
+  description = fields.get("description")
+  if isinstance(description, dict):
+    description = _adf_to_text(description)
+  return {
+    "id": issue.get("id"),
+    "key": issue.get("key"),
+    "summary": fields.get("summary"),
+    "status": (fields.get("status") or {}).get("name"),
+    "assignee": assignee.get("displayName") or assignee.get("emailAddress"),
+    "updated": fields.get("updated"),
+    "priority": (fields.get("priority") or {}).get("name"),
+    "type": (fields.get("issuetype") or {}).get("name"),
+    "labels": fields.get("labels") or [],
+    "description": description,
+    "url": issue.get("self"),
+  }
 
 
 class JiraIntegration(Integration):
@@ -229,30 +280,30 @@ class JiraIntegration(Integration):
       auth_method=AuthMethod.OAUTH,
     )
 
-  async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    oauth = get_jira_oauth_config()
-
-    parts = state.split("::", 2)
-    if len(parts) != 3 or not parts[0]:
-      raise ValueError("Invalid OAuth state. Restart the Jira connection flow.")
-    user_id = parts[0]
+  def _state_user(self, state: str) -> str:
+    """The user a well-formed OAuth state belongs to, while it is inside its 10-minute window."""
+    user_id = self.user_id_from_state(state)
+    if not user_id:
+      raise ValueError(_INVALID_STATE)
     try:
-      state_ts = int(parts[1])
+      issued_at = int(state.split("::", 2)[1])
     except ValueError as exc:
-      raise ValueError("Invalid OAuth state. Restart the Jira connection flow.") from exc
-    # Enforce 10-minute state expiration window
-    if time.time() - state_ts > 600:
+      raise ValueError(_INVALID_STATE) from exc
+    if time.time() - issued_at > OAUTH_STATE_TTL_SECONDS:
       raise ValueError("OAuth authorization request has expired. Please try connecting again.")
+    return user_id
 
+  def _consume_pending_state(self, user_id: str, state: str) -> None:
+    """The state must be the one this user started, and it works once: it is cleared to prevent replay."""
     pending = load_user_integration(user_id, self.id) or {}
-    expected = pending.get("oauth_state")
-    if not expected or expected != state:
-      raise ValueError("Invalid OAuth state. Restart the Jira connection flow.")
-
-    # Immediately consume the state to prevent replay attacks
+    if pending.get("oauth_state") != state:
+      raise ValueError(_INVALID_STATE)
     pending["oauth_state"] = None
     save_user_integration(user_id, self.id, pending)
 
+  @staticmethod
+  async def _exchange_code(code: str, oauth: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    """The tokens for an authorization code, the Atlassian sites of the account and the account's profile."""
     async with httpx.AsyncClient(timeout=30.0) as client:
       token_response = await client.post(
         ATLASSIAN_TOKEN_URL,
@@ -265,43 +316,28 @@ class JiraIntegration(Integration):
         },
       )
       if token_response.status_code >= 400:
-        body = token_response.text
-        raise ValueError(f"Token exchange failed ({token_response.status_code}): {body}")
+        raise ValueError(f"Token exchange failed ({token_response.status_code}): {token_response.text}")
       tokens = token_response.json()
 
-      access_token = tokens["access_token"]
-      headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
-
+      headers = {"Authorization": f"Bearer {tokens['access_token']}", "Accept": "application/json"}
       resources_response = await client.get(ATLASSIAN_RESOURCES_URL, headers=headers)
       resources_response.raise_for_status()
       resources = resources_response.json()
-
       if not resources:
         raise ValueError("No accessible Atlassian sites found for this account.")
 
-      site = resources[0]
       me_response = await client.get(ATLASSIAN_ME_URL, headers=headers)
       me = me_response.json() if me_response.status_code == 200 else {}
+    return tokens, resources, me
 
-    payload = {
-      "auth_method": AuthMethod.OAUTH.value,
-      "access_token": access_token,
-      "refresh_token": tokens.get("refresh_token"),
-      "expires_at": time.time() + int(tokens.get("expires_in", 3600)) - 60,
-      "token_type": tokens.get("token_type", "Bearer"),
-      "scope": tokens.get("scope"),
-      "cloud_id": site.get("id"),
-      "site_url": site.get("url"),
-      "site_name": site.get("name"),
-      "account_email": me.get("email"),
-      "account_name": me.get("name"),
-      "account_label": me.get("email") or me.get("name"),
-      "workspace_label": site.get("url"),
-      "accessible_resources": [
-        {"id": r.get("id"), "name": r.get("name"), "url": r.get("url")} for r in resources
-      ],
-    }
-    save_user_integration(user_id, self.id, payload)
+  async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
+    oauth = get_jira_oauth_config()
+    user_id = self._state_user(state)
+    self._consume_pending_state(user_id, state)
+
+    tokens, resources, me = await self._exchange_code(code, oauth)
+    site = resources[0]
+    save_user_integration(user_id, self.id, _oauth_payload(tokens, resources, me))
     await self.auto_select_projects_from_url(site.get("url") or "", user_id=user_id)
     return self.get_info(user_id=user_id)
 
@@ -314,9 +350,10 @@ class JiraIntegration(Integration):
 
   async def update_selected_projects(self, project_keys: list[str], user_id: str | None = None) -> IntegrationInfo:
     data = self._resolve_connection_data(user_id)
-    if not data or not self._is_connected(data):
+    if not self._is_connected(data):
       raise ValueError("Jira is not connected.")
-    cleaned = [key.strip().upper() for key in project_keys if key and key.strip()]
+    assert data is not None
+    cleaned =[key.strip().upper() for key in project_keys if key and key.strip()]
     data["selected_project_keys"] = cleaned
     save_user_integration(self._require_user(user_id), self.id, data)
     return self.get_info(user_id=user_id)
@@ -333,9 +370,10 @@ class JiraIntegration(Integration):
       body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50}, user_id=user_id)
       projects = body.get("values", [])
       match = match_project_for_hint(projects, hint)
-      if match and match.get("key"):
+      key = match.get("key") if match else None
+      if key:
         data = self._resolve_connection_data(user_id) or {}
-        data["selected_project_keys"] = [str(match["key"]).upper()]
+        data["selected_project_keys"] = [str(key).upper()]
         save_user_integration(self._require_user(user_id), self.id, data)
     except Exception:
       return
@@ -391,8 +429,8 @@ class JiraIntegration(Integration):
       return TestConnectionResult(ok=False, message=str(exc))
 
   async def _ensure_fresh_oauth_token(self, data: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
-    expires_at = float(data.get("expires_at") or 0)
-    if time.time() < expires_at and data.get("access_token"):
+    expires_at = data.get("expires_at")
+    if expires_at and data.get("access_token") and time.time() < float(expires_at):
       return data
 
     refresh_token = data.get("refresh_token")
@@ -416,7 +454,7 @@ class JiraIntegration(Integration):
     data["access_token"] = tokens["access_token"]
     if tokens.get("refresh_token"):
       data["refresh_token"] = tokens["refresh_token"]
-    data["expires_at"] = time.time() + int(tokens.get("expires_in", 3600)) - 60
+    data["expires_at"] = _expiry(tokens)
     save_user_integration(self._require_user(user_id), self.id, data)
     return data
 
@@ -473,33 +511,7 @@ class JiraIntegration(Integration):
       },
       user_id=user_id,
     )
-    issues = body.get("issues", [])
-    normalized: list[dict[str, Any]] = []
-    for issue in issues:
-      fields = issue.get("fields") or {}
-      assignee = fields.get("assignee") or {}
-      status = fields.get("status") or {}
-      priority = fields.get("priority") or {}
-      issuetype = fields.get("issuetype") or {}
-      description = fields.get("description")
-      if isinstance(description, dict):
-        description = _adf_to_text(description)
-      normalized.append(
-        {
-          "id": issue.get("id"),
-          "key": issue.get("key"),
-          "summary": fields.get("summary"),
-          "status": status.get("name"),
-          "assignee": assignee.get("displayName") or assignee.get("emailAddress"),
-          "updated": fields.get("updated"),
-          "priority": priority.get("name"),
-          "type": issuetype.get("name"),
-          "labels": fields.get("labels") or [],
-          "description": description,
-          "url": issue.get("self"),
-        }
-      )
-    return normalized
+    return [_normalize_issue(issue) for issue in body.get("issues", [])]
 
   async def get_sprints(self, *, max_results: int = 20, user_id: str | None = None) -> list[dict[str, Any]]:
     """Best-effort active/recent sprints via boards API."""

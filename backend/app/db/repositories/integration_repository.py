@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -18,6 +17,19 @@ from app.db.models import (
 
 logger = logging.getLogger(__name__)
 
+_USER_INTEGRATION_FIELDS = (
+  "external_account_id", "external_account_name", "access_token_ref", "refresh_token_ref", "expires_at",
+  "scopes_json", "connection_metadata_json", "status",
+)
+_JIRA_SHARED_FIELDS = ("access_token_ref", "refresh_token_ref", "expires_at", "scopes_json", "status")
+_JIRA_EXTRA_FIELDS = (
+  "jira_url", "cloud_id", "account_email", "account_id", "access_token_secret_id", "refresh_token_secret_id",
+)
+
+
+def _iso(moment: Optional[datetime]) -> Optional[str]:
+  return moment.isoformat() if moment else None
+
 
 class IntegrationRepository(IIntegrationRepository):
   """Implementación PostgreSQL SQLAlchemy para IIntegrationRepository."""
@@ -25,27 +37,27 @@ class IntegrationRepository(IIntegrationRepository):
   def __init__(self, session: Session) -> None:
     self.session = session
 
+  def _user_integration(self, user_id: str, provider: str) -> Optional[UserIntegrationModel]:
+    return self.session.scalar(select(UserIntegrationModel).where(UserIntegrationModel.user_id == user_id, UserIntegrationModel.provider == provider))
+
+  def _jira_connection(self, user_id: str) -> Optional[UserJiraConnectionModel]:
+    return self.session.scalar(select(UserJiraConnectionModel).where(UserJiraConnectionModel.user_id == user_id))
+
+  def _credential(self, user_id: str, provider: str) -> Optional[UserProviderCredentialModel]:
+    return self.session.scalar(select(UserProviderCredentialModel).where(UserProviderCredentialModel.user_id == user_id, UserProviderCredentialModel.provider == provider))
+
+  def _organization_integration(self, organization_id: str, provider: str) -> Optional[OrganizationIntegrationModel]:
+    return self.session.scalar(select(OrganizationIntegrationModel).where(OrganizationIntegrationModel.organization_id == organization_id, OrganizationIntegrationModel.provider == provider))
+
   def get_user_integration(self, user_id: str, provider: str) -> Optional[Dict[str, Any]]:
-    item = self.session.scalar(
-      select(UserIntegrationModel).where(
-        UserIntegrationModel.user_id == user_id,
-        UserIntegrationModel.provider == provider,
-      )
-    )
+    item = self._user_integration(user_id, provider)
     if not item:
       return None
     return {
       "id": item.id,
       "user_id": item.user_id,
       "provider": item.provider,
-      "external_account_id": item.external_account_id,
-      "external_account_name": item.external_account_name,
-      "access_token_ref": item.access_token_ref,
-      "refresh_token_ref": item.refresh_token_ref,
-      "expires_at": item.expires_at,
-      "scopes_json": item.scopes_json,
-      "connection_metadata_json": item.connection_metadata_json,
-      "status": item.status,
+      **{field: getattr(item, field) for field in _USER_INTEGRATION_FIELDS},
     }
 
   def save_user_integration(
@@ -62,107 +74,53 @@ class IntegrationRepository(IIntegrationRepository):
     status: str,
     jira_extra: Optional[Dict[str, Any]] = None,
   ) -> None:
-    item = self.session.scalar(
-      select(UserIntegrationModel).where(
-        UserIntegrationModel.user_id == user_id,
-        UserIntegrationModel.provider == provider,
-      )
-    )
+    values = {
+      "external_account_id": external_account_id,
+      "external_account_name": external_account_name,
+      "access_token_ref": access_token_ref,
+      "refresh_token_ref": refresh_token_ref,
+      "expires_at": expires_at,
+      "scopes_json": scopes_json,
+      "connection_metadata_json": connection_metadata_json,
+      "status": status,
+    }
+    item = self._user_integration(user_id, provider)
     if item:
-      item.external_account_id = external_account_id
-      item.external_account_name = external_account_name
-      item.access_token_ref = access_token_ref
-      item.refresh_token_ref = refresh_token_ref
-      item.expires_at = expires_at
-      item.scopes_json = scopes_json
-      item.connection_metadata_json = connection_metadata_json
-      item.status = status
+      for field, value in values.items():
+        setattr(item, field, value)
     else:
-      new_item = UserIntegrationModel(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        provider=provider,
-        external_account_id=external_account_id,
-        external_account_name=external_account_name,
-        access_token_ref=access_token_ref,
-        refresh_token_ref=refresh_token_ref,
-        expires_at=expires_at,
-        scopes_json=scopes_json,
-        connection_metadata_json=connection_metadata_json,
-        status=status,
-      )
-      self.session.add(new_item)
+      self.session.add(UserIntegrationModel(id=str(uuid.uuid4()), user_id=user_id, provider=provider, **values))
 
     if provider == "jira" and jira_extra is not None:
-      jira_item = self.session.scalar(
-        select(UserJiraConnectionModel).where(UserJiraConnectionModel.user_id == user_id)
-      )
-      jira_url = jira_extra.get("jira_url")
-      cloud_id = jira_extra.get("cloud_id")
-      account_email = jira_extra.get("account_email")
-      account_id = jira_extra.get("account_id")
-      access_secret_id = jira_extra.get("access_token_secret_id")
-      refresh_secret_id = jira_extra.get("refresh_token_secret_id")
-
-      if jira_item:
-        jira_item.jira_url = jira_url
-        jira_item.cloud_id = cloud_id
-        jira_item.account_email = account_email
-        jira_item.account_id = account_id
-        jira_item.access_token_secret_id = access_secret_id
-        jira_item.refresh_token_secret_id = refresh_secret_id
-        jira_item.access_token_ref = access_token_ref
-        jira_item.refresh_token_ref = refresh_token_ref
-        jira_item.expires_at = expires_at
-        jira_item.scopes_json = scopes_json
-        jira_item.status = status
-      else:
-        new_jira = UserJiraConnectionModel(
-          id=str(uuid.uuid4()),
-          user_id=user_id,
-          jira_url=jira_url,
-          cloud_id=cloud_id,
-          account_email=account_email,
-          account_id=account_id,
-          access_token_secret_id=access_secret_id,
-          refresh_token_secret_id=refresh_secret_id,
-          access_token_ref=access_token_ref,
-          refresh_token_ref=refresh_token_ref,
-          expires_at=expires_at,
-          scopes_json=scopes_json,
-          status=status,
-        )
-        self.session.add(new_jira)
+      self._save_jira_connection(user_id, values, jira_extra)
 
     self.session.flush()
 
+  def _save_jira_connection(self, user_id: str, shared: Dict[str, Any], jira_extra: Dict[str, Any]) -> None:
+    """Jira keeps a second row per user with the connection data the Jira client reads."""
+    values = {field: jira_extra.get(field) for field in _JIRA_EXTRA_FIELDS}
+    values.update({field: shared[field] for field in _JIRA_SHARED_FIELDS})
+    jira_item = self._jira_connection(user_id)
+    if jira_item:
+      for field, value in values.items():
+        setattr(jira_item, field, value)
+    else:
+      self.session.add(UserJiraConnectionModel(id=str(uuid.uuid4()), user_id=user_id, **values))
+
   def delete_user_integration(self, user_id: str, provider: str) -> bool:
-    item = self.session.scalar(
-      select(UserIntegrationModel).where(
-        UserIntegrationModel.user_id == user_id,
-        UserIntegrationModel.provider == provider,
-      )
-    )
+    item = self._user_integration(user_id, provider)
     if item:
       self.session.delete(item)
 
-    if provider == "jira":
-      jira_item = self.session.scalar(
-        select(UserJiraConnectionModel).where(UserJiraConnectionModel.user_id == user_id)
-      )
-      if jira_item:
-        self.session.delete(jira_item)
+    jira_item = self._jira_connection(user_id) if provider == "jira" else None
+    if jira_item:
+      self.session.delete(jira_item)
 
     self.session.flush()
     return bool(item)
 
   def get_user_credential(self, user_id: str, provider: str) -> Optional[Dict[str, Any]]:
-    cred = self.session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
+    cred = self._credential(user_id, provider)
     if not cred:
       return None
     return {
@@ -184,37 +142,21 @@ class IntegrationRepository(IIntegrationRepository):
     secret_id: str,
     secret_ref: str,
   ) -> None:
-    cred = self.session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
+    cred = self._credential(user_id, provider)
     if cred:
       cred.secret_id = secret_id
       cred.secret_ref = secret_ref
       cred.status = "active"
       cred.validation_error = None
     else:
-      cred = UserProviderCredentialModel(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        provider=provider,
-        secret_id=secret_id,
-        secret_ref=secret_ref,
-        status="active",
-      )
-      self.session.add(cred)
+      self.session.add(UserProviderCredentialModel(
+        id=str(uuid.uuid4()), user_id=user_id, provider=provider, secret_id=secret_id, secret_ref=secret_ref, status="active",
+      ))
 
     self.session.flush()
 
   def delete_user_credential(self, user_id: str, provider: str) -> bool:
-    cred = self.session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
+    cred = self._credential(user_id, provider)
     if not cred:
       return False
     self.session.delete(cred)
@@ -224,19 +166,15 @@ class IntegrationRepository(IIntegrationRepository):
   def list_user_credentials(self, user_id: str) -> List[Dict[str, Any]]:
     if not user_id:
       return []
-    creds = self.session.scalars(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id
-      )
-    ).all()
+    creds = self.session.scalars(select(UserProviderCredentialModel).where(UserProviderCredentialModel.user_id == user_id)).all()
     return [
       {
         "provider": c.provider,
         "status": c.status,
         "is_configured": True,
-        "last_validated_at": c.last_validated_at.isoformat() if c.last_validated_at else None,
+        "last_validated_at": _iso(c.last_validated_at),
         "validation_error": c.validation_error,
-        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        "updated_at": _iso(c.updated_at),
       }
       for c in creds
     ]
@@ -248,12 +186,7 @@ class IntegrationRepository(IIntegrationRepository):
     status: str,
     error_msg: Optional[str],
   ) -> None:
-    cred = self.session.scalar(
-      select(UserProviderCredentialModel).where(
-        UserProviderCredentialModel.user_id == user_id,
-        UserProviderCredentialModel.provider == provider,
-      )
-    )
+    cred = self._credential(user_id, provider)
     if cred:
       cred.status = status
       cred.last_validated_at = datetime.now(timezone.utc)
@@ -261,12 +194,7 @@ class IntegrationRepository(IIntegrationRepository):
       self.session.flush()
 
   def get_organization_integration(self, organization_id: str, provider: str) -> Optional[Dict[str, Any]]:
-    item = self.session.scalar(
-      select(OrganizationIntegrationModel).where(
-        OrganizationIntegrationModel.organization_id == organization_id,
-        OrganizationIntegrationModel.provider == provider,
-      )
-    )
+    item = self._organization_integration(organization_id, provider)
     return item.to_dict() if item else None
 
   def save_organization_integration(
@@ -278,41 +206,20 @@ class IntegrationRepository(IIntegrationRepository):
     status: str = "active",
     settings_payload: Optional[Dict[str, Any]] = None,
   ) -> None:
-    item = self.session.scalar(
-      select(OrganizationIntegrationModel).where(
-        OrganizationIntegrationModel.organization_id == organization_id,
-        OrganizationIntegrationModel.provider == provider,
-      )
-    )
-    if item:
-      if client_id is not None:
-        item.client_id = client_id
-      if client_secret_ref is not None:
-        item.client_secret_ref = client_secret_ref
-      if status is not None:
-        item.status = status
-      if settings_payload is not None:
-        item.settings_json = settings_payload
-    else:
-      item = OrganizationIntegrationModel(
-        id=str(uuid.uuid4()),
-        organization_id=organization_id,
-        provider=provider,
-        client_id=client_id,
-        client_secret_ref=client_secret_ref,
-        status=status,
-        settings_json=settings_payload,
-      )
+    item = self._organization_integration(organization_id, provider)
+    if item is None:
+      item = OrganizationIntegrationModel(id=str(uuid.uuid4()), organization_id=organization_id, provider=provider)
       self.session.add(item)
+    # What was not given stays as it was, so a partial update never clears a stored secret.
+    # `settings_payload` is part of the interface but the table has no column for it, so it is not stored.
+    changes = {"client_id": client_id, "client_secret_ref": client_secret_ref, "status": status}
+    for field, value in changes.items():
+      if value is not None:
+        setattr(item, field, value)
     self.session.flush()
 
   def delete_organization_integration(self, organization_id: str, provider: str) -> bool:
-    item = self.session.scalar(
-      select(OrganizationIntegrationModel).where(
-        OrganizationIntegrationModel.organization_id == organization_id,
-        OrganizationIntegrationModel.provider == provider,
-      )
-    )
+    item = self._organization_integration(organization_id, provider)
     if not item:
       return False
     self.session.delete(item)
@@ -320,10 +227,4 @@ class IntegrationRepository(IIntegrationRepository):
     return True
 
   def organization_integration_exists(self, organization_id: str, provider: str) -> bool:
-    item = self.session.scalar(
-      select(OrganizationIntegrationModel.id).where(
-        OrganizationIntegrationModel.organization_id == organization_id,
-        OrganizationIntegrationModel.provider == provider,
-      )
-    )
-    return item is not None
+    return self._organization_integration(organization_id, provider) is not None

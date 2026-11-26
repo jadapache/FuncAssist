@@ -7,15 +7,12 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
-from sqlalchemy import select
 
 from app.core.secrets import decrypt_bytes, encrypt_bytes
 from app.core.storage_cache import _CACHE_CONNECTIONS, make_conn_cache_key
-from app.db.repositories.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
 

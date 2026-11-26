@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
-from typing import Any, Optional
-
-from sqlalchemy import select
+from contextlib import contextmanager
+from functools import reduce
+from typing import Any, Iterator, Optional
 
 from app.core.secret_store import secret_store
 from app.core.secrets import decrypt_secret, encrypt_secret
@@ -19,6 +18,77 @@ from app.core.storage_cache import _CACHE_CONNECTIONS, make_user_conn_cache_key
 from app.db.repositories.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _session_scope(db: Optional[Any], failure: str, *failure_args: Any) -> Iterator[Any]:
+  """The caller's session as it is, or a new transaction that commits when the block succeeds."""
+  if db is not None:
+    yield db
+    return
+  try:
+    from app.db.unit_of_work import SyncUnitOfWork
+
+    with SyncUnitOfWork() as uow:
+      yield uow.session
+      uow.commit()
+  except Exception as exc:
+    logger.error(failure, *failure_args, exc)
+    raise
+
+
+def _first(payload: dict[str, Any], *keys: str) -> Any:
+  """The first truthy value among the keys (the last one's value when none is)."""
+  return reduce(lambda found, key: found or payload.get(key), keys, None)
+
+
+def _store_token(session: Any, user_id: str, provider: str, kind: str, token: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+  """The reference to keep in the row and the id of the secret that holds the token.
+
+  A token goes to the secret store; when the store gives no id the token is kept encrypted in the row.
+  """
+  if not token:
+    return None, None
+  secret_id = secret_store.create_secret(user_id=user_id, purpose=f"{provider}_{kind}_token", plain_value=token, db=session)
+  if secret_id:
+    return f"sec::{secret_id}", secret_id
+  return encrypt_secret(token), None
+
+
+def _scopes_json(payload: dict[str, Any]) -> str:
+  scopes = payload.get("scopes") or []
+  return json.dumps(scopes) if isinstance(scopes, list) else str(scopes)
+
+
+def _jira_extra(payload: dict[str, Any], access_secret_id: Optional[str], refresh_secret_id: Optional[str]) -> dict[str, Any]:
+  return {
+    "jira_url": _first(payload, "jira_url", "base_url", "site_url"),
+    "cloud_id": payload.get("cloud_id"),
+    "account_email": _first(payload, "account_email", "email"),
+    "account_id": _first(payload, "account_id", "external_account_id"),
+    "access_token_secret_id": access_secret_id,
+    "refresh_token_secret_id": refresh_secret_id,
+  }
+
+
+def _persist(session: Any, user_id: str, provider: str, payload: dict[str, Any], enc_str: str) -> None:
+  access_ref, access_secret_id = _store_token(session, user_id, provider, "access", payload.get("access_token"))
+  refresh_ref, refresh_secret_id = _store_token(session, user_id, provider, "refresh", payload.get("refresh_token"))
+  status = payload.get("status") or "connected"
+  jira_extra = _jira_extra(payload, access_secret_id, refresh_secret_id) if provider == "jira" else None
+  IntegrationRepository(session=session).save_user_integration(
+    user_id=user_id,
+    provider=provider,
+    external_account_id=_first(payload, "account_id", "external_account_id"),
+    external_account_name=_first(payload, "account_name", "display_name"),
+    access_token_ref=access_ref,
+    refresh_token_ref=refresh_ref,
+    expires_at=payload.get("expires_at"),
+    scopes_json=_scopes_json(payload),
+    connection_metadata_json=enc_str,
+    status=status,
+    jira_extra=jira_extra,
+  )
 
 
 def save_user_integration(
@@ -31,81 +101,31 @@ def save_user_integration(
   if not user_id or not provider:
     raise ValueError("user_id and provider are required to save a user integration.")
 
-  payload = dict(payload)
-  payload.setdefault("status", "connected")
-  raw = json.dumps(payload, ensure_ascii=False)
-  enc_str = encrypt_secret(raw)
+  payload = {"status": "connected", **payload}
+  enc_str = encrypt_secret(json.dumps(payload, ensure_ascii=False))
+  _CACHE_CONNECTIONS[make_user_conn_cache_key(user_id, provider)] = enc_str.encode("utf-8")
 
-  cache_key = make_user_conn_cache_key(user_id, provider)
-  _CACHE_CONNECTIONS[cache_key] = enc_str.encode("utf-8")
+  with _session_scope(db, "Failed to persist user integration to DB: %s") as session:
+    _persist(session, user_id, provider, payload, enc_str)
 
-  access_token = payload.get("access_token")
-  refresh_token = payload.get("refresh_token")
 
-  access_secret_id: Optional[str] = None
-  refresh_secret_id: Optional[str] = None
-
-  def _persist(session: Any) -> None:
-    nonlocal access_secret_id, refresh_secret_id
-    if access_token:
-      access_secret_id = secret_store.create_secret(
-        user_id=user_id,
-        purpose=f"{provider}_access_token",
-        plain_value=access_token,
-        db=session,
-      )
-    if refresh_token:
-      refresh_secret_id = secret_store.create_secret(
-        user_id=user_id,
-        purpose=f"{provider}_refresh_token",
-        plain_value=refresh_token,
-        db=session,
-      )
-
-    enc_access = f"sec::{access_secret_id}" if access_secret_id else (encrypt_secret(access_token) if access_token else None)
-    enc_refresh = f"sec::{refresh_secret_id}" if refresh_secret_id else (encrypt_secret(refresh_token) if refresh_token else None)
-
-    scopes = payload.get("scopes") or []
-    scopes_json = json.dumps(scopes) if isinstance(scopes, list) else str(scopes)
-
-    jira_extra = None
-    if provider == "jira":
-      jira_extra = {
-        "jira_url": payload.get("jira_url") or payload.get("base_url") or payload.get("site_url"),
-        "cloud_id": payload.get("cloud_id"),
-        "account_email": payload.get("account_email") or payload.get("email"),
-        "account_id": payload.get("account_id") or payload.get("external_account_id"),
-        "access_token_secret_id": access_secret_id,
-        "refresh_token_secret_id": refresh_secret_id,
-      }
-
-    repo = IntegrationRepository(session=session)
-    repo.save_user_integration(
-      user_id=user_id,
-      provider=provider,
-      external_account_id=payload.get("account_id") or payload.get("external_account_id"),
-      external_account_name=payload.get("account_name") or payload.get("display_name"),
-      access_token_ref=enc_access,
-      refresh_token_ref=enc_refresh,
-      expires_at=payload.get("expires_at"),
-      scopes_json=scopes_json,
-      connection_metadata_json=enc_str,
-      status=payload.get("status") or "connected",
-      jira_extra=jira_extra,
-    )
-
+def _fetch_row(user_id: str, provider: str, db: Optional[Any]) -> Optional[dict[str, Any]]:
   if db is not None:
-    _persist(db)
-    return
+    return IntegrationRepository(session=db).get_user_integration(user_id, provider)
+  from app.db.unit_of_work import SyncUnitOfWork
 
+  with SyncUnitOfWork() as uow:
+    return uow.integrations.get_user_integration(user_id, provider)
+
+
+def _decrypted_payload(enc_str: Optional[str], user_id: str, provider: str) -> dict[str, Any] | None:
+  if not enc_str:
+    return None
   try:
-    from app.db.unit_of_work import SyncUnitOfWork
-    with SyncUnitOfWork() as uow:
-      _persist(uow.session)
-      uow.commit()
+    return json.loads(decrypt_secret(enc_str))
   except Exception as exc:
-    logger.error("Failed to persist user integration to DB: %s", exc)
-    raise
+    logger.warning("Decryption failed for user integration %s/%s: %s", user_id, provider, exc)
+    return None
 
 
 def load_user_integration(
@@ -113,41 +133,31 @@ def load_user_integration(
   provider: str,
   db: Optional[Any] = None,
 ) -> dict[str, Any] | None:
-  """Load and decrypt user integration payload for specific user_id and provider."""
+  """Load and decrypt user integration payload for specific user_id and provider.
+
+  The database is the source of truth: a row replaces the cached value and no row drops it. When the
+  database cannot be read the cached value is used.
+  """
   if not user_id or not provider:
     return None
 
   cache_key = make_user_conn_cache_key(user_id, provider)
-  enc_bytes = _CACHE_CONNECTIONS.get(cache_key)
-  enc_str: str | None = enc_bytes.decode("utf-8") if enc_bytes else None
+  cached = _CACHE_CONNECTIONS.get(cache_key)
+  enc_str: str | None = cached.decode("utf-8") if cached else None
 
   try:
-    if db is not None:
-      repo = IntegrationRepository(session=db)
-      item = repo.get_user_integration(user_id, provider)
-    else:
-      from app.db.unit_of_work import SyncUnitOfWork
-      with SyncUnitOfWork() as uow:
-        item = uow.integrations.get_user_integration(user_id, provider)
-
+    item = _fetch_row(user_id, provider, db)
+  except Exception as exc:
+    logger.debug("Could not read user_integrations: %s", exc)
+  else:
+    if item is None and db is None:
+      _CACHE_CONNECTIONS.pop(cache_key, None)
+      return None
     if item and item.get("connection_metadata_json"):
       enc_str = item["connection_metadata_json"]
       _CACHE_CONNECTIONS[cache_key] = enc_str.encode("utf-8")
-    elif item is None and db is None:
-      _CACHE_CONNECTIONS.pop(cache_key, None)
-      return None
-  except Exception as exc:
-    logger.debug("Could not read user_integrations: %s", exc)
 
-  if not enc_str:
-    return None
-
-  try:
-    decrypted = decrypt_secret(enc_str)
-    return json.loads(decrypted)
-  except Exception as exc:
-    logger.warning("Decryption failed for user integration %s/%s: %s", user_id, provider, exc)
-    return None
+  return _decrypted_payload(enc_str, user_id, provider)
 
 
 def delete_user_integration(
@@ -159,24 +169,10 @@ def delete_user_integration(
   if not user_id or not provider:
     return False
 
-  cache_key = make_user_conn_cache_key(user_id, provider)
-  existed = cache_key in _CACHE_CONNECTIONS
-  _CACHE_CONNECTIONS.pop(cache_key, None)
-
-  if db is not None:
-    repo = IntegrationRepository(session=db)
-    deleted = repo.delete_user_integration(user_id, provider)
-    return bool(deleted or existed)
-
-  try:
-    from app.db.unit_of_work import SyncUnitOfWork
-    with SyncUnitOfWork() as uow:
-      deleted = uow.integrations.delete_user_integration(user_id, provider)
-      uow.commit()
-      return bool(deleted or existed)
-  except Exception as exc:
-    logger.error("Failed deleting user integration %s/%s: %s", user_id, provider, exc)
-    raise
+  existed = _CACHE_CONNECTIONS.pop(make_user_conn_cache_key(user_id, provider), None) is not None
+  with _session_scope(db, "Failed deleting user integration %s/%s: %s", user_id, provider) as session:
+    deleted = IntegrationRepository(session=session).delete_user_integration(user_id, provider)
+  return bool(deleted or existed)
 
 
 def user_integration_exists(

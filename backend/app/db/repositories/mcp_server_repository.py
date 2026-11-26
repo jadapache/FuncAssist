@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import uuid
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.interfaces.mcp_server_repository import IMcpServerRepository
 from app.db.models import McpServerModel
 from app.integrations.mcp_policy import approved_names, normalize_domains, normalize_tools
+
+
+_TRIMMED_FIELDS = ("name", "description", "endpoint_url")
+_PLAIN_FIELDS = ("transport_type", "auth_type", "status")
 
 
 class McpServerRepository(IMcpServerRepository):
@@ -51,12 +56,38 @@ class McpServerRepository(IMcpServerRepository):
       "updated_at": model.updated_at.isoformat() if model.updated_at else None,
     }
 
-  async def get_by_id(self, server_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+  async def _find(self, server_id: str, user_id: Optional[str]) -> Optional[McpServerModel]:
+    """A server by id; with a user, only when that user registered it (administrators pass None)."""
     stmt = select(McpServerModel).where(McpServerModel.id == server_id)
     if user_id:
       stmt = stmt.where(McpServerModel.user_id == user_id)
-    res = await self.session.execute(stmt)
-    item = res.scalar_one_or_none()
+    return (await self.session.execute(stmt)).scalar_one_or_none()
+
+  async def _flush_and_refresh(self, model: McpServerModel) -> None:
+    await self.session.flush()
+    if hasattr(self.session, "refresh"):
+      refreshed = self.session.refresh(model)
+      if inspect.isawaitable(refreshed):
+        await refreshed
+
+  def _apply_updates(self, server: McpServerModel, updates: Dict[str, Any]) -> None:
+    """Only the fields that were given (not None) change."""
+    given = {key: value for key, value in updates.items() if value is not None}
+    for field in _TRIMMED_FIELDS:
+      if field in given:
+        setattr(server, field, given[field].strip())
+    for field in _PLAIN_FIELDS:
+      if field in given:
+        setattr(server, field, given[field])
+    if "tools" in given:
+      server.allowed_tools_json = json.dumps(normalize_tools(given["tools"]))
+    if "allowed_domains" in given:
+      meta = self._metadata(server)
+      meta["allowed_domains"] = normalize_domains(given["allowed_domains"])
+      server.metadata_json = json.dumps(meta)
+
+  async def get_by_id(self, server_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    item = await self._find(server_id, user_id)
     return self._to_dto(item) if item else None
 
   async def list_by_user(self, user_id: str) -> List[Dict[str, Any]]:
@@ -92,12 +123,7 @@ class McpServerRepository(IMcpServerRepository):
       allowed_tools_json=json.dumps(normalize_tools(tools)),
     )
     self.session.add(model)
-    await self.session.flush()
-    if hasattr(self.session, "refresh"):
-      res = self.session.refresh(model)
-      import inspect
-      if inspect.isawaitable(res):
-        await res
+    await self._flush_and_refresh(model)
     return self._to_dto(model)
 
   async def update(
@@ -106,47 +132,15 @@ class McpServerRepository(IMcpServerRepository):
     user_id: Optional[str],
     updates: Dict[str, Any],
   ) -> Optional[Dict[str, Any]]:
-    stmt = select(McpServerModel).where(McpServerModel.id == server_id)
-    if user_id:
-      stmt = stmt.where(McpServerModel.user_id == user_id)
-    res = await self.session.execute(stmt)
-    server = res.scalar_one_or_none()
+    server = await self._find(server_id, user_id)
     if not server:
       return None
-
-    if "name" in updates and updates["name"] is not None:
-      server.name = updates["name"].strip()
-    if "description" in updates and updates["description"] is not None:
-      server.description = updates["description"].strip()
-    if "endpoint_url" in updates and updates["endpoint_url"] is not None:
-      server.endpoint_url = updates["endpoint_url"].strip()
-    if "transport_type" in updates and updates["transport_type"] is not None:
-      server.transport_type = updates["transport_type"]
-    if "auth_type" in updates and updates["auth_type"] is not None:
-      server.auth_type = updates["auth_type"]
-    if "status" in updates and updates["status"] is not None:
-      server.status = updates["status"]
-    if "tools" in updates and updates["tools"] is not None:
-      server.allowed_tools_json = json.dumps(normalize_tools(updates["tools"]))
-    if "allowed_domains" in updates and updates["allowed_domains"] is not None:
-      meta = self._metadata(server)
-      meta["allowed_domains"] = normalize_domains(updates["allowed_domains"])
-      server.metadata_json = json.dumps(meta)
-
-    await self.session.flush()
-    if hasattr(self.session, "refresh"):
-      res = self.session.refresh(server)
-      import inspect
-      if inspect.isawaitable(res):
-        await res
+    self._apply_updates(server, updates)
+    await self._flush_and_refresh(server)
     return self._to_dto(server)
 
   async def delete(self, server_id: str, user_id: Optional[str] = None) -> bool:
-    stmt = select(McpServerModel).where(McpServerModel.id == server_id)
-    if user_id:
-      stmt = stmt.where(McpServerModel.user_id == user_id)
-    res = await self.session.execute(stmt)
-    server = res.scalar_one_or_none()
+    server = await self._find(server_id, user_id)
     if not server:
       return False
     await self.session.delete(server)

@@ -25,53 +25,67 @@ def _cache_key(integration_id: str, tenant_or_user_id: str | None = None) -> str
   return f"funcassist:sync:global:{integration_id}"
 
 
-async def _fetch_integration_payload(integration_id: str, user_id: str | None = None) -> dict[str, Any]:
-  integration = registry.get(integration_id)
+async def _require_connected(integration: Any, integration_id: str, user_id: str | None) -> None:
   if integration_id in PERSONAL_INTEGRATION_IDS:
     if not user_id:
       raise ValueError(f"{integration_id} is a personal integration: a user is required.")
-    if not await integration.authenticate(user_id=user_id):  # type: ignore[call-arg]
-      raise ValueError(f"{integration_id} is not connected.")
-  elif not await integration.authenticate():
+    connected = await integration.authenticate(user_id=user_id)
+  else:
+    connected = await integration.authenticate()
+  if not connected:
     raise ValueError(f"{integration_id} is not connected.")
 
-  synced_at = datetime.now(timezone.utc).isoformat()
-  payload: dict[str, Any] = {
-    "integration_id": integration_id,
-    "synced_at": synced_at,
-    "data": {},
+
+async def _jira_data(integration: Any, user_id: str | None) -> dict[str, Any]:
+  issues = await integration.get_issues(max_results=50, user_id=user_id)
+  data = {
+    "issues": issues,
+    "projects": await integration.get_projects(user_id=user_id),
+    "sprints": await integration.get_sprints(user_id=user_id),
   }
+  annotate_items(issues, ("summary", "description"))
+  return data
 
+
+async def _first_pull_request_files(integration: Any, pull_requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+  """The files of the most recent pull request; a failure to read them leaves the list empty."""
+  if not pull_requests or not hasattr(integration, "get_files_changed"):
+    return []
+  number, repo = pull_requests[0].get("number"), pull_requests[0].get("repo")
+  if not (number and repo):
+    return []
+  try:
+    return await integration.get_files_changed(pr_number=int(number), repo=str(repo))
+  except Exception:
+    return []
+
+
+async def _git_hosting_data(integration: Any, integration_id: str) -> dict[str, Any]:
+  data: dict[str, Any] = {
+    "repositories": await integration.get_repositories(),
+    "pull_requests": await integration.get_pull_requests(max_results=30),
+    "commits": await integration.get_commits(max_results=30),
+  }
+  if integration_id == "gitlab":
+    data["issues"] = await integration.get_issues(max_results=30)
+    annotate_items(data["issues"], ("title", "summary", "description"))
+  annotate_items(data["pull_requests"], ("title", "body"))
+  annotate_items(data["commits"], ("message",))
+  data["files_changed"] = await _first_pull_request_files(integration, data["pull_requests"] or [])
+  return data
+
+
+async def _fetch_integration_payload(integration_id: str, user_id: str | None = None) -> dict[str, Any]:
+  integration = registry.get(integration_id)
+  await _require_connected(integration, integration_id, user_id)
+
+  synced_at = datetime.now(timezone.utc).isoformat()
+  data: dict[str, Any] = {}
   if integration_id == "jira":
-    payload["data"]["issues"] = await integration.get_issues(max_results=50, user_id=user_id)  # type: ignore[attr-defined]
-    payload["data"]["projects"] = await integration.get_projects(user_id=user_id)  # type: ignore[attr-defined]
-    payload["data"]["sprints"] = await integration.get_sprints(user_id=user_id)  # type: ignore[attr-defined]
-    annotate_items(payload["data"]["issues"], ("summary", "description"))
+    data = await _jira_data(integration, user_id)
   elif integration_id in GIT_HOSTING_IDS:
-    payload["data"]["repositories"] = await integration.get_repositories()  # type: ignore[attr-defined]
-    payload["data"]["pull_requests"] = await integration.get_pull_requests(max_results=30)  # type: ignore[attr-defined]
-    payload["data"]["commits"] = await integration.get_commits(max_results=30)  # type: ignore[attr-defined]
-
-    if integration_id == "gitlab":
-      payload["data"]["issues"] = await integration.get_issues(max_results=30)  # type: ignore[attr-defined]
-      annotate_items(payload["data"]["issues"], ("title", "summary", "description"))
-
-    annotate_items(payload["data"]["pull_requests"], ("title", "body"))
-    annotate_items(payload["data"]["commits"], ("message",))
-    prs = payload["data"].get("pull_requests") or []
-    files_changed: list[dict[str, Any]] = []
-    if prs and hasattr(integration, "get_files_changed"):
-      first = prs[0]
-      number = first.get("number")
-      repo = first.get("repo")
-      if number and repo:
-        try:
-          files_changed = await integration.get_files_changed(pr_number=int(number), repo=str(repo))  # type: ignore[attr-defined]
-        except Exception:
-          files_changed = []
-    payload["data"]["files_changed"] = files_changed
-
-  return payload
+    data = await _git_hosting_data(integration, integration_id)
+  return {"integration_id": integration_id, "synced_at": synced_at, "data": data}
 
 
 async def sync_integration(
