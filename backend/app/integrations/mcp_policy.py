@@ -18,7 +18,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator
@@ -46,17 +46,30 @@ class PolicyDecision:
 
 def tool_fingerprint(name: str, description: str, input_schema: Optional[dict[str, Any]]) -> str:
   """Stable hash of everything the model sees about a tool."""
-  canonical = json.dumps(
-    {"name": name, "description": description or "", "input_schema": input_schema or {}},
-    sort_keys=True,
-    separators=(",", ":"),
-    ensure_ascii=False,
-  )
+  seen = {"name": name, "description": description or "", "input_schema": input_schema or {}}
+  canonical = json.dumps(seen, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
   return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def descriptor_fingerprint(descriptor: ToolDescriptor) -> str:
   return tool_fingerprint(descriptor.name, descriptor.description, descriptor.input_schema)
+
+
+def _tool_entry(item: Any) -> Optional[dict[str, Any]]:
+  """One approval entry from a stored item, or None when the item is neither a name nor an object with one."""
+  if isinstance(item, str):
+    return {"name": item.strip(), "read_only": True, "approved": False, "fingerprint": None, "input_schema": None}
+  if not (isinstance(item, dict) and isinstance(item.get("name"), str)):
+    return None
+  return {
+    "name": item["name"].strip(),
+    "read_only": bool(item.get("read_only", False)),
+    "approved": bool(item.get("approved", False)) and bool(item.get("fingerprint")),
+    "fingerprint": item.get("fingerprint"),
+    "input_schema": item.get("input_schema") if isinstance(item.get("input_schema"), dict) else None,
+    "approved_by": item.get("approved_by"),
+    "approved_at": item.get("approved_at"),
+  }
 
 
 def normalize_tools(raw: Any) -> list[dict[str, Any]]:
@@ -68,21 +81,8 @@ def normalize_tools(raw: Any) -> list[dict[str, Any]]:
   entries: list[dict[str, Any]] = []
   seen: set[str] = set()
   for item in raw or []:
-    if isinstance(item, str):
-      entry = {"name": item.strip(), "read_only": True, "approved": False, "fingerprint": None, "input_schema": None}
-    elif isinstance(item, dict) and isinstance(item.get("name"), str):
-      entry = {
-        "name": item["name"].strip(),
-        "read_only": bool(item.get("read_only", False)),
-        "approved": bool(item.get("approved", False)) and bool(item.get("fingerprint")),
-        "fingerprint": item.get("fingerprint"),
-        "input_schema": item.get("input_schema") if isinstance(item.get("input_schema"), dict) else None,
-        "approved_by": item.get("approved_by"),
-        "approved_at": item.get("approved_at"),
-      }
-    else:
-      continue
-    if not entry["name"] or entry["name"] in seen:
+    entry = _tool_entry(item)
+    if entry is None or not entry["name"] or entry["name"] in seen:
       continue
     seen.add(entry["name"])
     entries.append(entry)
@@ -107,15 +107,9 @@ def approve_tool(
     except SchemaError as exc:
       raise ValueError(f"The tool input schema is not valid: {exc.message}") from exc
   updated = [e for e in normalize_tools(entries) if e["name"] != descriptor.name.strip()]
-  updated.append({
-    "name": descriptor.name.strip(),
-    "read_only": bool(read_only),
-    "approved": True,
-    "fingerprint": descriptor_fingerprint(descriptor),
-    "input_schema": copy.deepcopy(descriptor.input_schema),
-    "approved_by": approved_by,
-    "approved_at": datetime.now(timezone.utc).isoformat(),
-  })
+  approval = {"name": descriptor.name.strip(), "read_only": bool(read_only), "approved": True, "fingerprint": descriptor_fingerprint(descriptor)}
+  approval.update(input_schema=copy.deepcopy(descriptor.input_schema), approved_by=approved_by, approved_at=datetime.now(timezone.utc).isoformat())
+  updated.append(approval)
   return updated
 
 
@@ -123,12 +117,7 @@ def revoke_tool(entries: Iterable[dict[str, Any]], name: str) -> list[dict[str, 
   return [e for e in normalize_tools(entries) if e["name"] != name.strip()]
 
 
-def authorize_call(
-  entries: Iterable[dict[str, Any]],
-  descriptor: ToolDescriptor,
-  *,
-  user_confirmed: bool = False,
-) -> PolicyDecision:
+def authorize_call(entries: Iterable[dict[str, Any]], descriptor: ToolDescriptor, *, user_confirmed: bool = False) -> PolicyDecision:
   """Decide whether `descriptor` may run now, comparing it with what was approved."""
   entry = next((e for e in normalize_tools(entries) if e["name"] == descriptor.name), None)
   if entry is None or not entry["approved"]:
@@ -198,45 +187,50 @@ def normalize_domains(values: Iterable[Any]) -> list[str]:
   return out
 
 
+def _leaf_strings(value: Any, key: str = "") -> Iterator[tuple[str, str]]:
+  """Every string in nested arguments, with the lowercase name of the nearest key above it."""
+  if isinstance(value, dict):
+    for k, v in value.items():
+      yield from _leaf_strings(v, str(k).lower())
+  elif isinstance(value, (list, tuple)):
+    for item in value:
+      yield from _leaf_strings(item, key)
+  elif isinstance(value, str):
+    yield key, value.strip()
+
+
 def extract_destinations(arguments: Any) -> list[str]:
   """Every URL-like value in the arguments: under a destination-like name or written as a URL."""
-  found: list[str] = []
   if not isinstance(arguments, dict):
-    return found
+    return []
+  return [text for key, text in _leaf_strings(arguments) if key in DESTINATION_ARGUMENTS and text or _URL_LIKE.match(text)]
 
-  def walk(value: Any, key: str = "") -> None:
-    if isinstance(value, dict):
-      for k, v in value.items():
-        walk(v, str(k).lower())
-    elif isinstance(value, (list, tuple)):
-      for item in value:
-        walk(item, key)
-    elif isinstance(value, str):
-      text = value.strip()
-      if key in DESTINATION_ARGUMENTS and text or _URL_LIKE.match(text):
-        found.append(text)
 
-  walk(arguments)
-  return found
+_SCHEME_PREFIX = re.compile(r"^[a-z][a-z0-9+.-]*:(?!\d)", re.IGNORECASE)
+
+
+def _as_url(text: str) -> Optional[str]:
+  """The text as an absolute URL; a bare host gets https. None when it carries another scheme."""
+  if text.startswith("//"):
+    return "https:" + text
+  if "://" in text:
+    return text
+  # "javascript:alert(1)" or "mailto:x" carry a scheme; "docs.example.com:8080" is a host and a port.
+  return None if _SCHEME_PREFIX.match(text) else "https://" + text
 
 
 def destination_host(value: str) -> Optional[str]:
   """The host of a destination, or None when it is not a plain http(s) URL."""
-  text = value.strip()
-  if text.startswith("//"):
-    text = "https:" + text
-  elif "://" not in text:
-    # "javascript:alert(1)" or "mailto:x" carry a scheme; "docs.example.com:8080" is a host and a port.
-    if re.match(r"^[a-z][a-z0-9+.-]*:(?!\d)", text, re.IGNORECASE):
-      return None
-    text = "https://" + text
-  parsed = urlparse(text)
-  if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+  url = _as_url(value.strip())
+  if url is None:
     return None
   try:
-    return (parsed.hostname or "").lower().rstrip(".") or None
+    parsed = urlparse(url)
   except ValueError:
     return None
+  if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+    return None
+  return (parsed.hostname or "").lower().rstrip(".") or None
 
 
 def host_allowed(host: str, allowed_domains: Iterable[str]) -> bool:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 import httpx
@@ -26,6 +26,44 @@ from app.integrations.service_accounts import (
 )
 
 DEFAULT_HOST = "https://gitlab.com"
+
+
+def _merge_request(repo: str, mr: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "repo": repo,
+    "number": mr.get("iid"),
+    "title": mr.get("title"),
+    "state": mr.get("state"),
+    "user": (mr.get("author") or {}).get("username"),
+    "merged_at": mr.get("merged_at"),
+    "updated_at": mr.get("updated_at"),
+    "html_url": mr.get("web_url"),
+    "draft": mr.get("draft") or mr.get("work_in_progress"),
+  }
+
+
+def _commit(repo: str, commit: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "repo": repo,
+    "sha": (commit.get("id") or "")[:7],
+    "message": (commit.get("title") or commit.get("message") or "").split("\n")[0],
+    "author": commit.get("author_name") or (commit.get("author") or {}).get("name"),
+    "date": commit.get("committed_date") or commit.get("created_at"),
+    "html_url": commit.get("web_url"),
+  }
+
+
+def _issue(repo: str, issue: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "repo": repo,
+    "number": issue.get("iid"),
+    "title": issue.get("title"),
+    "state": issue.get("state"),
+    "user": (issue.get("author") or {}).get("username"),
+    "updated_at": issue.get("updated_at"),
+    "html_url": issue.get("web_url"),
+  }
+
 
 
 class GitLabIntegration(GitHostingIntegration):
@@ -138,6 +176,7 @@ class GitLabIntegration(GitHostingIntegration):
       user = user_response.json()
 
     existing = load_connection(self.id) or {}
+    repos = selected_repos if selected_repos is not None else (existing.get("selected_repos") or [])
     payload = {
       "auth_method": AuthMethod.SERVICE_ACCOUNT.value,
       "service_token": token,
@@ -151,7 +190,7 @@ class GitLabIntegration(GitHostingIntegration):
       "token_name": token_info["token_name"],
       "configured_by": configured_by,
       "configured_at": datetime.now(timezone.utc).isoformat(),
-      "selected_repos": selected_repos if selected_repos is not None else (existing.get("selected_repos") or []),
+      "selected_repos": repos,
     }
     save_connection(self.id, payload)
     return self.get_info()
@@ -209,8 +248,7 @@ class GitLabIntegration(GitHostingIntegration):
     if not await self.authenticate():
       raise ValueError("GitLab is not connected.")
 
-    data = load_connection(self.id) or {}
-    api_base = self._api_base(data)
+    api_base = self._api_base()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.get(
@@ -247,115 +285,53 @@ class GitLabIntegration(GitHostingIntegration):
   ) -> list[dict[str, Any]]:
     return await self.get_merge_requests(state=state, max_results=max_results)
 
+  async def _collect_per_repo(
+    self,
+    resource: str,
+    params: dict[str, str | int],
+    convert: Callable[[str, dict[str, Any]], dict[str, Any]],
+    sort_key: str,
+    max_results: int,
+  ) -> list[dict[str, Any]]:
+    """The newest `max_results` items of a project resource, across every project the administrator selected."""
+    repos = self.selected_repos()
+    if not repos:
+      raise ValueError("No GitLab projects selected. Choose projects in Integrations.")
+
+    api_base = self._api_base()
+    results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      for repo in repos:
+        response = await client.get(
+          f"{api_base}/projects/{self._encode_project(repo)}/{resource}",
+          headers=self._headers(),
+          params=params,
+        )
+        response.raise_for_status()
+        results.extend(convert(repo, item) for item in response.json())
+    results.sort(key=lambda item: item.get(sort_key) or "", reverse=True)
+    return results[:max_results]
+
   async def get_merge_requests(
     self,
     *,
     state: str = "all",
     max_results: int = 30,
   ) -> list[dict[str, Any]]:
-    repos = self.selected_repos()
-    if not repos:
-      raise ValueError("No GitLab projects selected. Choose projects in Integrations.")
-
-    data = load_connection(self.id) or {}
-    api_base = self._api_base(data)
     gitlab_state = "opened" if state == "open" else state
-
-    results: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      for repo in repos:
-        params: dict[str, str | int] = {
-          "per_page": min(max_results, 30),
-          "order_by": "updated_at",
-        }
-        if gitlab_state != "all":
-          params["state"] = gitlab_state
-
-        response = await client.get(
-          f"{api_base}/projects/{self._encode_project(repo)}/merge_requests",
-          headers=self._headers(),
-          params=params,
-        )
-        response.raise_for_status()
-        for mr in response.json():
-          results.append(
-            {
-              "repo": repo,
-              "number": mr.get("iid"),
-              "title": mr.get("title"),
-              "state": mr.get("state"),
-              "user": (mr.get("author") or {}).get("username"),
-              "merged_at": mr.get("merged_at"),
-              "updated_at": mr.get("updated_at"),
-              "html_url": mr.get("web_url"),
-              "draft": mr.get("draft") or mr.get("work_in_progress"),
-            }
-          )
-    results.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
-    return results[:max_results]
+    params: dict[str, str | int] = {"per_page": min(max_results, 30), "order_by": "updated_at"}
+    if gitlab_state != "all":
+      params["state"] = gitlab_state
+    return await self._collect_per_repo("merge_requests", params, _merge_request, "updated_at", max_results)
 
   async def get_commits(self, *, max_results: int = 30) -> list[dict[str, Any]]:
-    repos = self.selected_repos()
-    if not repos:
-      raise ValueError("No GitLab projects selected. Choose projects in Integrations.")
-
-    data = load_connection(self.id) or {}
-    api_base = self._api_base(data)
-    results: list[dict[str, Any]] = []
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      for repo in repos:
-        response = await client.get(
-          f"{api_base}/projects/{self._encode_project(repo)}/repository/commits",
-          headers=self._headers(),
-          params={"per_page": min(max_results, 30)},
-        )
-        response.raise_for_status()
-        for commit in response.json():
-          results.append(
-            {
-              "repo": repo,
-              "sha": (commit.get("id") or "")[:7],
-              "message": (commit.get("title") or commit.get("message") or "").split("\n")[0],
-              "author": (commit.get("author_name") or (commit.get("author") or {}).get("name")),
-              "date": commit.get("committed_date") or commit.get("created_at"),
-              "html_url": commit.get("web_url"),
-            }
-          )
-    results.sort(key=lambda item: item.get("date") or "", reverse=True)
-    return results[:max_results]
+    return await self._collect_per_repo(
+      "repository/commits", {"per_page": min(max_results, 30)}, _commit, "date", max_results
+    )
 
   async def get_issues(self, *, max_results: int = 30) -> list[dict[str, Any]]:
-    repos = self.selected_repos()
-    if not repos:
-      raise ValueError("No GitLab projects selected. Choose projects in Integrations.")
-
-    data = load_connection(self.id) or {}
-    api_base = self._api_base(data)
-    results: list[dict[str, Any]] = []
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      for repo in repos:
-        response = await client.get(
-          f"{api_base}/projects/{self._encode_project(repo)}/issues",
-          headers=self._headers(),
-          params={"per_page": min(max_results, 30), "order_by": "updated_at"},
-        )
-        response.raise_for_status()
-        for issue in response.json():
-          results.append(
-            {
-              "repo": repo,
-              "number": issue.get("iid"),
-              "title": issue.get("title"),
-              "state": issue.get("state"),
-              "user": (issue.get("author") or {}).get("username"),
-              "updated_at": issue.get("updated_at"),
-              "html_url": issue.get("web_url"),
-            }
-          )
-    results.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
-    return results[:max_results]
+    params = {"per_page": min(max_results, 30), "order_by": "updated_at"}
+    return await self._collect_per_repo("issues", params, _issue, "updated_at", max_results)
 
   async def get_files_changed(self, *, pr_number: int, repo: str | None = None) -> list[dict[str, Any]]:
     selected = self.selected_repos()
@@ -365,8 +341,7 @@ class GitLabIntegration(GitHostingIntegration):
     if target_repo not in selected:
       raise ValueError("The project is not enabled by the administrator.")
 
-    data = load_connection(self.id) or {}
-    api_base = self._api_base(data)
+    api_base = self._api_base()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.get(
