@@ -70,31 +70,36 @@ def format_history_as_messages(history: list[dict[str, Any]] | list[str] | str |
     Unknown roles (system/tool) are dropped, and consecutive turns of the same role are merged so
     providers that require strict alternation (Anthropic) accept the conversation.
     """
-    if not history:
-        return []
-
-    if isinstance(history, str):
-        items: list[Any] = _parse_prefixed_lines([history])
-    elif all(isinstance(item, str) for item in history):
-        items = _parse_prefixed_lines(list(history))  # type: ignore[arg-type]
-    else:
-        items = [item for item in history if isinstance(item, dict)]
-
     messages: list[AIMessage] = []
-    for item in items[-MAX_HISTORY_MESSAGES:]:
-        role = _normalize_role(item.get("role"))
-        content = item.get("content")
-        if not role or not isinstance(content, str) or not content.strip():
-            continue
-        if messages and messages[-1].role == role:
-            messages[-1] = AIMessage(role=role, content=f"{messages[-1].content}\n\n{content.strip()}")
-        else:
-            messages.append(AIMessage(role=role, content=content.strip()))
+    for item in _history_turns(history)[-MAX_HISTORY_MESSAGES:]:
+        _append_turn(messages, _normalize_role(item.get("role")), item.get("content"))
 
     # History is followed by the current user turn, so it must not end on a user message.
     while messages and messages[-1].role == "user":
         messages.pop()
     return messages
+
+
+def _history_turns(history: list[dict[str, Any]] | list[str] | str | None) -> list[Any]:
+    """Raw `{role, content}` turns from any accepted history shape."""
+    if not history:
+        return []
+    if isinstance(history, str):
+        return _parse_prefixed_lines([history])
+    if all(isinstance(item, str) for item in history):
+        return _parse_prefixed_lines(list(history))  # type: ignore[arg-type]
+    return [item for item in history if isinstance(item, dict)]
+
+
+def _append_turn(messages: list[AIMessage], role: str | None, content: Any) -> None:
+    """Add a turn, merging it into the previous one when the role repeats; skip unusable turns."""
+    if not role or not isinstance(content, str) or not content.strip():
+        return
+    text = content.strip()
+    if messages and messages[-1].role == role:
+        messages[-1] = AIMessage(role=role, content=f"{messages[-1].content}\n\n{text}")
+    else:
+        messages.append(AIMessage(role=role, content=text))
 
 
 def _summary_key(scope: str | None, older: list[AIMessage]) -> str:
@@ -150,62 +155,90 @@ async def _summarize_older(
     if cached is not None:
         return cached
 
-    previous: str | None = None
-    covered = 0
-    if store is not None:
-        try:
-            record = await store.load()
-        except Exception as exc:
-            logger.warning("Could not load persisted history summary: %s", exc, exc_info=True)
-            record = None
-        if record:
-            decoded = _decode_store_key(record[0])
-            if decoded and 0 < decoded[0] <= len(older) and _summary_key(scope, older[: decoded[0]]) == decoded[1]:
-                covered, previous = decoded[0], record[1]
-
+    covered, previous = await _load_persisted_summary(store, scope, older)
     if previous is not None and covered == len(older):
         _cache_put(full_digest, previous)
         return previous
     if fast_provider is None:
         return previous
 
-    new_turns = older[covered:]
+    summary = await _request_summary(fast_provider, previous, older[covered:])
+    if not summary:
+        return previous
+    _cache_put(full_digest, summary)
+    await _persist_summary(store, _encode_store_key(len(older), full_digest), summary)
+    return summary
+
+
+async def _load_persisted_summary(
+    store: SummaryStore | None, scope: str | None, older: list[AIMessage]
+) -> tuple[int, str | None]:
+    """(turns covered, summary) of the persisted summary when it covers a prefix of `older`."""
+    if store is None:
+        return 0, None
+    try:
+        record = await store.load()
+    except Exception as exc:
+        logger.warning("Could not load persisted history summary: %s", exc, exc_info=True)
+        return 0, None
+    decoded = _decode_store_key(record[0]) if record else None
+    if decoded and 0 < decoded[0] <= len(older) and _summary_key(scope, older[: decoded[0]]) == decoded[1]:
+        return decoded[0], record[1]
+    return 0, None
+
+
+def _summary_prompt(previous: str | None, new_turns: list[AIMessage]) -> tuple[str, str]:
+    """(system, user) prompt that summarizes `new_turns`, updating `previous` when there is one."""
     turns_text = "\n".join(f"{m.role}: {m.content}" for m in new_turns)
     if previous:
         system = (
             "Actualiza el resumen de una conversación incorporando los nuevos turnos. Conserva acuerdos, "
             "decisiones, datos y temas pendientes; elimina lo que quedó resuelto o superado. No inventes información."
         )
-        user = f"RESUMEN ACTUAL:\n{previous}\n\nNUEVOS TURNOS:\n{turns_text}"
-    else:
-        system = (
-            "Resume de forma concisa los acuerdos, decisiones, datos y temas pendientes "
-            "de esta conversación previa. No inventes información."
-        )
-        user = turns_text
+        return system, f"RESUMEN ACTUAL:\n{previous}\n\nNUEVOS TURNOS:\n{turns_text}"
+    system = (
+        "Resume de forma concisa los acuerdos, decisiones, datos y temas pendientes "
+        "de esta conversación previa. No inventes información."
+    )
+    return system, turns_text
 
+
+async def _request_summary(provider: AIProvider, previous: str | None, new_turns: list[AIMessage]) -> str:
+    """Summary text from the model; empty when the call fails or returns nothing."""
+    system, user = _summary_prompt(previous, new_turns)
     try:
-        res = await fast_provider.complete(
+        res = await provider.complete(
             [AIMessage(role="system", content=system), AIMessage(role="user", content=user)],
             max_tokens=SUMMARY_MAX_TOKENS,
         )
     except Exception as exc:
         logger.warning(
             "History summarization failed with model %s; older turns are dropped without a summary: %s",
-            getattr(fast_provider, "default_model", "?"), exc, exc_info=True,
+            getattr(provider, "default_model", "?"), exc, exc_info=True,
         )
-        return previous
+        return ""
+    return (res.text or "").strip()
 
-    summary = (res.text or "").strip()
-    if not summary:
-        return previous
-    _cache_put(full_digest, summary)
-    if store is not None:
-        try:
-            await store.save(_encode_store_key(len(older), full_digest), summary)
-        except Exception as exc:
-            logger.warning("Could not persist history summary: %s", exc, exc_info=True)
-    return summary
+
+async def _persist_summary(store: SummaryStore | None, key: str, summary: str) -> None:
+    if store is None:
+        return
+    try:
+        await store.save(key, summary)
+    except Exception as exc:
+        logger.warning("Could not persist history summary: %s", exc, exc_info=True)
+
+
+def _recent_window(messages: list[AIMessage], max_tokens_budget: int, model: str) -> list[AIMessage]:
+    """Latest turns kept verbatim: they start on a user turn and fit the budget."""
+    recent = messages[-KEEP_RECENT_MESSAGES:]
+    # Start the verbatim window on a user turn so alternation survives the summary.
+    while recent and recent[0].role != "user":
+        recent = recent[1:]
+    # Recent turns alone may still exceed the budget: drop oldest pairs until they fit.
+    while len(recent) > 2 and count_tokens(model, [m.to_litellm() for m in recent]) > max_tokens_budget:
+        recent = recent[2:]
+    return recent
 
 
 async def prune_or_summarize_history(
@@ -227,14 +260,7 @@ async def prune_or_summarize_history(
     if count_tokens(model, [m.to_litellm() for m in messages]) <= max_tokens_budget or len(messages) <= 2:
         return messages
 
-    recent = messages[-KEEP_RECENT_MESSAGES:]
-    # Start the verbatim window on a user turn so alternation survives the summary.
-    while recent and recent[0].role != "user":
-        recent = recent[1:]
-
-    # Recent turns alone may still exceed the budget: drop oldest pairs until they fit.
-    while len(recent) > 2 and count_tokens(model, [m.to_litellm() for m in recent]) > max_tokens_budget:
-        recent = recent[2:]
+    recent = _recent_window(messages, max_tokens_budget, model)
     older = messages[: len(messages) - len(recent)]
 
     summary_text = (

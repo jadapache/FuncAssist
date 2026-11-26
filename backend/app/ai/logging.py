@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import threading
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
+from itertools import chain, islice
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -68,8 +68,7 @@ async def flush_pending_logs() -> None:
 def _iter_lines_reversed(path: Path, block_size: int = _READ_BLOCK_BYTES) -> Iterator[str]:
   """Yield the lines of a file from last to first, reading fixed-size blocks from the end."""
   with open(path, "rb") as f:
-    f.seek(0, os.SEEK_END)
-    position = f.tell()
+    position = path.stat().st_size
     remainder = b""
     while position > 0:
       read_size = min(block_size, position)
@@ -86,37 +85,37 @@ def _iter_lines_reversed(path: Path, block_size: int = _READ_BLOCK_BYTES) -> Ite
       yield remainder.decode("utf-8", errors="replace")
 
 
+def _iter_jsonl_records(directory: Path) -> Iterator[Any]:
+  """Parsed records of every daily JSONL file in `directory`, newest file and newest line first.
+
+  Unparseable lines and unreadable files are skipped.
+  """
+  for jf in sorted(directory.glob("*.jsonl"), reverse=True):
+    try:
+      for line in _iter_lines_reversed(jf):
+        try:
+          yield json.loads(line)
+        except json.JSONDecodeError:
+          continue
+    except OSError:
+      continue
+
+
+def _iter_legacy_logs() -> Iterator[Any]:
+  """Backward compatibility: legacy individual JSON files, newest first."""
+  json_files = sorted(LOGS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+  for path in json_files:
+    try:
+      yield json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+      continue
+
+
 def list_logs(limit: int = 20) -> list[dict[str, Any]]:
   """Latest log entries, newest first, reading each daily file from its end."""
   ensure_local_dirs()
   LOGS_DIR.mkdir(parents=True, exist_ok=True)
-  logs: list[dict[str, Any]] = []
-
-  # 1. Daily JSONL files, newest file first, newest line first.
-  for jf in sorted(LOGS_DIR.glob("*.jsonl"), reverse=True):
-    try:
-      for line in _iter_lines_reversed(jf):
-        try:
-          logs.append(json.loads(line))
-        except json.JSONDecodeError:
-          continue
-        if len(logs) >= limit:
-          return logs
-    except OSError:
-      continue
-
-  # 2. Backward compatibility: legacy individual JSON files.
-  if len(logs) < limit:
-    json_files = sorted(LOGS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for path in json_files:
-      try:
-        logs.append(json.loads(path.read_text(encoding="utf-8")))
-        if len(logs) >= limit:
-          break
-      except (json.JSONDecodeError, OSError):
-        continue
-
-  return logs
+  return list(islice(chain(_iter_jsonl_records(LOGS_DIR), _iter_legacy_logs()), limit))
 
 
 SECURITY_DIR = USER_DATA_DIR / "ai" / "security"
@@ -162,22 +161,8 @@ def list_security_events(limit: int = 50, kind: str | None = None) -> list[dict[
   """Latest security events, newest first."""
   if not SECURITY_DIR.exists():
     return []
-  events: list[dict[str, Any]] = []
-  for jf in sorted(SECURITY_DIR.glob("*.jsonl"), reverse=True):
-    try:
-      for line in _iter_lines_reversed(jf):
-        try:
-          event = json.loads(line)
-        except json.JSONDecodeError:
-          continue
-        if kind and event.get("kind") != kind:
-          continue
-        events.append(event)
-        if len(events) >= limit:
-          return events
-    except OSError:
-      continue
-  return events
+  events = (event for event in _iter_jsonl_records(SECURITY_DIR) if not kind or event.get("kind") == kind)
+  return list(islice(events, limit))
 
 
 def percentile(values: list[float], pct: float) -> float | None:
@@ -185,56 +170,71 @@ def percentile(values: list[float], pct: float) -> float | None:
   data = sorted(v for v in values if isinstance(v, (int, float)))
   if not data:
     return None
-  if len(data) == 1:
-    return float(data[0])
   rank = (len(data) - 1) * (pct / 100.0)
   low = int(rank)
   high = min(low + 1, len(data) - 1)
   return float(data[low] + (data[high] - data[low]) * (rank - low))
 
 
-def summarize_logs(logs: list[dict[str, Any]]) -> dict[str, Any]:
-  """Aggregate metrics over log entries: tokens, cost, latency percentiles, fallback/cache/error rates."""
+def _num(entry: dict[str, Any], key: str) -> float | None:
+  value = entry.get(key)
+  return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
-  def _num(entry: dict[str, Any], key: str) -> float | None:
-    value = entry.get(key)
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
-  total = len(logs)
-  prompt_tokens = sum(_num(l, "prompt_tokens") or 0 for l in logs)
-  completion_tokens = sum(_num(l, "completion_tokens") or 0 for l in logs)
-  cached_tokens = sum(_num(l, "cached_tokens") or 0 for l in logs)
-  cost = sum(_num(l, "cost_usd") or 0.0 for l in logs)
-  durations = [d for d in (_num(l, "duration_ms") for l in logs) if d]
-  ttfts = [t for t in (_num(l, "ttft_ms") for l in logs) if t]
-  llm_calls = [l for l in logs if not l.get("refused")]
-  fallbacks = sum(1 for l in llm_calls if l.get("fallback_used"))
-  errors = sum(1 for l in logs if l.get("error_code"))
-  truncated = sum(1 for l in logs if l.get("finish_reason") == "length")
-  routes = Counter(str(l.get("route")) for l in logs if l.get("route"))
-  # Chat SSE protocol per request: v1 can be retired once it stops appearing here.
-  protocols = Counter(str(l.get("protocol")) for l in logs if l.get("protocol"))
-  intent_sources = Counter(str(l.get("intent_source")) for l in logs if l.get("intent_source"))
+def _total(logs: list[dict[str, Any]], key: str) -> float:
+  return sum(_num(entry, key) or 0 for entry in logs)
 
-  def _round(value: float | None) -> float | None:
-    return round(value, 2) if value is not None else None
 
+def _positive_values(logs: list[dict[str, Any]], key: str) -> list[float]:
+  return [value for value in (_num(entry, key) for entry in logs) if value]
+
+
+def _round(value: float | None) -> float | None:
+  return round(value, 2) if value is not None else None
+
+
+def _ratio(part: float, whole: float) -> float:
+  return round(part / whole, 4) if whole else 0.0
+
+
+def _counts(logs: list[dict[str, Any]], key: str) -> dict[str, int]:
+  return dict(Counter(str(entry.get(key)) for entry in logs if entry.get(key)))
+
+
+def _latency_stats(logs: list[dict[str, Any]]) -> dict[str, Any]:
+  durations = _positive_values(logs, "duration_ms")
+  ttfts = _positive_values(logs, "ttft_ms")
   return {
-    "total_calls": total,
-    "total_prompt_tokens": int(prompt_tokens),
-    "total_completion_tokens": int(completion_tokens),
-    "total_cached_tokens": int(cached_tokens),
-    "total_cost_usd": round(cost, 4),
     "avg_duration_ms": _round(sum(durations) / len(durations)) if durations else 0.0,
     "p50_duration_ms": _round(percentile(durations, 50)),
     "p95_duration_ms": _round(percentile(durations, 95)),
     "p50_ttft_ms": _round(percentile(ttfts, 50)),
     "p95_ttft_ms": _round(percentile(ttfts, 95)),
-    "fallback_rate": round(fallbacks / len(llm_calls), 4) if llm_calls else 0.0,
-    "cache_hit_rate": round(cached_tokens / prompt_tokens, 4) if prompt_tokens else 0.0,
-    "error_rate": round(errors / total, 4) if total else 0.0,
-    "truncation_rate": round(truncated / total, 4) if total else 0.0,
-    "routes": dict(routes),
-    "protocols": dict(protocols),
-    "intent_sources": dict(intent_sources),
+  }
+
+
+def summarize_logs(logs: list[dict[str, Any]]) -> dict[str, Any]:
+  """Aggregate metrics over log entries: tokens, cost, latency percentiles, fallback/cache/error rates."""
+  total = len(logs)
+  prompt_tokens = _total(logs, "prompt_tokens")
+  cached_tokens = _total(logs, "cached_tokens")
+  llm_calls = [entry for entry in logs if not entry.get("refused")]
+  fallbacks = sum(1 for entry in llm_calls if entry.get("fallback_used"))
+  errors = sum(1 for entry in logs if entry.get("error_code"))
+  truncated = sum(1 for entry in logs if entry.get("finish_reason") == "length")
+  return {
+    "total_calls": total,
+    "total_prompt_tokens": int(prompt_tokens),
+    "total_completion_tokens": int(_total(logs, "completion_tokens")),
+    "total_cached_tokens": int(cached_tokens),
+    "total_cost_usd": round(_total(logs, "cost_usd"), 4),
+    **_latency_stats(logs),
+    "fallback_rate": _ratio(fallbacks, len(llm_calls)),
+    "cache_hit_rate": _ratio(cached_tokens, prompt_tokens),
+    "error_rate": _ratio(errors, total),
+    "truncation_rate": _ratio(truncated, total),
+    "routes": _counts(logs, "route"),
+    # Chat SSE protocol per request: v1 can be retired once it stops appearing here.
+    "protocols": _counts(logs, "protocol"),
+    "intent_sources": _counts(logs, "intent_source"),
   }

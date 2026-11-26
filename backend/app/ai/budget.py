@@ -76,26 +76,35 @@ def _model_info(provider: str, model: str) -> dict[str, Any] | None:
     return None
 
 
+def _catalog_window(model: str) -> int | None:
+    """Context length of the first catalog entry matching `model` that declares one."""
+    wanted = (model or "").strip().lower()
+    try:
+        for item in load_local_catalog():
+            raw_id = (getattr(item, "raw_id", "") or "").lower()
+            if wanted in (item.id.lower(), raw_id) and getattr(item, "context_length", None):
+                return int(item.context_length)
+    except Exception as exc:
+        logger.debug("Catalog lookup failed for %s: %s", model, exc)
+    return None
+
+
+def _info_window(info: dict[str, Any] | None) -> int | None:
+    """Input window from LiteLLM metadata, preferring `max_input_tokens`."""
+    for key in ("max_input_tokens", "max_tokens"):
+        if info and info.get(key):
+            return int(info[key])
+    return None
+
+
 def context_window(provider: str, model: str) -> int:
     """Model context window: catalog → LiteLLM metadata → provider default."""
     p_norm = (provider or "").strip().lower()
-    m_norm = (model or "").strip().lower()
-
-    try:
-        for item in load_local_catalog():
-            if item.id.lower() == m_norm or (getattr(item, "raw_id", "") or "").lower() == m_norm:
-                if getattr(item, "context_length", None):
-                    return int(item.context_length)
-    except Exception as exc:
-        logger.debug("Catalog lookup failed for %s: %s", model, exc)
-
-    info = _model_info(p_norm, model)
-    if info:
-        for key in ("max_input_tokens", "max_tokens"):
-            if info.get(key):
-                return int(info[key])
-
-    return _PROVIDER_DEFAULT_WINDOW.get(p_norm, 16_384)
+    return (
+        _catalog_window(model)
+        or _info_window(_model_info(p_norm, model))
+        or _PROVIDER_DEFAULT_WINDOW.get(p_norm, 16_384)
+    )
 
 
 def max_output(provider: str, model: str) -> int:
@@ -120,7 +129,7 @@ def calculate_input_budget(provider: str, model: str, reserved_output: int | Non
     p_norm = (provider or "").strip().lower()
     window = context_window(p_norm, model)
     output = reserved_output if reserved_output is not None else max_output(p_norm, model)
-    output = min(output, max(0, window // 2))  # never let output reservation eat the whole window
+    output = min(output, window // 2)  # never let output reservation eat the whole window
     budget = window - output
     ceiling = _PROVIDER_ITPM_CEILING.get(p_norm)
     if ceiling:

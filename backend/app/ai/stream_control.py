@@ -28,6 +28,40 @@ class StreamStopped(Exception):
         self.reason = reason
 
 
+async def _raise_if_stopped(should_stop: Callable[[], Awaitable[str | None]]) -> None:
+    reason = await should_stop()
+    if reason:
+        raise StreamStopped(reason)
+
+
+async def _produce(source: AsyncIterator[T], queue: asyncio.Queue[tuple[str, object]]) -> None:
+    """Feed `source` into `queue`, closing it when done, followed by a "done" or "error" marker."""
+    try:
+        if hasattr(source, "aclose"):
+            async with aclosing(source) as items:  # type: ignore[type-var]
+                async for item in items:
+                    await queue.put(("item", item))
+        else:
+            async for item in source:
+                await queue.put(("item", item))
+        await queue.put(("done", None))
+    except Exception as exc:
+        await queue.put(("error", exc))
+
+
+async def _next_message(
+    queue: asyncio.Queue[tuple[str, object]],
+    should_stop: Callable[[], Awaitable[str | None]],
+    poll_s: float,
+) -> tuple[str, object] | None:
+    """Next queued message, or None after a quiet `poll_s` in which the stop check did not fire."""
+    try:
+        return await asyncio.wait_for(queue.get(), timeout=poll_s)
+    except asyncio.TimeoutError:
+        await _raise_if_stopped(should_stop)
+        return None
+
+
 async def iterate_until_stopped(
     source: AsyncIterator[T],
     should_stop: Callable[[], Awaitable[str | None]],
@@ -41,38 +75,19 @@ async def iterate_until_stopped(
     Exceptions raised by the source are re-raised to the consumer.
     """
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
-
-    async def _produce() -> None:
-        try:
-            if hasattr(source, "aclose"):
-                async with aclosing(source) as items:  # type: ignore[type-var]
-                    async for item in items:
-                        await queue.put(("item", item))
-            else:
-                async for item in source:
-                    await queue.put(("item", item))
-            await queue.put(("done", None))
-        except Exception as exc:
-            await queue.put(("error", exc))
-
-    task = asyncio.create_task(_produce())
+    task = asyncio.create_task(_produce(source, queue))
     try:
         while True:
-            try:
-                kind, payload = await asyncio.wait_for(queue.get(), timeout=poll_s)
-            except asyncio.TimeoutError:
-                reason = await should_stop()
-                if reason:
-                    raise StreamStopped(reason)
+            message = await _next_message(queue, should_stop, poll_s)
+            if message is None:
                 continue
+            kind, payload = message
             if kind == "done":
                 return
             if kind == "error":
                 raise payload  # type: ignore[misc]
             yield payload  # type: ignore[misc]
-            reason = await should_stop()
-            if reason:
-                raise StreamStopped(reason)
+            await _raise_if_stopped(should_stop)
     finally:
         if not task.done():
             task.cancel()

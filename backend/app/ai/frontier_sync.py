@@ -7,12 +7,9 @@ Operates safely offline using LiteLLM bundled cost map when remote connectivity 
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 # Ensure LiteLLM uses offline cost map on startup and doesn't block or spam warnings
@@ -59,8 +56,7 @@ async def fetch_litellm_cost_map(timeout_seconds: float = 6.0) -> tuple[dict[str
             data = resp.json()
             if isinstance(data, dict) and len(data) > 100:
                 try:
-                    if hasattr(litellm, "model_cost") and isinstance(litellm.model_cost, dict):
-                        litellm.model_cost.update(data)
+                    litellm.model_cost.update(data)
                 except Exception:
                     pass
                 return data, "remote_litellm"
@@ -76,34 +72,42 @@ def _format_context_window(ctx_len: int) -> str:
     return f"{ctx_len} tokens"
 
 
+_EXTRA_KEY_PREFIXES = {
+    "claude": ("anthropic",),
+    "gemini": ("gemini", "google"),
+    "openai": ("openai",),
+    "groq": ("groq",),
+}
+
+
 def _find_litellm_entry(cost_map: dict[str, Any], model_id: str, provider: str) -> dict[str, Any] | None:
     """Lookup model in LiteLLM cost map with various provider key variations."""
     clean_id = model_id.strip()
-    candidates = [
-        clean_id,
-        f"{provider}/{clean_id}",
-        clean_id.split("/")[-1],
-    ]
-    if provider == "claude":
-        candidates.extend([f"anthropic/{clean_id}", f"anthropic/{clean_id.split('/')[-1]}"])
-    elif provider == "gemini":
-        candidates.extend([f"gemini/{clean_id}", f"google/{clean_id}"])
-    elif provider == "openai":
-        candidates.extend([f"openai/{clean_id}"])
-    elif provider == "groq":
-        candidates.extend([f"groq/{clean_id}"])
+    bare_id = clean_id.split("/")[-1]
+    extra_names = (clean_id, bare_id) if provider == "claude" else (clean_id,)
+    candidates = [clean_id, f"{provider}/{clean_id}", bare_id]
+    candidates += [f"{prefix}/{name}" for prefix in _EXTRA_KEY_PREFIXES.get(provider, ()) for name in extra_names]
 
-    for cand in candidates:
-        if cand in cost_map and isinstance(cost_map[cand], dict):
-            return cost_map[cand]
-
+    exact = next((cost_map[c] for c in candidates if isinstance(cost_map.get(c), dict)), None)
+    if exact is not None:
+        return exact
     # Flexible matching
-    for k, v in cost_map.items():
-        if isinstance(v, dict):
-            if k == clean_id or k.endswith(f"/{clean_id}"):
-                return v
+    return next(
+        (v for k, v in cost_map.items() if isinstance(v, dict) and (k == clean_id or k.endswith(f"/{clean_id}"))),
+        None,
+    )
 
-    return None
+
+def _capabilities(entry: dict[str, Any]) -> list[str]:
+    """Spanish labels of the capabilities a LiteLLM entry declares."""
+    sees_images = entry.get("supports_vision") or "image" in (entry.get("supported_modalities") or [])
+    declared = (
+        ("razonamiento", entry.get("supports_reasoning")),
+        ("visión multimodal", sees_images),
+        ("herramientas", entry.get("supports_function_calling")),
+        ("prompt caching", entry.get("supports_prompt_caching")),
+    )
+    return [label for label, supported in declared if supported]
 
 
 def _build_model_description(
@@ -118,19 +122,58 @@ def _build_model_description(
         diarize = " con diarización" if "diarize" in model_id.lower() else ""
         return f"Modelo de audio para transcripción{diarize} alojado en {provider_name}."
 
-    entry_data = entry or {}
-    caps: list[str] = []
-    if entry_data.get("supports_reasoning"):
-        caps.append("razonamiento")
-    if entry_data.get("supports_vision") or "image" in (entry_data.get("supported_modalities") or []):
-        caps.append("visión multimodal")
-    if entry_data.get("supports_function_calling"):
-        caps.append("herramientas")
-    if entry_data.get("supports_prompt_caching"):
-        caps.append("prompt caching")
-
+    caps = _capabilities(entry or {})
     cap_str = f", optimizado para {', '.join(caps)}" if caps else ""
     return f"Modelo {provider_name} con ventana de {context_window}{cap_str}."
+
+
+_PROVIDER_BY_LITELLM_PREFIX = {
+    "groq": "groq",
+    "openai": "openai",
+    "anthropic": "claude",
+    "claude": "claude",
+    "gemini": "gemini",
+    "google": "gemini",
+    "openrouter": "openrouter",
+    "deepseek": "deepseek",
+}
+_TASK_BY_LITELLM_MODE = {"audio_transcription": "transcription", "chat": "chat_writing"}
+
+
+def _provider_and_model_id(raw_key: str, entry: dict[str, Any]) -> tuple[str | None, str]:
+    """Provider id and model id of a cost-map key, which may or may not carry a provider prefix."""
+    prefix, separator, model_name = raw_key.partition("/")
+    if separator and model_name:
+        return _PROVIDER_BY_LITELLM_PREFIX.get(prefix.lower()), model_name.strip()
+    if not separator:
+        raw_provider = (entry.get("litellm_provider") or "").strip().lower()
+        return _PROVIDER_BY_LITELLM_PREFIX.get(raw_provider), raw_key.strip()
+    return None, ""
+
+
+def _catalog_candidate(provider: str, model_id: str, task_type: str) -> dict[str, Any]:
+    """Catalog entry for a model found in LiteLLM, before it is enriched with its specs."""
+    meta = PROVIDER_META.get(provider, {})
+    transcription = task_type == "transcription"
+    return {
+        "id": model_id,
+        "raw_id": model_id,
+        "name": model_id,
+        "provider": provider,
+        "provider_name": meta.get("name", provider.title()),
+        "description": f"Modelo {provider.title()} descubierto desde LiteLLM.",
+        "context_window": "Audio (hasta 25MB)" if transcription else "128k tokens",
+        "context_length": 0 if transcription else 131072,
+        "badge": meta.get("badge_default", provider.title()),
+        "task_type": task_type,
+        "task_label": "Transcripción y Voz" if transcription else "Redacción y Chat",
+        "is_free": bool(meta.get("is_free_default", False)),
+        "tier_type": "free" if provider == "groq" else "paid",
+        "pricing_prompt": 0.0,
+        "pricing_completion": 0.0,
+        "pricing_label": "",
+        "rate_limits": "Standard Provider Limits",
+    }
 
 
 def _discover_litellm_models(cost_map: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -139,203 +182,145 @@ def _discover_litellm_models(cost_map: dict[str, Any]) -> dict[str, dict[str, An
     LiteLLM is the discovery source; the curated list only supplies optional
     presentation metadata for models that are already present in this result.
     """
-    provider_prefixes = {
-        "groq": "groq",
-        "openai": "openai",
-        "anthropic": "claude",
-        "claude": "claude",
-        "gemini": "gemini",
-        "google": "gemini",
-        "openrouter": "openrouter",
-        "deepseek": "deepseek",
-    }
     discovered: dict[str, dict[str, Any]] = {}
     for raw_key, entry in cost_map.items():
         if not isinstance(raw_key, str) or not isinstance(entry, dict):
             continue
-
-        mode = (entry.get("mode") or "").strip().lower()
-        if mode == "audio_transcription":
-            task_type = "transcription"
-        elif mode == "chat":
-            task_type = "chat_writing"
-        else:
-            continue
-
-        prefix, separator, model_name = raw_key.partition("/")
-        if separator and model_name:
-            provider = provider_prefixes.get(prefix.lower())
-            model_id = model_name.strip()
-        elif not separator:
-            raw_prov = (entry.get("litellm_provider") or "").strip().lower()
-            provider = provider_prefixes.get(raw_prov)
-            model_id = raw_key.strip()
-        else:
-            continue
-
-        if not provider or not model_id:
-            continue
-
-        key = f"{provider}:{model_id}"
-        discovered[key] = {
-            "id": model_id,
-            "raw_id": model_id,
-            "name": model_id,
-            "provider": provider,
-            "provider_name": PROVIDER_META.get(provider, {}).get("name", provider.title()),
-            "description": f"Modelo {provider.title()} descubierto desde LiteLLM.",
-            "context_window": "Audio (hasta 25MB)" if task_type == "transcription" else "128k tokens",
-            "context_length": 0 if task_type == "transcription" else 131072,
-            "badge": PROVIDER_META.get(provider, {}).get("badge_default", provider.title()),
-            "task_type": task_type,
-            "task_label": "Transcripción y Voz" if task_type == "transcription" else "Redacción y Chat",
-            "is_free": bool(PROVIDER_META.get(provider, {}).get("is_free_default", False)),
-            "tier_type": "free" if provider == "groq" else "paid",
-            "pricing_prompt": 0.0,
-            "pricing_completion": 0.0,
-            "pricing_label": "",
-            "rate_limits": "Standard Provider Limits",
-        }
+        task_type = _TASK_BY_LITELLM_MODE.get((entry.get("mode") or "").strip().lower())
+        provider, model_id = _provider_and_model_id(raw_key, entry)
+        if task_type and provider and model_id:
+            discovered[f"{provider}:{model_id}"] = _catalog_candidate(provider, model_id, task_type)
     return discovered
+
+
+def _positive_number(value: Any) -> int | float | None:
+    return value if isinstance(value, (int, float)) and value > 0 else None
+
+
+def _apply_litellm_specs(item: dict[str, Any], entry: dict[str, Any]) -> None:
+    """Context window, output limit and per-million-token prices from a LiteLLM entry."""
+    max_input = _positive_number(entry.get("max_input_tokens") or entry.get("max_tokens"))
+    if max_input:
+        item["context_length"] = int(max_input)
+        if item["task_type"] == "chat_writing":
+            item["context_window"] = _format_context_window(int(max_input))
+
+    max_output = _positive_number(entry.get("max_output_tokens") or entry.get("max_tokens"))
+    if max_output:
+        item["max_output_tokens"] = int(max_output)
+
+    for field, cost_key in (("pricing_prompt", "input_cost_per_token"), ("pricing_completion", "output_cost_per_token")):
+        cost = entry.get(cost_key)
+        if isinstance(cost, (int, float)):
+            item[field] = round(float(cost) * 1_000_000, 4)
+
+
+def _apply_pricing_label(item: dict[str, Any]) -> None:
+    """Pricing label plus the free/paid flags it implies."""
+    prompt_price = item["pricing_prompt"]
+    completion_price = item["pricing_completion"]
+    if item["provider"] == "groq":
+        item.update(tier_type="free", is_free=True, pricing_prompt=0.0, pricing_completion=0.0)
+        provider_name = PROVIDER_META.get("groq", {}).get("name", "Groq")
+        item["pricing_label"] = f"$0.00 (Gratuito en {provider_name})"
+    elif item["task_type"] == "transcription":
+        if prompt_price <= 0:
+            item["pricing_label"] = "$0.00 (Gratuito en Groq Cloud)"
+        elif prompt_price < 0.1:
+            item["pricing_label"] = f"${prompt_price:.3f} por minuto de audio"
+        else:
+            item["pricing_label"] = f"${prompt_price:.2f} / 1M tokens"
+    elif prompt_price == 0.0 and completion_price == 0.0:
+        item.update(tier_type="free", is_free=True, pricing_label="$0.00 (Gratuito)")
+    else:
+        item.update(
+            tier_type="paid",
+            is_free=False,
+            pricing_label=f"${prompt_price:.2f} / 1M input • ${completion_price:.2f} / 1M output",
+        )
+
+
+def _enrich_model(item: dict[str, Any], cost_map: dict[str, Any]) -> None:
+    """Complete a discovered model with the specs, description and price label LiteLLM supports."""
+    entry = _find_litellm_entry(cost_map, item["id"], item["provider"])
+    if entry:
+        _apply_litellm_specs(item, entry)
+    item["description"] = _build_model_description(
+        entry, item["provider_name"], item["id"], item["task_type"], item["context_window"]
+    )
+    _apply_pricing_label(item)
+
+
+def _validated_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The models that satisfy AIModelInfo, as plain dicts; invalid ones are logged and skipped."""
+    validated: list[dict[str, Any]] = []
+    for item in models:
+        try:
+            validated.append(AIModelInfo(**item).model_dump())
+        except Exception as e:
+            logger.warning(f"Skipping model {item.get('id')} due to validation error: {e}")
+    return validated
+
+
+def _persist_external_models(models: list[dict[str, Any]]) -> None:
+    """Replace the external catalog in the database; a failure is logged, not raised."""
+    try:
+        from app.db.unit_of_work import SyncUnitOfWork
+
+        with SyncUnitOfWork() as uow:
+            uow.model_catalog.replace_external(models)
+            uow.commit()
+    except Exception as db_err:
+        logger.warning(f"Failed to persist frontier models catalog into DB: {db_err}")
+
+
+def _invalidate_catalog_cache() -> None:
+    try:
+        from app.ai import catalog as cat_mod
+
+        cat_mod._catalog_cache = None
+        cat_mod._catalog_cache_ts = 0.0
+    except Exception:
+        pass
+
+
+def _record_sync(last_sync: str, source: str, status: str, models_count: int, error: str | None) -> dict[str, Any]:
+    global _last_sync_result
+    _last_sync_result = {
+        "last_sync": last_sync,
+        "source": source,
+        "status": status,
+        "models_count": models_count,
+        "error": error,
+    }
+    return _last_sync_result
 
 
 async def sync_frontier_models_catalog(force_remote: bool = False) -> dict[str, Any]:
     """Synchronize frontier model catalog with the latest LiteLLM database.
-    
+
     Enriches context windows, max tokens, and pricing for all frontier models.
     Persists the updated external catalog in AIModelCatalog, preserving browser seeds.
     """
-    global _last_sync_result
     now_iso = datetime.now(timezone.utc).isoformat()
-
     try:
         cost_map, source = await fetch_litellm_cost_map(timeout_seconds=8.0 if force_remote else 5.0)
 
         # External models are discovered exclusively from LiteLLM. Browser models are owned
         # by catalog.py and preserved by replace_external().
-        model_dict = _discover_litellm_models(cost_map)
+        discovered = _discover_litellm_models(cost_map)
+        for item in discovered.values():
+            _enrich_model(item, cost_map)
 
-        # Enrich each frontier model with LiteLLM specs
-        for _, model_item in model_dict.items():
-            mid = model_item["id"]
-            prov = model_item.get("provider", "groq")
-            task_type = model_item.get("task_type", "chat_writing")
-            prov_info = PROVIDER_META.get(prov, {})
-            model_item.setdefault("provider_name", prov_info.get("name", prov.title()))
-            model_item.setdefault("task_label", "Transcripción y Voz" if task_type == "transcription" else "Redacción y Chat")
-            model_item.setdefault("rate_limits", "Standard Provider Limits")
+        validated = _validated_models(list(discovered.values()))
+        _persist_external_models(validated)
+        _invalidate_catalog_cache()
 
-            entry = _find_litellm_entry(cost_map, mid, prov)
-            if entry:
-                max_inp = entry.get("max_input_tokens") or entry.get("max_tokens")
-                if max_inp and isinstance(max_inp, (int, float)) and max_inp > 0:
-                    model_item["context_length"] = int(max_inp)
-                    if task_type == "chat_writing":
-                        model_item["context_window"] = _format_context_window(int(max_inp))
-
-                max_out = entry.get("max_output_tokens") or entry.get("max_tokens")
-                if max_out and isinstance(max_out, (int, float)) and max_out > 0:
-                    if "max_output_tokens" not in model_item or model_item["max_output_tokens"] is None:
-                        model_item["max_output_tokens"] = int(max_out)
-
-                inp_cost = entry.get("input_cost_per_token")
-                out_cost = entry.get("output_cost_per_token")
-
-                if inp_cost is not None and isinstance(inp_cost, (int, float)):
-                    cost_1m_prompt = round(float(inp_cost) * 1_000_000, 4)
-                    model_item["pricing_prompt"] = cost_1m_prompt
-
-                if out_cost is not None and isinstance(out_cost, (int, float)):
-                    cost_1m_comp = round(float(out_cost) * 1_000_000, 4)
-                    model_item["pricing_completion"] = cost_1m_comp
-
-            # Ensure all required AIModelInfo fields are present with valid defaults
-            model_item.setdefault("context_length", 131072 if task_type == "chat_writing" else 0)
-            model_item.setdefault("context_window", _format_context_window(model_item["context_length"]) if task_type == "chat_writing" else "Audio (hasta 25MB)")
-            model_item.setdefault("pricing_prompt", 0.0)
-            model_item.setdefault("pricing_completion", 0.0)
-            model_item.setdefault("is_free", prov == "groq")
-            model_item.setdefault("tier_type", "free" if model_item["is_free"] else "paid")
-
-            prompt_p = model_item.get("pricing_prompt", 0.0)
-            comp_p = model_item.get("pricing_completion", 0.0)
-
-            model_item["description"] = _build_model_description(
-                entry,
-                model_item["provider_name"],
-                mid,
-                task_type,
-                model_item["context_window"],
-            )
-
-            if prov == "groq" and model_item.get("is_free", True):
-                model_item["tier_type"] = "free"
-                model_item["is_free"] = True
-                model_item["pricing_prompt"] = 0.0
-                model_item["pricing_completion"] = 0.0
-                model_item["pricing_label"] = f"$0.00 (Gratuito en {prov_info.get('name', 'Groq')})"
-            elif task_type == "transcription":
-                if prompt_p > 0:
-                    model_item["pricing_label"] = f"${prompt_p:.3f} por minuto de audio" if prompt_p < 0.1 else f"${prompt_p:.2f} / 1M tokens"
-                else:
-                    model_item["pricing_label"] = "$0.00 (Gratuito en Groq Cloud)"
-            elif not model_item.get("pricing_label"):
-                if prompt_p == 0.0 and comp_p == 0.0:
-                    model_item["tier_type"] = "free"
-                    model_item["is_free"] = True
-                    model_item["pricing_label"] = "$0.00 (Gratuito)"
-                else:
-                    model_item["tier_type"] = "paid"
-                    model_item["is_free"] = False
-                    model_item["pricing_label"] = f"${prompt_p:.2f} / 1M input • ${comp_p:.2f} / 1M output"
-
-        # Validate with AIModelInfo
-        validated_list: list[dict[str, Any]] = []
-        for item in model_dict.values():
-            try:
-                validated_model = AIModelInfo(**item)
-                validated_list.append(validated_model.model_dump())
-            except Exception as e:
-                logger.warning(f"Skipping model {item.get('id')} due to validation error: {e}")
-
-        # Persist directly to PostgreSQL database entity
-        try:
-            from app.db.unit_of_work import SyncUnitOfWork
-            with SyncUnitOfWork() as uow:
-                uow.model_catalog.replace_external(validated_list)
-                uow.commit()
-        except Exception as db_err:
-            logger.warning(f"Failed to persist frontier models catalog into DB: {db_err}")
-
-        # Invalidate catalog memory cache in catalog module
-        try:
-            from app.ai import catalog as cat_mod
-            cat_mod._catalog_cache = None
-            cat_mod._catalog_cache_ts = 0.0
-        except Exception:
-            pass
-
-        _last_sync_result = {
-            "last_sync": now_iso,
-            "source": source,
-            "status": "success",
-            "models_count": len(validated_list),
-            "error": None,
-        }
-        logger.info(f"Frontier models catalog synced successfully ({len(validated_list)} models from {source})")
-        return _last_sync_result
-
+        logger.info(f"Frontier models catalog synced successfully ({len(validated)} models from {source})")
+        return _record_sync(now_iso, source, "success", len(validated), None)
     except Exception as exc:
-        err_msg = f"Failed to sync frontier models catalog: {exc}"
-        logger.warning(err_msg)
-        _last_sync_result = {
-            "last_sync": now_iso,
-            "source": "error",
-            "status": "error",
-            "models_count": 0,
-            "error": str(exc),
-        }
-        return _last_sync_result
+        logger.warning(f"Failed to sync frontier models catalog: {exc}")
+        return _record_sync(now_iso, "error", "error", 0, str(exc))
 
 
 def get_frontier_sync_status() -> dict[str, Any]:

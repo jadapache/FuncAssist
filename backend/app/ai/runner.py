@@ -23,6 +23,7 @@ from app.ai.events import AgentEvent
 from app.ai.history import format_history_as_messages, prune_or_summarize_history
 from app.ai.history_store import ChatSessionSummaryStore
 from app.ai.logging import log_ai_call
+from app.ai.multimodal import user_message_with_images
 from app.ai.map_reduce import map_reduce_condense_context
 from app.ai.policies import (
     resolve_feature_max_tokens,
@@ -126,23 +127,31 @@ async def continue_if_truncated(
             "Answer looks truncated (finish_reason=%s); continuation %d/%d", last_reason, continuations, max_continuations,
         )
         call_usage: dict[str, Any] = {}
-        produced = False
         async for chunk in provider.complete_stream(
             _continuation_messages(base_messages, current_text), max_tokens=max_tokens, usage_sink=call_usage,
         ):
             accumulated_text.append(chunk)
-            produced = True
             yield chunk
         last_reason = call_usage.get("finish_reason")
         if usage_sink is not None:
             _merge_usage(usage_sink, call_usage)
         current_text = "".join(accumulated_text)
-        if not produced or len(current_text) <= prev_len:
+        if len(current_text) <= prev_len:
             break
 
     if usage_sink is not None:
         usage_sink["finish_reason"] = last_reason
         usage_sink["continuations"] = continuations
+
+
+def _add_completion_usage(total: AICompletion, part: AICompletion) -> None:
+    """Add the tokens and cost of a continuation call to the completion being built."""
+    for key in ("prompt_tokens", "completion_tokens", "cached_tokens"):
+        value = getattr(part, key, None)
+        if isinstance(value, int):
+            setattr(total, key, (getattr(total, key) or 0) + value)
+    if isinstance(part.cost_usd, (int, float)):
+        total.cost_usd = (total.cost_usd or 0.0) + part.cost_usd
 
 
 async def complete_with_continuation(
@@ -158,21 +167,13 @@ async def complete_with_continuation(
     reason = completion.finish_reason
     continuations = 0
     while needs_continuation(text, reason) and continuations < max_continuations:
-        prev_len = len(text)
         continuations += 1
         nxt = await provider.complete(_continuation_messages(messages, text), max_tokens=max_tokens)
-        for key in ("prompt_tokens", "completion_tokens", "cached_tokens"):
-            extra_value = getattr(nxt, key, None)
-            if isinstance(extra_value, int):
-                setattr(completion, key, (getattr(completion, key) or 0) + extra_value)
-        if isinstance(nxt.cost_usd, (int, float)):
-            completion.cost_usd = (completion.cost_usd or 0.0) + nxt.cost_usd
+        _add_completion_usage(completion, nxt)
         if not nxt.text:
             break
         text += nxt.text
         reason = nxt.finish_reason
-        if len(text) <= prev_len:
-            break
     completion.text = text
     completion.finish_reason = reason
     return completion
@@ -239,6 +240,94 @@ class _GroundedPrep:
     allowed: list[str]
 
 
+def _citation(index: int, chunk: ContextChunk) -> dict[str, Any]:
+    return {
+        "index": index,
+        "id": chunk.id,
+        "source_type": chunk.source_type.value,
+        "source_label": chunk.source_label,
+        "title": chunk.title,
+    }
+
+
+def _citations(chunks: list[ContextChunk]) -> list[dict[str, Any]]:
+    """One numbered citation per chunk of the context, in the order the model saw them."""
+    return [_citation(index, chunk) for index, chunk in enumerate(chunks, start=1)]
+
+
+def _grounded_log(feature: str, **fields: Any) -> dict[str, Any]:
+    """Log one grounded run; it is not a refusal unless the caller says so."""
+    return log_ai_call({"feature": feature, "route": "grounded", "refused": False, **fields})
+
+
+def _refusal(reason: str, bundle: Any = None) -> dict[str, Any]:
+    """Answer for a request that is refused without calling the model."""
+    refusal: dict[str, Any] = {"ok": False, "refused": True, "reason": reason, "answer": None, "citations": []}
+    if bundle is not None:
+        refusal["context"] = bundle.model_dump()
+    return refusal
+
+
+async def _load_document_chunks(document_ids: list[str] | None) -> list[ContextChunk]:
+    if not document_ids:
+        return []
+    return await asyncio.to_thread(chunks_from_documents, document_ids)
+
+
+def _merge_upload_chunks(bundle: Any, upload_chunks: list[ContextChunk]) -> None:
+    """Put the uploaded documents' chunks at the front of the bundle, skipping ones already in it."""
+    if not upload_chunks:
+        return
+    if "uploads" not in bundle.used_sources:
+        bundle.used_sources.append("uploads")
+    existing_ids = {chunk.id for chunk in bundle.chunks}
+    for chunk in upload_chunks:
+        if chunk.id not in existing_ids:
+            bundle.chunks.insert(0, chunk)
+
+
+def _bundle_refusal(
+    feature: str, prompt: dict, rubric: dict, allowed: list[str], bundle: Any
+) -> dict[str, Any] | None:
+    """Refusal when the context is empty or every requested source is unavailable, else None."""
+    if bundle.is_empty:
+        missing = ", ".join(bundle.missing_sources) or "no matching context"
+        reason = f"Not found in connected sources. Missing/unavailable: {missing}."
+        log_ai_call({
+            "feature": feature,
+            "route": "grounded",
+            "refused": True,
+            "reason": reason,
+            "prompt_version": prompt.get("version"),
+            "rubric_version": rubric.get("version"),
+            "sources_requested": allowed,
+            "sources_used": bundle.used_sources,
+            "chunk_ids": [],
+        })
+        return _refusal(reason, bundle)
+    hard_missing = [item for item in bundle.missing_sources if "(" not in item]
+    if set(allowed).issubset(set(hard_missing)):
+        return _refusal(f"Required sources are not connected: {', '.join(hard_missing)}.", bundle)
+    return None
+
+
+def _prompt_texts(prompt: dict) -> tuple[str, str]:
+    """(system text, user template) of a feature prompt; the template defaults to just the context."""
+    return str(prompt.get("system") or ""), str(prompt.get("user_template") or "{context}")
+
+
+def _fill_user_template(
+    user_template: str, bundle: Any, rubric_text: str, query: str, chat_block: str, template_text: str
+) -> str:
+    return user_template.format(
+        context=bundle.to_prompt_block(),
+        rubric=rubric_text,
+        query=query,
+        chat_context=chat_block or "(none)",
+        template=template_text,
+    )
+
+
 async def _prepare_grounded_context(
     *,
     feature: str,
@@ -259,109 +348,37 @@ async def _prepare_grounded_context(
     if max_output_tokens is None:
         max_output_tokens = resolve_feature_max_tokens(feature)
     # Fetch prompt and rubric concurrently
-    prompt, rubric = await asyncio.gather(
-        get_prompt(feature),
-        get_rubric(feature),
-    )
+    prompt, rubric = await asyncio.gather(get_prompt(feature), get_rubric(feature))
     allowed = list(sources or prompt.get("allowed_sources") or [])
-
     if not allowed:
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": "Esta funcionalidad no tiene fuentes de conocimiento configuradas.",
-            "answer": None,
-            "citations": [],
-        }
+        return _refusal("Esta funcionalidad no tiene fuentes de conocimiento configuradas.")
 
     # Fetch context bundle and document chunks concurrently
-    async def _fetch_chunks():
-        if document_ids:
-            return await asyncio.to_thread(chunks_from_documents, document_ids)
-        return []
-
     bundle, upload_chunks = await asyncio.gather(
         assemble_context(query=query, sources=allowed, user_id=user_id),
-        _fetch_chunks(),
+        _load_document_chunks(document_ids),
     )
+    _merge_upload_chunks(bundle, upload_chunks)
 
-    if upload_chunks:
-        if "uploads" not in bundle.used_sources:
-            bundle.used_sources.append("uploads")
-        existing_ids = {chunk.id for chunk in bundle.chunks}
-        for chunk in upload_chunks:
-            if chunk.id not in existing_ids:
-                bundle.chunks.insert(0, chunk)
+    refusal = _bundle_refusal(feature, prompt, rubric, allowed, bundle)
+    if refusal:
+        return refusal
 
     chat_block = (chat_context or "").strip()
-
-    if bundle.is_empty:
-        reason = (
-            "Not found in connected sources. "
-            f"Missing/unavailable: {', '.join(bundle.missing_sources) or 'no matching context'}."
-        )
-        log_ai_call({
-            "feature": feature,
-            "route": "grounded",
-            "refused": True,
-            "reason": reason,
-            "prompt_version": prompt.get("version"),
-            "rubric_version": rubric.get("version"),
-            "sources_requested": allowed,
-            "sources_used": bundle.used_sources,
-            "chunk_ids": [],
-        })
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": reason,
-            "answer": None,
-            "citations": [],
-            "context": bundle.model_dump(),
-        }
-
-    hard_missing = [item for item in bundle.missing_sources if "(" not in item]
-    if set(allowed).issubset(set(hard_missing)):
-        reason = f"Required sources are not connected: {', '.join(hard_missing)}."
-        return {
-            "ok": False,
-            "refused": True,
-            "reason": reason,
-            "answer": None,
-            "citations": [],
-            "context": bundle.model_dump(),
-        }
-
-    user_template = str(prompt.get("user_template") or "{context}")
+    template_text = template_content or ""
+    system_text, user_template = _prompt_texts(prompt)
     rubric_text = rubric_to_text(rubric)
-    system_text = str(prompt.get("system") or "")
     if provider is not None:
         await _fit_bundle_to_budget(
             bundle,
             provider=provider,
             max_output_tokens=max_output_tokens,
-            fixed_texts=[system_text, user_template, rubric_text, query, chat_block, template_content or ""],
+            fixed_texts=[system_text, user_template, rubric_text, query, chat_block, template_text],
         )
-    format_kwargs = {
-        "context": bundle.to_prompt_block(),
-        "rubric": rubric_text,
-        "query": query,
-        "chat_context": chat_block or "(none)",
-        "template": template_content or "",
-    }
-    if "{chat_context}" not in user_template:
-        format_kwargs.pop("chat_context", None)
-    if "{template}" not in user_template:
-        format_kwargs.pop("template", None)
-
-    user_prompt = user_template.format(**format_kwargs)
-    messages = [
-        AIMessage(role="system", content=system_text),
-        AIMessage(role="user", content=user_prompt),
-    ]
+    user_prompt = _fill_user_template(user_template, bundle, rubric_text, query, chat_block, template_text)
 
     return _GroundedPrep(
-        messages=messages,
+        messages=[AIMessage(role="system", content=system_text), AIMessage(role="user", content=user_prompt)],
         bundle=bundle,
         prompt_meta=prompt,
         rubric_meta=rubric,
@@ -398,47 +415,34 @@ async def run_grounded_feature(
     try:
         completion = await complete_with_continuation(provider, prep.messages, max_tokens=max_tokens)
     except Exception as err:
-        log_ai_call({
-            "feature": feature,
-            "route": "grounded",
-            "refused": False,
-            "stage": "generate",
-            "provider": getattr(provider, "id", "unknown"),
-            "model": getattr(provider, "default_model", "unknown"),
+        _grounded_log(
+            feature,
+            stage="generate",
+            provider=getattr(provider, "id", "unknown"),
+            model=getattr(provider, "default_model", "unknown"),
             **error_log_fields(err),
-        })
+        )
         raise
 
-    citations = [
-        {
-            "index": index,
-            "id": chunk.id,
-            "source_type": chunk.source_type.value,
-            "source_label": chunk.source_label,
-            "title": chunk.title,
-        }
-        for index, chunk in enumerate(prep.bundle.chunks, start=1)
-    ]
+    citations = _citations(prep.bundle.chunks)
 
-    log = log_ai_call({
-        "feature": feature,
-        "route": "grounded",
-        "refused": False,
-        "prompt_version": prep.prompt_meta.get("version"),
-        "rubric_version": prep.rubric_meta.get("version"),
-        "sources_requested": prep.allowed,
-        "sources_used": prep.bundle.used_sources,
-        "chunk_ids": [chunk.id for chunk in prep.bundle.chunks],
-        "provider": completion.provider,
-        "model": completion.model,
-        "output": completion.text,
-        "prompt_tokens": completion.prompt_tokens,
-        "completion_tokens": completion.completion_tokens,
-        "cached_tokens": completion.cached_tokens,
-        "cost_usd": completion.cost_usd,
-        "duration_ms": completion.duration_ms,
-        "finish_reason": completion.finish_reason,
-    })
+    log = _grounded_log(
+        feature,
+        prompt_version=prep.prompt_meta.get("version"),
+        rubric_version=prep.rubric_meta.get("version"),
+        sources_requested=prep.allowed,
+        sources_used=prep.bundle.used_sources,
+        chunk_ids=[chunk.id for chunk in prep.bundle.chunks],
+        provider=completion.provider,
+        model=completion.model,
+        output=completion.text,
+        prompt_tokens=completion.prompt_tokens,
+        completion_tokens=completion.completion_tokens,
+        cached_tokens=completion.cached_tokens,
+        cost_usd=completion.cost_usd,
+        duration_ms=completion.duration_ms,
+        finish_reason=completion.finish_reason,
+    )
 
     parsed_artifacts, clean_answer = extract_artifacts(completion.text)
 
@@ -510,37 +514,29 @@ async def run_grounded_feature_stream(
             async for chunk in continuation:
                 yield chunk
     except BaseException as err:
-        log_ai_call({
-            "feature": feature,
-            "route": "grounded",
-            "refused": False,
-            "streamed": True,
-            "stage": "generate",
-            "provider": getattr(provider, "id", "unknown"),
-            "model": getattr(provider, "default_model", "unknown"),
+        _grounded_log(
+            feature, streamed=True, stage="generate",
+            provider=getattr(provider, "id", "unknown"),
+            model=getattr(provider, "default_model", "unknown"),
             **error_log_fields(err),
-        })
+        )
         raise
 
     usage = {k: v for k, v in stream_usage.items() if k != "tool_calls"}
     _merge_usage(usage, continuation_usage)
-    log_ai_call({
-        "feature": feature,
-        "route": "grounded",
-        "refused": False,
-        "prompt_version": prep.prompt_meta.get("version"),
-        "rubric_version": prep.rubric_meta.get("version"),
-        "sources_requested": prep.allowed,
-        "sources_used": prep.bundle.used_sources,
-        "chunk_ids": [chunk.id for chunk in prep.bundle.chunks],
-        "provider": getattr(provider, "id", getattr(provider, "name", "unknown")),
-        "output": "".join(accumulated_text),
-        "streamed": True,
-        **usage,
-        "finish_reason": continuation_usage.get("finish_reason", stream_usage.get("finish_reason")),
-        "continuations": continuation_usage.get("continuations", 0),
-        "model": stream_usage.get("model") or getattr(provider, "default_model", "unknown"),
-    })
+    finish_reason = continuation_usage["finish_reason"]
+    continuations = continuation_usage["continuations"]
+    model = stream_usage.get("model") or getattr(provider, "default_model", "unknown")
+    _grounded_log(feature, streamed=True,
+        prompt_version=prep.prompt_meta.get("version"),
+        rubric_version=prep.rubric_meta.get("version"),
+        sources_requested=prep.allowed,
+        sources_used=prep.bundle.used_sources,
+        chunk_ids=[chunk.id for chunk in prep.bundle.chunks],
+        provider=getattr(provider, "id", getattr(provider, "name", "unknown")),
+        output="".join(accumulated_text),
+        **{**usage, "finish_reason": finish_reason, "continuations": continuations, "model": model},
+    )
 
 
 async def run_simple_feature(request: SimpleFeatureRequest) -> dict[str, Any]:
@@ -619,7 +615,7 @@ def _flag(name: str, default: str) -> bool:
     return os.getenv(name, default).strip().lower() in ("true", "1", "on", "yes")
 
 
-def _format_rule_for_intent(intent: str, extension: str = "docx") -> str:
+def _format_rule_for_intent(intent: str, extension: str | None = "docx") -> str:
     ext = (extension or "docx").strip().lstrip(".").lower()
     if intent in _ARTIFACT_INTENTS:
         return (
@@ -651,7 +647,7 @@ async def _build_base_system_prompt(intent: str, feature: str | None = None) -> 
     target_feature = intent if intent and intent != "chat" else (feature or "chat")
     try:
         tmpl = await get_prompt(target_feature)
-        if tmpl and tmpl.get("system"):
+        if (tmpl or {}).get("system"):
             return tmpl["system"] + _UNTRUSTED_SUFFIX
     except Exception as exc:
         logger.info("No prompt template for %s (%s); using the default system prompt", target_feature, exc)
@@ -666,22 +662,11 @@ async def _build_base_system_prompt(intent: str, feature: str | None = None) -> 
 
 async def _build_chat_system_prompt(intent: str, feature: str | None = None, template_extension: str | None = "docx") -> str:
     base = await _build_base_system_prompt(intent, feature)
-    return base + _format_rule_for_intent(intent, template_extension or "docx")
+    return base + _format_rule_for_intent(intent, template_extension)
 
 
 def _assemble_multimodal_message(text_prompt: str, images: list[dict[str, str]] | None) -> AIMessage:
-    if not images:
-        return AIMessage(role="user", content=text_prompt)
-
-    parts: list[dict[str, Any]] = [{"type": "text", "text": text_prompt}]
-    for img in images:
-        data_url = img.get("data") or img.get("dataUrl") or ""
-        if not data_url.startswith("data:"):
-            mime = img.get("mime_type") or img.get("type") or "image/png"
-            data_url = f"data:{mime};base64,{data_url}"
-        parts.append({"type": "image_url", "image_url": {"url": data_url}})
-
-    return AIMessage(role="user", content=parts)
+    return user_message_with_images(text_prompt, images)
 
 
 class _FastProviderResolver:
@@ -724,132 +709,157 @@ class _ChatPrep:
     allowed: list[str]
 
 
-async def _prepare_chat(cfg: AgenticChatConfig) -> _ChatPrep:
-    """Gather context, fit it to the token budget and assemble the conversation for any route."""
-    allowed = list(cfg.sources or [])
-    bundle_text = ""
-    used_sources: list[str] = []
-
-    async def _assemble_bundle():
-        if allowed:
-            return await assemble_context(query=cfg.query, sources=allowed, user_id=cfg.user_id)
+async def _assemble_bundle(cfg: AgenticChatConfig, allowed: list[str]) -> Any:
+    if not allowed:
         return None
+    return await assemble_context(query=cfg.query, sources=allowed, user_id=cfg.user_id)
 
-    async def _load_upload_chunks():
-        if cfg.document_ids:
-            return await asyncio.to_thread(chunks_from_documents, cfg.document_ids)
-        return []
 
-    async def _resolve_provider_async():
-        return await asyncio.to_thread(
-            resolve_provider,
-            provider_name=cfg.provider,
-            model_name=cfg.model,
-            user_id=cfg.user_id,
-        )
-
-    bundle, upload_chunks, base_prompt, provider = await asyncio.gather(
-        _assemble_bundle(),
-        _load_upload_chunks(),
-        _build_base_system_prompt(cfg.intent, cfg.feature),
-        _resolve_provider_async(),
+async def _resolve_main_provider(cfg: AgenticChatConfig) -> AIProvider:
+    return await asyncio.to_thread(
+        resolve_provider, provider_name=cfg.provider, model_name=cfg.model, user_id=cfg.user_id,
     )
-    sys_prompt = base_prompt + _format_rule_for_intent(cfg.intent, cfg.template_extension or "docx")
-    cfg.run_info["provider"] = getattr(provider, "id", "unknown")
-    cfg.run_info["model"] = getattr(provider, "default_model", "unknown")
-    fast = _FastProviderResolver(cfg, provider)
 
-    if bundle and not bundle.is_empty:
-        bundle_text = bundle.to_prompt_block()
-        used_sources = list(bundle.used_sources)
 
-    if upload_chunks:
-        parts = [
-            f"[{i+1}] " + prepare_untrusted("upload", c.source_label, f"{c.title}\n{c.text}", max_chars=None)
-            for i, c in enumerate(upload_chunks)
-        ]
-        bundle_text = f"{bundle_text}\n\n" + "\n\n".join(parts)
-        bundle_text = bundle_text.strip()
-        if "uploads" not in used_sources:
-            used_sources.append("uploads")
+def _append_context_parts(text: str, used_sources: list[str], parts: list[str], source: str) -> str:
+    """Append `parts` to the context text and record `source`; unchanged when there are no parts."""
+    if not parts:
+        return text
+    if source not in used_sources:
+        used_sources.append(source)
+    return (f"{text}\n\n" + "\n\n".join(parts)).strip()
 
-    if cfg.attached_docs:
-        doc_parts = [
-            prepare_untrusted("adjunto", d.get("filename", "documento"), d.get("content", ""), max_chars=None)
-            for d in cfg.attached_docs
-            if d.get("content")
-        ]
-        if doc_parts:
-            bundle_text = f"{bundle_text}\n\n" + "\n\n".join(doc_parts)
-            bundle_text = bundle_text.strip()
-            if "chat_attachments" not in used_sources:
-                used_sources.append("chat_attachments")
 
-    context_docs_text = bundle_text or ""
-    template_text = cfg.template_content or ""
-    provider_id = getattr(provider, "id", "")
-    main_model = getattr(provider, "default_model", "") or "gpt-4o"
+def _upload_part(index: int, chunk: ContextChunk) -> str:
+    body = prepare_untrusted("upload", chunk.source_label, f"{chunk.title}\n{chunk.text}", max_chars=None)
+    return f"[{index + 1}] " + body
+
+
+def _attachment_part(doc: dict[str, Any]) -> str:
+    return prepare_untrusted("adjunto", doc.get("filename", "documento"), doc.get("content", ""), max_chars=None)
+
+
+def _collect_context(
+    bundle: Any, upload_chunks: list[ContextChunk], attached_docs: list[dict[str, Any]] | None
+) -> tuple[str, list[str]]:
+    """Context text (retrieved sources, uploads, chat attachments) and the names of the sources used.
+
+    Uploads and attachments are external content, so each part is delimited as untrusted data.
+    """
+    has_bundle = bool(bundle and not bundle.is_empty)
+    text = bundle.to_prompt_block() if has_bundle else ""
+    used_sources = list(bundle.used_sources) if has_bundle else []
+    upload_parts = [_upload_part(i, chunk) for i, chunk in enumerate(upload_chunks)]
+    text = _append_context_parts(text, used_sources, upload_parts, "uploads")
+    attachments = [doc for doc in attached_docs or [] if doc.get("content")]
+    attachment_parts = [_attachment_part(doc) for doc in attachments]
+    return _append_context_parts(text, used_sources, attachment_parts, "chat_attachments"), used_sources
+
+
+@dataclass
+class _Budgets:
+    """Token budgets of one chat request."""
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    history_tokens: int
+    docs_tokens: int
+
+
+async def _chat_budgets(cfg: AgenticChatConfig, provider: AIProvider, sys_prompt: str) -> _Budgets:
+    """What the model can take in this request once the answer is reserved, split between parts."""
+    model = getattr(provider, "default_model", "") or "gpt-4o"
     out_tokens = resolve_intent_max_tokens(cfg.intent)
-
-    # Token budget: what the model can take in this request once the answer is reserved.
-    input_budget = await asyncio.to_thread(calculate_input_budget, provider_id, main_model, out_tokens)
+    input_budget = await asyncio.to_thread(calculate_input_budget, getattr(provider, "id", ""), model, out_tokens)
     history_budget = min(HISTORY_MAX_TOKENS, max(HISTORY_MIN_TOKENS, input_budget // 4))
-    fixed_tokens = (
-        count_tokens(main_model, sys_prompt)
-        + count_tokens(main_model, cfg.query)
-        + (count_tokens(main_model, template_text) if cfg.intent == "template_mutation" else 0)
-        + IMAGE_TOKEN_ESTIMATE * len(cfg.images or [])
-    )
+    template_tokens = count_tokens(model, cfg.template_content or "") if cfg.intent == "template_mutation" else 0
+    prompt_tokens = count_tokens(model, sys_prompt) + count_tokens(model, cfg.query)
+    image_tokens = IMAGE_TOKEN_ESTIMATE * len(cfg.images or [])
+    fixed_tokens = prompt_tokens + template_tokens + image_tokens
     # History is reserved up front so documents never starve the conversation.
-    docs_budget_tokens = max(DOCS_MIN_TOKENS, input_budget - fixed_tokens - history_budget)
+    docs_budget = max(DOCS_MIN_TOKENS, input_budget - fixed_tokens - history_budget)
+    return _Budgets(model, input_budget, out_tokens, history_budget, docs_budget)
 
-    if context_docs_text:
-        docs_tokens = count_tokens(main_model, context_docs_text)
-        if docs_tokens > docs_budget_tokens:
-            cfg.run_info["stage"] = "condense"
-            # map_reduce works in characters: translate with the measured chars/token ratio.
-            ratio = chars_per_token(main_model, context_docs_text)
-            target_chars = int(docs_budget_tokens * ratio)
-            context_docs_text = await map_reduce_condense_context(
-                context_docs_text,
-                target_budget=target_chars,
-                provider=await fast.get(),
-                feature_goal=f"Contexto relevante para {cfg.intent}",
-            )
-            cfg.run_info["context_condensed"] = True
 
-    # Cache-friendly ordering: 1) System, 2) Documents & templates, 3) Chat History, 4) Current Query
-    messages: list[AIMessage] = [AIMessage(role="system", content=sys_prompt)]
+async def _condense_context(
+    cfg: AgenticChatConfig, text: str, budgets: _Budgets, fast: _FastProviderResolver
+) -> str:
+    """Summarize the documents with the fast model when they do not fit their token budget."""
+    if not text or count_tokens(budgets.model, text) <= budgets.docs_tokens:
+        return text
+    cfg.run_info["stage"] = "condense"
+    # map_reduce works in characters: translate with the measured chars/token ratio.
+    target_chars = int(budgets.docs_tokens * chars_per_token(budgets.model, text))
+    condensed = await map_reduce_condense_context(
+        text,
+        target_budget=target_chars,
+        provider=await fast.get(),
+        feature_goal=f"Contexto relevante para {cfg.intent}",
+    )
+    cfg.run_info["context_condensed"] = True
+    return condensed
 
-    doc_sections = []
+
+def _documents_message(cfg: AgenticChatConfig, context_docs_text: str) -> str:
+    """Second system message: work mode, documents and corporate template; empty when none applies."""
+    sections = []
     if cfg.intent in _ARTIFACT_INTENTS:
         ext_label = (cfg.template_extension or "docx").upper()
-        doc_sections.append(
+        sections.append(
             f"[MODO DE TRABAJO: GENERACIÓN DE ARTEFACTO (Formato {ext_label})]\n"
             "Debes separar la respuesta: un mensaje breve en <chat>...</chat> y el documento completo en <artifact>...</artifact>."
         )
     if context_docs_text:
-        doc_sections.append(f"DOCUMENTOS Y CONTEXTO DISPONIBLE:\n{context_docs_text}")
-    if template_text and cfg.intent == "template_mutation":
-        doc_sections.append(f"PLANTILLA CORPORATIVA:\n{template_text}")
-    if doc_sections:
-        messages.append(AIMessage(role="system", content="\n\n".join(doc_sections)))
+        sections.append(f"DOCUMENTOS Y CONTEXTO DISPONIBLE:\n{context_docs_text}")
+    if cfg.template_content and cfg.intent == "template_mutation":
+        sections.append(f"PLANTILLA CORPORATIVA:\n{cfg.template_content}")
+    return "\n\n".join(sections)
 
-    clean_history: list[AIMessage] = []
-    history_input = cfg.history if cfg.history else cfg.chat_context
-    raw_history_msgs = format_history_as_messages(history_input)
-    if raw_history_msgs:
-        cfg.run_info["stage"] = "history"
-        clean_history = await prune_or_summarize_history(
-            raw_history_msgs,
-            max_tokens_budget=history_budget,
-            model=main_model,
-            fast_provider=await fast.get(),
-            scope=cfg.conversation_id or cfg.user_id,
-            store=ChatSessionSummaryStore(cfg.conversation_id, cfg.user_id) if cfg.conversation_id else None,
-        )
-        messages.extend(clean_history)
 
+async def _prepare_history(
+    cfg: AgenticChatConfig, budgets: _Budgets, fast: _FastProviderResolver
+) -> list[AIMessage]:
+    """Previous turns kept verbatim within budget, older ones replaced by a rolling summary."""
+    raw_history = format_history_as_messages(cfg.history if cfg.history else cfg.chat_context)
+    if not raw_history:
+        return []
+    cfg.run_info["stage"] = "history"
+    return await prune_or_summarize_history(
+        raw_history,
+        max_tokens_budget=budgets.history_tokens,
+        model=budgets.model,
+        fast_provider=await fast.get(),
+        scope=cfg.conversation_id or cfg.user_id,
+        store=ChatSessionSummaryStore(cfg.conversation_id, cfg.user_id) if cfg.conversation_id else None,
+    )
+
+
+async def _prepare_chat(cfg: AgenticChatConfig) -> _ChatPrep:
+    """Gather context, fit it to the token budget and assemble the conversation for any route."""
+    allowed = list(cfg.sources or [])
+    bundle, upload_chunks, base_prompt, provider = await asyncio.gather(
+        _assemble_bundle(cfg, allowed),
+        _load_document_chunks(cfg.document_ids),
+        _build_base_system_prompt(cfg.intent, cfg.feature),
+        _resolve_main_provider(cfg),
+    )
+    sys_prompt = base_prompt + _format_rule_for_intent(cfg.intent, cfg.template_extension)
+    cfg.run_info["provider"] = getattr(provider, "id", "unknown")
+    cfg.run_info["model"] = getattr(provider, "default_model", "unknown")
+    fast = _FastProviderResolver(cfg, provider)
+
+    context_docs_text, used_sources = _collect_context(bundle, upload_chunks, cfg.attached_docs)
+    budgets = await _chat_budgets(cfg, provider, sys_prompt)
+    context_docs_text = await _condense_context(cfg, context_docs_text, budgets, fast)
+
+    # Cache-friendly ordering: 1) System, 2) Documents & templates, 3) Chat History, 4) Current Query
+    messages: list[AIMessage] = [AIMessage(role="system", content=sys_prompt)]
+    documents_message = _documents_message(cfg, context_docs_text)
+    if documents_message:
+        messages.append(AIMessage(role="system", content=documents_message))
+    clean_history = await _prepare_history(cfg, budgets, fast)
+    messages.extend(clean_history)
     messages.append(_assemble_multimodal_message(cfg.query, cfg.images))
 
     return _ChatPrep(
@@ -861,10 +871,43 @@ async def _prepare_chat(cfg: AgenticChatConfig) -> _ChatPrep:
         history=clean_history,
         context_docs_text=context_docs_text,
         used_sources=used_sources,
-        input_budget=input_budget,
-        out_tokens=out_tokens,
+        input_budget=budgets.input_tokens,
+        out_tokens=budgets.output_tokens,
         allowed=allowed,
     )
+
+
+def _log_entry(
+    cfg: AgenticChatConfig, prep: _ChatPrep | None, output: str, usage: dict[str, Any] | None, extra: dict[str, Any]
+) -> dict[str, Any]:
+    """The log entry of a chat request, from what the runner recorded in `cfg.run_info`."""
+    info = cfg.run_info
+    clean_usage = {k: v for k, v in (usage or {}).items() if k != "tool_calls"}
+    always = {"refused": False, "streamed": True}
+    model = clean_usage.get("model") or info.get("model", "unknown")
+    entry: dict[str, Any] = {
+        "feature": cfg.feature,
+        **always,
+        "intent": cfg.intent,
+        "route": info.get("route"),
+        "conversation_id": cfg.conversation_id,
+        "sources_used": prep.used_sources if prep else [],
+        "provider": info.get("provider", "unknown"),
+        "output": output,
+        "input_budget_tokens": prep.input_budget if prep else None,
+        "fast_model": info.get("fast_model"),
+        # Set by the endpoint: SSE protocol (to know when v1 can be retired) and how the intent
+        # was decided (rules / model / model_cache).
+        "protocol": info.get("protocol"),
+        "intent_source": info.get("intent_source"),
+        **clean_usage,
+        **extra,
+        "model": model,
+    }
+    if info.get("section_plan_failed"):
+        entry["section_plan_failed"] = True
+    entry.update({key: info[key] for key in ("intent_rules", "intent_classifier_ms") if key in info})
+    return entry
 
 
 def _log_chat(
@@ -877,40 +920,14 @@ def _log_chat(
     **extra: Any,
 ) -> None:
     """One log entry per chat request, whatever its route and outcome."""
-    info = cfg.run_info
-    if info.get("logged"):
+    if cfg.run_info.get("logged"):
         return
-    clean_usage = {k: v for k, v in (usage or {}).items() if k != "tool_calls"}
-    entry: dict[str, Any] = {
-        "feature": cfg.feature,
-        "refused": False,
-        "intent": cfg.intent,
-        "route": info.get("route"),
-        "conversation_id": cfg.conversation_id,
-        "sources_used": prep.used_sources if prep else [],
-        "provider": info.get("provider", "unknown"),
-        "output": output,
-        "streamed": True,
-        "input_budget_tokens": prep.input_budget if prep else None,
-        "fast_model": info.get("fast_model"),
-        # Set by the endpoint: SSE protocol (to know when v1 can be retired) and how the intent
-        # was decided (rules / model / model_cache).
-        "protocol": info.get("protocol"),
-        "intent_source": info.get("intent_source"),
-        **clean_usage,
-        **extra,
-        "model": clean_usage.get("model") or info.get("model", "unknown"),
-    }
-    if info.get("section_plan_failed"):
-        entry["section_plan_failed"] = True
-    for key in ("intent_rules", "intent_classifier_ms"):
-        if key in info:
-            entry[key] = info[key]
+    entry = _log_entry(cfg, prep, output, usage, extra)
     if error is not None:
-        entry["stage"] = info.get("stage")
+        entry["stage"] = cfg.run_info.get("stage")
         entry.update(error_log_fields(error))
     log_ai_call(entry)
-    info["logged"] = True
+    cfg.run_info["logged"] = True
 
 
 def _usage_event(usage: dict[str, Any], route: str) -> AgentEvent:
@@ -923,11 +940,8 @@ def _usage_event(usage: dict[str, Any], route: str) -> AgentEvent:
 
 async def _agent_route(cfg: AgenticChatConfig, prep: _ChatPrep) -> AsyncIterator[str | AgentEvent]:
     cfg.run_info.update(route="agent", stage="agent")
-    tool_ctx = ToolContext(
-        user_id=cfg.user_id,
-        allowed_sources=prep.allowed,
-        allowed_document_ids=list(cfg.document_ids or []),
-    )
+    document_ids = list(cfg.document_ids or [])
+    tool_ctx = ToolContext(user_id=cfg.user_id, allowed_sources=prep.allowed, allowed_document_ids=document_ids)
     output: list[str] = []
     usage: dict[str, Any] = {}
     t0 = time.perf_counter()
@@ -995,10 +1009,8 @@ async def _sections_route(
 
     usage["duration_ms"] = round((time.perf_counter() - t0) * 1000.0, 2)
     yield _usage_event(usage, "sections")
-    _log_chat(
-        cfg, prep, output="".join(output), usage=usage,
-        sections=len(plan.sections), failed_sections=usage.get("failed_sections") or [],
-    )
+    failed_sections = usage.get("failed_sections") or []
+    _log_chat(cfg, prep, output="".join(output), usage=usage, sections=len(plan.sections), failed_sections=failed_sections)
 
 
 async def _plain_route(cfg: AgenticChatConfig, prep: _ChatPrep) -> AsyncIterator[str | AgentEvent]:
@@ -1026,23 +1038,24 @@ async def _plain_route(cfg: AgenticChatConfig, prep: _ChatPrep) -> AsyncIterator
         async for chunk in continuation:
             yield chunk
 
-    final_reason = continuation_usage.get("finish_reason", usage.get("finish_reason"))
+    final_reason = continuation_usage["finish_reason"]
+    continuations = continuation_usage["continuations"]
     full_output = "".join(accumulated)
     truncated = final_reason == "length" or has_unclosed_artifact(full_output)
     if truncated:
         logger.warning(
             "Answer still truncated after %s continuation(s) (intent=%s, model=%s)",
-            continuation_usage.get("continuations", 0), cfg.intent, usage.get("model"),
+            continuations, cfg.intent, usage.get("model"),
         )
         tail = truncation_tail(full_output)
         accumulated.append(tail)
         cfg.run_info["truncated"] = True
         yield tail
 
-    merged = {k: v for k, v in usage.items() if k != "tool_calls"}
+    merged = dict(usage)
     _merge_usage(merged, continuation_usage)
     merged["finish_reason"] = final_reason
-    merged["continuations"] = continuation_usage.get("continuations", 0)
+    merged["continuations"] = continuations
     yield _usage_event(merged, "plain")
     _log_chat(cfg, prep, output="".join(accumulated), usage=merged, truncated=truncated)
 
@@ -1056,6 +1069,48 @@ def _supports_agent(provider: AIProvider) -> bool:
     except Exception as exc:
         logger.warning("Could not determine tool support for %s: %s", getattr(provider, "default_model", "?"), exc)
         return False
+
+
+def _agent_route_if_selected(cfg: AgenticChatConfig, prep: _ChatPrep) -> AsyncIterator[str | AgentEvent] | None:
+    """The agent route when AI_AGENT_MODE is on and the model supports tool calling, else None."""
+    if not _flag("AI_AGENT_MODE", "false"):
+        return None
+    if _supports_agent(prep.provider):
+        return _agent_route(cfg, prep)
+    cfg.run_info["agent_unsupported"] = True
+    logger.info("Agent mode on but %s has no tool calling; using the normal route", cfg.run_info.get("model"))
+    return None
+
+
+def _wants_sections(cfg: AgenticChatConfig) -> bool:
+    return _flag("AI_SECTION_GENERATION", "true") and is_section_generation_candidate(cfg.intent, cfg.query)
+
+
+async def _sections_route_if_planned(
+    cfg: AgenticChatConfig, prep: _ChatPrep
+) -> AsyncIterator[str | AgentEvent] | None:
+    """The sections route when the fast model produced a section plan, else None."""
+    plan, plan_usage = await _plan_sections(cfg, prep)
+    return _sections_route(cfg, prep, plan, plan_usage) if plan else None
+
+
+async def _plan_sections(cfg: AgenticChatConfig, prep: _ChatPrep) -> tuple[DocumentPlan | None, dict[str, Any]]:
+    """Section plan made with the fast model, and the usage it took; None when it has no sections."""
+    plan_usage: dict[str, Any] = {}
+    extension = cfg.template_extension or "docx"
+    plan = await plan_document(
+        query=cfg.query,
+        context_summary=prep.context_docs_text,
+        template_extension=extension,
+        provider=await prep.fast.get(),
+        history=prep.history,
+        usage_sink=plan_usage,
+    )
+    if plan and plan.sections:
+        return plan, plan_usage
+    cfg.run_info["section_plan_failed"] = True
+    logger.warning("No section plan for intent %s; falling back to the plain route", cfg.intent)
+    return None, plan_usage
 
 
 async def run_agentic_chat_stream(cfg: AgenticChatConfig) -> AsyncIterator[str | AgentEvent]:
@@ -1080,37 +1135,14 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig) -> AsyncIterator[str |
             info["injection_detected"] = omitted
             yield AgentEvent(type="status", data={"message": report_message(omitted), "stage": "security"})
 
-        if _flag("AI_AGENT_MODE", "false"):
-            if _supports_agent(prep.provider):
-                async with aclosing(_agent_route(cfg, prep)) as route:
-                    async for item in route:
-                        yield item
-                return
-            info["agent_unsupported"] = True
-            logger.info("Agent mode on but %s has no tool calling; using the normal route", info.get("model"))
-
-        if _flag("AI_SECTION_GENERATION", "true") and is_section_generation_candidate(cfg.intent, cfg.query):
+        route = _agent_route_if_selected(cfg, prep)
+        if route is None and _wants_sections(cfg):
             info["stage"] = "plan"
             yield AgentEvent(type="status", data={"message": "Planificando el documento...", "stage": "plan"})
-            plan_usage: dict[str, Any] = {}
-            plan = await plan_document(
-                query=cfg.query,
-                context_summary=prep.context_docs_text,
-                template_extension=cfg.template_extension or "docx",
-                provider=await prep.fast.get(),
-                history=prep.history,
-                usage_sink=plan_usage,
-            )
-            if plan and plan.sections:
-                async with aclosing(_sections_route(cfg, prep, plan, plan_usage)) as route:
-                    async for item in route:
-                        yield item
-                return
-            info["section_plan_failed"] = True
-            logger.warning("No section plan for intent %s; falling back to the plain route", cfg.intent)
+            route = await _sections_route_if_planned(cfg, prep)
 
-        async with aclosing(_plain_route(cfg, prep)) as route:
-            async for item in route:
+        async with aclosing(route or _plain_route(cfg, prep)) as items:
+            async for item in items:
                 yield item
     except (asyncio.CancelledError, GeneratorExit) as err:
         _log_chat(cfg, prep, error=err)

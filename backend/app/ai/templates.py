@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-
-import json
-
+from functools import partial
 from typing import Any
 
-
 from app.ai.seeds import DEFAULT_PROMPTS, DEFAULT_RUBRICS
-from app.db.repositories.template_repository import AITemplateRepository
 
 
 _DB_SEEDED = False
@@ -48,83 +44,60 @@ def ensure_ai_files() -> None:
   ensure_ai_templates_seeded()
 
 
-async def list_prompts(tag: str | None = None) -> list[dict[str, Any]]:
+def _defaults(kind: str) -> dict[str, dict[str, Any]]:
+  return DEFAULT_PROMPTS if kind == "prompt" else DEFAULT_RUBRICS
+
+
+async def _list_templates(kind: str, tag: str | None) -> list[dict[str, Any]]:
+  """Stored templates of a kind, else the built-in defaults; both optionally filtered by tag."""
   ensure_ai_templates_seeded()
   try:
     from app.db.unit_of_work import AsyncUnitOfWork
     async with AsyncUnitOfWork() as uow:
-      items = await uow.ai_templates.list_templates("prompt", tag=tag)
+      items = await uow.ai_templates.list_templates(kind, tag=tag)
       if items:
         return items
   except Exception:
     pass
 
-  prompts = [dict(DEFAULT_PROMPTS[f]) for f in sorted(DEFAULT_PROMPTS.keys())]
-  if tag:
-    return [p for p in prompts if p.get("tag") == tag]
-  return prompts
+  defaults = _defaults(kind)
+  templates = [dict(defaults[f]) for f in sorted(defaults)]
+  return [t for t in templates if t.get("tag") == tag] if tag else templates
+
+
+async def list_prompts(tag: str | None = None) -> list[dict[str, Any]]:
+  return await _list_templates("prompt", tag)
 
 
 async def list_rubrics(tag: str | None = None) -> list[dict[str, Any]]:
+  return await _list_templates("rubric", tag)
+
+
+async def _get_template(kind: str, feature: str) -> dict[str, Any]:
   ensure_ai_templates_seeded()
+  resolved_feature = DEFAULT_TRANSCRIPT_SUMMARY_FEATURE if feature == "transcript_summary" else feature
   try:
     from app.db.unit_of_work import AsyncUnitOfWork
     async with AsyncUnitOfWork() as uow:
-      items = await uow.ai_templates.list_templates("rubric", tag=tag)
-      if items:
-        return items
+      item = await uow.ai_templates.get_template(kind, resolved_feature)
+      if item:
+        return item
   except Exception:
     pass
 
-  rubrics = [dict(DEFAULT_RUBRICS[f]) for f in sorted(DEFAULT_RUBRICS.keys())]
-  if tag:
-    return [r for r in rubrics if r.get("tag") == tag]
-  return rubrics
+  defaults = _defaults(kind)
+  if resolved_feature in defaults:
+    return dict(defaults[resolved_feature])
+
+  raise KeyError(f"Unknown {kind} feature: {feature}")
 
 
 async def get_prompt(feature: str) -> dict[str, Any]:
-  ensure_ai_templates_seeded()
-  resolved_feature = (
-    DEFAULT_TRANSCRIPT_SUMMARY_FEATURE
-    if feature == "transcript_summary"
-    else feature
-  )
-  try:
-    from app.db.unit_of_work import AsyncUnitOfWork
-    async with AsyncUnitOfWork() as uow:
-      item = await uow.ai_templates.get_template("prompt", resolved_feature)
-      if item:
-        return item
-  except Exception:
-    pass
-
-  if resolved_feature in DEFAULT_PROMPTS:
-    return dict(DEFAULT_PROMPTS[resolved_feature])
-
-  raise KeyError(f"Unknown prompt feature: {feature}")
+  return await _get_template("prompt", feature)
 
 
 async def get_rubric(feature: str) -> dict[str, Any]:
-  ensure_ai_templates_seeded()
-  resolved_feature = (
-    DEFAULT_TRANSCRIPT_SUMMARY_FEATURE
-    if feature == "transcript_summary"
-    else feature
-  )
-  try:
-    from app.db.unit_of_work import AsyncUnitOfWork
-    async with AsyncUnitOfWork() as uow:
-      item = await uow.ai_templates.get_template("rubric", resolved_feature)
-      if item:
-        return item
-  except Exception:
-    pass
-
-  if resolved_feature in DEFAULT_RUBRICS:
-    return dict(DEFAULT_RUBRICS[resolved_feature])
-
-  raise KeyError(f"Unknown rubric feature: {feature}")
-
+  return await _get_template("rubric", feature)
 
 
 def rubric_to_text(rubric: dict[str, Any]) -> str:
@@ -166,21 +139,28 @@ async def save_prompt(
       **payload,
     }
 
+  return await _save_template("prompt", feature, merged, updated_by, change_summary or f"Updated prompt for {feature}")
+
+
+
+async def _save_template(
+  kind: str, feature: str, data: dict[str, Any], updated_by: str | None, change_summary: str
+) -> dict[str, Any]:
+  """Persist a new template version; when the database is unavailable the data is returned unsaved."""
   try:
     from app.db.unit_of_work import AsyncUnitOfWork
     async with AsyncUnitOfWork() as uow:
       res = await uow.ai_templates.save_template_update(
-        template_type="prompt",
+        template_type=kind,
         feature=feature,
-        new_data=merged,
+        new_data=data,
         updated_by=updated_by,
-        change_summary=change_summary or f"Updated prompt for {feature}",
+        change_summary=change_summary,
       )
       await uow.commit()
       return res
   except Exception:
-    return merged
-
+    return data
 
 
 async def save_rubric(
@@ -193,76 +173,21 @@ async def save_rubric(
   current = await get_rubric(feature)
   next_version = int(current.get("version") or 1) + 1
   merged = {**current, **payload, "feature": feature, "version": next_version}
-
-  try:
-    from app.db.unit_of_work import AsyncUnitOfWork
-    async with AsyncUnitOfWork() as uow:
-      res = await uow.ai_templates.save_template_update(
-        template_type="rubric",
-        feature=feature,
-        new_data=merged,
-        updated_by=updated_by,
-        change_summary=change_summary or f"Updated rubric for {feature}",
-      )
-      await uow.commit()
-      return res
-  except Exception:
-    return merged
+  return await _save_template("rubric", feature, merged, updated_by, change_summary or f"Updated rubric for {feature}")
 
 
-async def reset_prompt(
-  feature: str,
-  updated_by: str | None = None,
-) -> dict[str, Any]:
+async def _reset_template(kind: str, feature: str, updated_by: str | None = None) -> dict[str, Any]:
   ensure_ai_templates_seeded()
-  if feature not in DEFAULT_PROMPTS:
-    raise KeyError(f"No default prompt found for feature: {feature}")
+  defaults = _defaults(kind)
+  if feature not in defaults:
+    raise KeyError(f"No default {kind} found for feature: {feature}")
 
-  current = await get_prompt(feature)
-  next_version = int(current.get("version") or 1) + 1
-  default_payload = dict(DEFAULT_PROMPTS[feature])
-  default_payload["version"] = next_version
-
-  try:
-    from app.db.unit_of_work import AsyncUnitOfWork
-    async with AsyncUnitOfWork() as uow:
-      res = await uow.ai_templates.save_template_update(
-        template_type="prompt",
-        feature=feature,
-        new_data=default_payload,
-        updated_by=updated_by,
-        change_summary="Reset prompt to factory default",
-      )
-      await uow.commit()
-      return res
-  except Exception:
-    return default_payload
+  current = await _get_template(kind, feature)
+  default_payload = dict(defaults[feature])
+  default_payload["version"] = int(current.get("version") or 1) + 1
+  return await _save_template(kind, feature, default_payload, updated_by, f"Reset {kind} to factory default")
 
 
-async def reset_rubric(
-  feature: str,
-  updated_by: str | None = None,
-) -> dict[str, Any]:
-  ensure_ai_templates_seeded()
-  if feature not in DEFAULT_RUBRICS:
-    raise KeyError(f"No default rubric found for feature: {feature}")
-
-  current = await get_rubric(feature)
-  next_version = int(current.get("version") or 1) + 1
-  default_payload = dict(DEFAULT_RUBRICS[feature])
-  default_payload["version"] = next_version
-
-  try:
-    from app.db.unit_of_work import AsyncUnitOfWork
-    async with AsyncUnitOfWork() as uow:
-      res = await uow.ai_templates.save_template_update(
-        template_type="rubric",
-        feature=feature,
-        new_data=default_payload,
-        updated_by=updated_by,
-        change_summary="Reset rubric to factory default",
-      )
-      await uow.commit()
-      return res
-  except Exception:
-    return default_payload
+# reset_prompt(feature, updated_by=None) / reset_rubric(feature, updated_by=None)
+reset_prompt = partial(_reset_template, "prompt")
+reset_rubric = partial(_reset_template, "rubric")

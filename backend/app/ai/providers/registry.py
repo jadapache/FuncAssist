@@ -112,7 +112,7 @@ PROVIDER_REGISTRY: dict[str, ProviderSpec] = {
 
 def find_provider_spec(identifier: str) -> ProviderSpec | None:
   clean = (identifier or "").strip().lower()
-  if not clean or clean in FORBIDDEN_BACKEND_PROVIDERS:
+  if clean in FORBIDDEN_BACKEND_PROVIDERS:
     return None
 
   if clean in PROVIDER_REGISTRY:
@@ -129,41 +129,35 @@ def register_provider_spec(spec: ProviderSpec) -> None:
   PROVIDER_REGISTRY[spec.id] = spec
 
 
-def resolve_model_max_tokens(
-  provider_id: str,
-  model_name: str,
-  requested_max: int | None = None,
-  is_stream: bool = False,
-) -> int:
+def resolve_model_max_tokens(provider_id: str, model_name: str, requested_max: int | None = None, is_stream: bool = False) -> int:
   prov_clean = (provider_id or "").strip().lower()
   spec = find_provider_spec(prov_clean)
   model_clean = (model_name or (spec.default_model if spec else "")).strip()
 
-  model_limit = None
+  ceiling = _catalog_output_limit(prov_clean, model_clean)
+  if ceiling is None and spec:
+    ceiling = spec.default_max_tokens
+  return _clamp_max_tokens(requested_max, ceiling, is_stream)
+
+
+def _clamp_max_tokens(requested: int | None, ceiling: int | None, is_stream: bool) -> int:
+  """The requested limit capped by the ceiling; the ceiling or a default when none is requested."""
+  known = [limit for limit in (requested, ceiling) if limit is not None]
+  if known:
+    return max(1, min(known))
+  return 8192 if is_stream else 4096
+
+
+def _catalog_output_limit(provider: str, model: str) -> int | None:
+  """Max output tokens of the first catalog entry matching `provider`/`model` that declares one."""
+  bare = model.split("/")[-1] if "/" in model else None
   try:
     from app.ai.catalog import load_local_catalog
 
-    catalog = load_local_catalog()
-    for m in catalog:
-      if m.provider == prov_clean and (
-        m.id == model_clean
-        or m.raw_id == model_clean
-        or ("/" in model_clean and (m.id == model_clean.split("/")[-1] or m.raw_id == model_clean.split("/")[-1]))
-      ):
-        if m.max_output_tokens:
-          model_limit = m.max_output_tokens
-          break
+    for entry in load_local_catalog():
+      names = (entry.id, entry.raw_id)
+      if entry.provider == provider and (model in names or (bare and bare in names)) and entry.max_output_tokens:
+        return entry.max_output_tokens
   except Exception:
     pass
-
-  ceiling = model_limit if model_limit is not None else (spec.default_max_tokens if spec else None)
-
-  if ceiling is not None:
-    if requested_max is not None:
-      return max(1, min(requested_max, ceiling))
-    return max(1, ceiling)
-
-  if requested_max is not None:
-    return max(1, requested_max)
-
-  return 8192 if is_stream else 4096
+  return None

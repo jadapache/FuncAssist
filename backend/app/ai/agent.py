@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from app.ai.events import AgentEvent
@@ -57,6 +58,118 @@ async def _exec_tool(tc: ToolCall, ctx: ToolContext, *, untrusted_present: bool 
         return tc, f"[Error al ejecutar {tc.name}]: {exc}", True
 
 
+@dataclass
+class _RunStats:
+    """Usage totals and last-seen metadata accumulated across the model turns of one run."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    cost_usd: float = 0.0
+    iterations: int = 0
+    finish_reason: str | None = None
+    fallback_used: bool = False
+    ttft_ms: float | None = None
+
+    def absorb(self, sink: dict[str, Any]) -> None:
+        self.prompt_tokens += sink.get("prompt_tokens") or 0
+        self.completion_tokens += sink.get("completion_tokens") or 0
+        self.cached_tokens += sink.get("cached_tokens") or 0
+        self.cost_usd += sink.get("cost_usd") or 0.0
+        self.finish_reason = sink.get("finish_reason") or self.finish_reason
+        self.fallback_used = self.fallback_used or bool(sink.get("fallback_used"))
+        if self.ttft_ms is None and sink.get("ttft_ms") is not None:
+            self.ttft_ms = sink["ttft_ms"]
+
+    def event(self) -> AgentEvent:
+        return AgentEvent(
+            type="usage",
+            data={
+                "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens,
+                "cached_tokens": self.cached_tokens,
+                "cost_usd": self.cost_usd,
+                "iterations": self.iterations,
+                "finish_reason": self.finish_reason,
+                "fallback_used": self.fallback_used,
+                "ttft_ms": self.ttft_ms,
+            },
+        )
+
+
+@dataclass
+class _Turn:
+    """What one streamed model turn produced: its text and the provider's usage sink."""
+
+    text_parts: list[str] = field(default_factory=list)
+    sink: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def text(self) -> str:
+        return "".join(self.text_parts)
+
+    @property
+    def tool_calls(self) -> list[ToolCall]:
+        return list(self.sink.get("tool_calls") or [])
+
+
+async def _stream_turn(
+    turn: _Turn, convo: list[AIMessage], provider: AIProvider, tools_schema: Any, max_tokens: int | None, is_last: bool
+) -> AsyncIterator[AgentEvent]:
+    """Stream one model turn, emitting text deltas and filling `turn`.
+
+    Tools stay declared on the last turn: providers such as Anthropic reject conversations
+    containing tool messages when no tools are declared.
+    """
+    async for delta in provider.complete_stream(
+        convo,
+        max_tokens=max_tokens,
+        tools=tools_schema,
+        tool_choice="none" if is_last else "auto",
+        usage_sink=turn.sink,
+    ):
+        turn.text_parts.append(delta)
+        yield AgentEvent(type="delta", data={"text": delta})
+
+
+async def _run_tool_calls(
+    tool_calls: list[ToolCall], ctx: ToolContext, convo: list[AIMessage], calls_made: int
+) -> tuple[list[tuple[ToolCall, str, bool]], int]:
+    """Run the calls that fit under the per-run cap; the rest get an error result instead.
+
+    Returns the results of all calls and how many actually ran.
+    """
+    room = max(0, MAX_TOOL_CALLS_PER_TURN - calls_made)
+    to_run, refused = tool_calls[:room], tool_calls[room:]
+    untrusted_present = _has_untrusted_content(convo)
+    results = list(await asyncio.gather(*[_exec_tool(tc, ctx, untrusted_present=untrusted_present) for tc in to_run]))
+    limit_error = f"[Error]: Se alcanzó el límite de {MAX_TOOL_CALLS_PER_TURN} llamadas a herramientas en este turno."
+    return results + [(tc, limit_error, True) for tc in refused], len(to_run)
+
+
+def _tool_result_events(results: list[tuple[ToolCall, str, bool]], convo: list[AIMessage]) -> list[AgentEvent]:
+    """Record each result in the conversation as untrusted data and return its event."""
+    events = []
+    for tc, output, is_err in results:
+        events.append(AgentEvent(
+            type="tool_result",
+            data={"id": tc.id, "name": tc.name, "result": output[:500], "is_error": is_err},
+        ))
+        convo.append(AIMessage(role="tool", tool_call_id=tc.id, content=_wrap_tool_output(tc.name, output)))
+    return events
+
+
+def _artifact_events(artifacts: list[dict[str, Any]]) -> list[AgentEvent]:
+    """Events delivering artifacts created by tools."""
+    events = []
+    for art in artifacts:
+        header = {"title": art["title"], "extension": art["extension"]}
+        events.append(AgentEvent(type="artifact_start", data=dict(header)))
+        events.append(AgentEvent(type="artifact_delta", data={"text": art["content"]}))
+        events.append(AgentEvent(type="artifact_end", data=dict(header)))
+    return events
+
+
 async def run_agent(
     messages: list[AIMessage],
     provider: AIProvider,
@@ -73,91 +186,33 @@ async def run_agent(
     """
     tools_schema = get_tools_openai_schema()
     convo = list(messages)
+    stats = _RunStats()
+    tool_calls_made = 0
+    delivered_artifacts = 0
 
     yield AgentEvent(type="status", data={"message": "Analizando la solicitud...", "stage": "agent"})
 
-    totals: dict[str, Any] = {
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "cached_tokens": 0,
-        "cost_usd": 0.0,
-    }
-    iterations = 0
-    tool_calls_made = 0
-    delivered_artifacts = 0
-    last_finish_reason: str | None = None
-    fallback_used = False
-    ttft_ms: float | None = None
-
     for iteration in range(max(1, max_iters)):
-        iterations = iteration + 1
-        is_last = iteration == max_iters - 1
+        stats.iterations = iteration + 1
+        turn = _Turn()
+        async for event in _stream_turn(turn, convo, provider, tools_schema, max_tokens, iteration == max_iters - 1):
+            yield event
+        stats.absorb(turn.sink)
 
-        # Tools stay declared on the last turn: providers such as Anthropic reject
-        # conversations containing tool messages when no tools are declared.
-        sink: dict[str, Any] = {}
-        text_parts: list[str] = []
-        async for delta in provider.complete_stream(
-            convo,
-            max_tokens=max_tokens,
-            tools=tools_schema,
-            tool_choice="none" if is_last else "auto",
-            usage_sink=sink,
-        ):
-            text_parts.append(delta)
-            yield AgentEvent(type="delta", data={"text": delta})
-
-        for key in ("prompt_tokens", "completion_tokens", "cached_tokens"):
-            totals[key] += sink.get(key) or 0
-        totals["cost_usd"] += sink.get("cost_usd") or 0.0
-        last_finish_reason = sink.get("finish_reason") or last_finish_reason
-        fallback_used = fallback_used or bool(sink.get("fallback_used"))
-        if ttft_ms is None and sink.get("ttft_ms") is not None:
-            ttft_ms = sink["ttft_ms"]
-
-        text = "".join(text_parts)
-        tool_calls: list[ToolCall] = list(sink.get("tool_calls") or [])
+        tool_calls = turn.tool_calls
         if not tool_calls:
             break
-
         for tc in tool_calls:
             yield AgentEvent(type="tool_call", data={"id": tc.id, "name": tc.name, "arguments": tc.arguments})
+        convo.append(AIMessage(role="assistant", content=turn.text, tool_calls=tool_calls))
 
-        convo.append(AIMessage(role="assistant", content=text, tool_calls=tool_calls))
-
-        # A model that loops on tools is capped: calls beyond the limit get an error instead of running.
-        room = max(0, MAX_TOOL_CALLS_PER_TURN - tool_calls_made)
-        to_run, refused = tool_calls[:room], tool_calls[room:]
-        tool_calls_made += len(to_run)
-        untrusted_present = _has_untrusted_content(convo)
-        results = list(await asyncio.gather(*[_exec_tool(tc, ctx, untrusted_present=untrusted_present) for tc in to_run]))
-        results += [
-            (tc, f"[Error]: Se alcanzó el límite de {MAX_TOOL_CALLS_PER_TURN} llamadas a herramientas en este turno.", True)
-            for tc in refused
-        ]
-
-        for tc, output, is_err in results:
-            yield AgentEvent(
-                type="tool_result",
-                data={"id": tc.id, "name": tc.name, "result": output[:500], "is_error": is_err},
-            )
-            convo.append(AIMessage(role="tool", tool_call_id=tc.id, content=_wrap_tool_output(tc.name, output)))
-
-        # Deliver artifacts created by tools in this iteration.
-        for art in ctx.artifacts[delivered_artifacts:]:
-            yield AgentEvent(type="artifact_start", data={"title": art["title"], "extension": art["extension"]})
-            yield AgentEvent(type="artifact_delta", data={"text": art["content"]})
-            yield AgentEvent(type="artifact_end", data={"title": art["title"], "extension": art["extension"]})
+        results, ran = await _run_tool_calls(tool_calls, ctx, convo, tool_calls_made)
+        tool_calls_made += ran
+        for event in _tool_result_events(results, convo):
+            yield event
+        for event in _artifact_events(ctx.artifacts[delivered_artifacts:]):
+            yield event
         delivered_artifacts = len(ctx.artifacts)
 
-    yield AgentEvent(
-        type="usage",
-        data={
-            **totals,
-            "iterations": iterations,
-            "finish_reason": last_finish_reason,
-            "fallback_used": fallback_used,
-            "ttft_ms": ttft_ms,
-        },
-    )
+    yield stats.event()
     yield AgentEvent(type="done", data={"ok": True})

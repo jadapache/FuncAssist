@@ -1,6 +1,7 @@
 """Grounded runner, continuation logic and the agentic chat routes (all LLM/context calls faked)."""
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -522,3 +523,439 @@ async def test_chat_failure_and_cancellation_are_logged_once(chat, logs, monkeyp
       break
   await gen.aclose()
   assert logs[-1]["error_code"] == "cancelled" and logs[-1]["stage"] == "generate"
+
+
+# --- edge cases of logs, budgets, routing and timing ---------------------------------
+
+
+def _ticks(monkeypatch, *values):
+  """Make `runner.time.perf_counter()` return the given values in order, then the last one forever."""
+  queue = list(values)
+  monkeypatch.setattr(runner, "time", SimpleNamespace(perf_counter=lambda: queue.pop(0) if len(queue) > 1 else queue[0]))
+
+
+# --- continuation and citations -------------------------------------------
+
+def test_continuation_prompt_quotes_the_last_800_characters():
+  prompt = runner._continuation_prompt("a" * 500 + "b" * 800)
+  assert '"""' + "b" * 800 + '"""' in prompt
+
+
+def test_citations_are_numbered_from_one():
+  citations = runner._citations([_chunk(1), _chunk(2)])
+  assert [(c["index"], c["id"], c["source_type"], c["title"]) for c in citations] == [
+    (1, "c1", "knowledge", "T1"), (2, "c2", "knowledge", "T2"),
+  ]
+
+
+# --- grounded logs --------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_grounded_logs_say_it_was_not_a_refusal(grounded, logs, monkeypatch):
+  monkeypatch.setattr(runner, "resolve_provider", lambda **kw: FakeProvider(completions=[_completion("hola")]))
+  await runner.run_grounded_feature(feature="f", query="q")
+  assert logs[-1]["refused"] is False and logs[-1]["route"] == "grounded" and logs[-1]["feature"] == "f"
+
+  class Broken(FakeProvider):
+    async def complete(self, *a, **k):
+      raise AIError("down", "caído")
+
+  monkeypatch.setattr(runner, "resolve_provider", lambda **kw: Broken())
+  with pytest.raises(AIError):
+    await runner.run_grounded_feature(feature="f", query="q")
+  assert logs[-1]["refused"] is False and logs[-1]["stage"] == "generate" and "streamed" not in logs[-1]
+
+
+@pytest.mark.asyncio
+async def test_grounded_stream_logs(grounded, logs, monkeypatch):
+  provider = FakeProvider(streams=[(["a"], {"finish_reason": "stop", "prompt_tokens": 4, "tool_calls": [1]})])
+  monkeypatch.setattr(runner, "resolve_provider", lambda **kw: provider)
+  await _collect(runner.run_grounded_feature_stream(feature="f", query="q"))
+  log = logs[-1]
+  assert log["streamed"] is True and log["refused"] is False and log["continuations"] == 0
+  assert log["model"] == "fake-model" and log["finish_reason"] == "stop" and "tool_calls" not in log
+
+  provider = FakeProvider(streams=[(["a"], {"finish_reason": "stop", "model": "served-model"})])
+  monkeypatch.setattr(runner, "resolve_provider", lambda **kw: provider)
+  await _collect(runner.run_grounded_feature_stream(feature="f", query="q"))
+  assert logs[-1]["model"] == "served-model"
+
+  class Broken(FakeProvider):
+    async def complete_stream(self, *a, **k):
+      raise ValueError("boom")
+      yield
+
+  monkeypatch.setattr(runner, "resolve_provider", lambda **kw: Broken())
+  with pytest.raises(ValueError):
+    await _collect(runner.run_grounded_feature_stream(feature="f", query="q"))
+  assert logs[-1]["refused"] is False and logs[-1]["streamed"] is True and logs[-1]["stage"] == "generate"
+
+
+@pytest.mark.asyncio
+async def test_document_feature_defaults_to_the_knowledge_source(monkeypatch):
+  seen = []
+
+  async def fake_run(**kwargs):
+    seen.append(kwargs["sources"])
+    return {}
+
+  monkeypatch.setattr(runner, "run_grounded_feature", fake_run)
+  await runner.run_document_feature(DocumentFeatureRequest("f", "q", ["d"]))
+  await runner.run_document_feature(DocumentFeatureRequest("f", "q", ["d"], sources=["jira"]))
+  await runner.run_document_feature(DocumentFeatureRequest("f", "q", ["d"], sources=[]))
+  assert seen == [["knowledge"], ["jira"], ["knowledge"]]
+
+
+# --- system prompts and context -------------------------------------------
+
+@pytest.mark.asyncio
+async def test_chat_system_prompt_defaults_to_docx(monkeypatch):
+  async def no_template(feature):
+    return {}
+
+  monkeypatch.setattr(runner, "get_prompt", no_template)
+  assert 'extension="docx"' in await runner._build_chat_system_prompt("generic_report", None, None)
+  assert 'extension="pdf"' in await runner._build_chat_system_prompt("generic_report", None, "pdf")
+
+
+@pytest.mark.asyncio
+async def test_template_without_a_system_text_falls_back_to_the_default_prompt(monkeypatch):
+  async def none_template(feature):
+    return None
+
+  monkeypatch.setattr(runner, "get_prompt", none_template)
+  assert "QA" in await runner._build_base_system_prompt("chat")
+
+
+def test_context_parts_are_numbered_and_attachments_without_content_are_dropped():
+  bundle = SimpleNamespace(is_empty=True, used_sources=[], to_prompt_block=lambda: "")
+  text, used = runner._collect_context(
+    bundle, [_chunk(1, "uno"), _chunk(2, "dos")], [{"filename": "a.txt", "content": "ATT"}, {"filename": "vacio"}]
+  )
+  assert "[1] " in text and "[2] " in text and "ATT" in text and "vacio" not in text
+  assert used == ["uploads", "chat_attachments"]
+  assert runner._collect_context(None, [], None) == ("", [])
+
+
+# --- budgets --------------------------------------------------------------
+
+def _cfg(**kwargs):
+  return runner.AgenticChatConfig(query="qq", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_budgets_split_the_input_window(monkeypatch):
+  seen = []
+  monkeypatch.setattr(runner, "count_tokens", lambda model, text: len(text))
+  monkeypatch.setattr(runner, "calculate_input_budget", lambda provider_id, model, out: seen.append(model) or 100_000)
+  provider = SimpleNamespace(id="x")
+  cfg = _cfg(intent="template_mutation", template_content="tttt", images=[{}, {}])
+  budgets = await runner._chat_budgets(cfg, provider, "sss")
+  assert seen == ["gpt-4o"] and budgets.model == "gpt-4o"
+  assert budgets.history_tokens == 6_000
+  assert budgets.docs_tokens == 100_000 - (3 + 2 + 4 + 2 * runner.IMAGE_TOKEN_ESTIMATE) - 6_000
+
+  chat_only = await runner._chat_budgets(_cfg(intent="chat", template_content="tttt"), SimpleNamespace(id="x", default_model="m"), "sss")
+  assert chat_only.model == "m" and chat_only.docs_tokens == 100_000 - 5 - 6_000
+  no_template = await runner._chat_budgets(_cfg(intent="template_mutation"), provider, "sss")
+  assert no_template.docs_tokens == 100_000 - 5 - 6_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("input_budget,history", [(100_000, 6_000), (8_000, 2_000), (2_000, 1_000)])
+async def test_history_budget_is_a_quarter_of_the_window_within_bounds(monkeypatch, input_budget, history):
+  monkeypatch.setattr(runner, "count_tokens", lambda model, text: 0)
+  monkeypatch.setattr(runner, "calculate_input_budget", lambda *a: input_budget)
+  budgets = await runner._chat_budgets(_cfg(), SimpleNamespace(id="x", default_model="m"), "s")
+  assert budgets.history_tokens == history
+  assert budgets.docs_tokens == max(runner.DOCS_MIN_TOKENS, input_budget - history)
+
+
+@pytest.mark.asyncio
+async def test_documents_are_condensed_only_when_they_exceed_their_budget(monkeypatch):
+  targets = []
+
+  async def condense(text, target_budget, provider, feature_goal):
+    targets.append(target_budget)
+    return "CONDENSED"
+
+  monkeypatch.setattr(runner, "count_tokens", lambda model, text: len(text))
+  monkeypatch.setattr(runner, "chars_per_token", lambda model, text: 2.0)
+  monkeypatch.setattr(runner, "map_reduce_condense_context", condense)
+  fast = SimpleNamespace(get=lambda: _async(None))
+  cfg = _cfg()
+  budgets = runner._Budgets("m", 0, 0, 0, docs_tokens=10)
+  assert await runner._condense_context(cfg, "x" * 10, budgets, fast) == "x" * 10
+  assert await runner._condense_context(cfg, "", budgets, fast) == ""
+  assert targets == [] and "context_condensed" not in cfg.run_info
+  assert await runner._condense_context(cfg, "x" * 11, budgets, fast) == "CONDENSED"
+  assert targets == [20] and cfg.run_info["context_condensed"] is True and cfg.run_info["stage"] == "condense"
+
+
+async def _async(value):
+  return value
+
+
+def test_documents_message_sections():
+  def message(intent, template="TPL", docs="DOCS"):
+    return runner._documents_message(_cfg(intent=intent, template_content=template, template_extension="pdf"), docs)
+
+  assert "PLANTILLA CORPORATIVA:\nTPL" in message("template_mutation")
+  assert "PLANTILLA" not in message("chat")
+  assert "PLANTILLA" not in message("template_mutation", template=None)
+  assert "Formato PDF" in message("generic_plan") and "Formato" not in message("chat")
+  assert message("chat", docs="") == ""
+
+
+@pytest.mark.asyncio
+async def test_history_scope_is_the_conversation_then_the_user(monkeypatch):
+  seen = []
+
+  async def prune(messages, **kwargs):
+    seen.append((kwargs["scope"], kwargs["store"]))
+    return messages
+
+  class Store:
+    def __init__(self, conversation_id, user_id):
+      self.ids = (conversation_id, user_id)
+
+  monkeypatch.setattr(runner, "prune_or_summarize_history", prune)
+  monkeypatch.setattr(runner, "ChatSessionSummaryStore", Store)
+  fast = SimpleNamespace(get=lambda: _async(None))
+  budgets = runner._Budgets("m", 0, 0, 100, 100)
+  history = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
+  await runner._prepare_history(_cfg(history=history, conversation_id="conv", user_id="u"), budgets, fast)
+  await runner._prepare_history(_cfg(history=history, user_id="u"), budgets, fast)
+  assert [scope for scope, _ in seen] == ["conv", "u"]
+  assert seen[0][1].ids == ("conv", "u") and seen[1][1] is None
+  assert await runner._prepare_history(_cfg(), budgets, fast) == []
+
+
+@pytest.mark.asyncio
+async def test_chat_prompt_defaults_to_docx_in_the_prepared_conversation(chat):
+  prep = await runner._prepare_chat(_cfg(intent="generic_plan", template_extension=None))
+  assert 'extension="docx"' in prep.sys_prompt
+
+
+# --- chat log entry -------------------------------------------------------
+
+def test_log_entry_flags_and_usage(logs):
+  cfg = _cfg()
+  cfg.run_info.update(model="info-model", provider="p")
+  runner._log_chat(cfg, None, usage={"tool_calls": [1], "model": "served", "prompt_tokens": 3})
+  entry = logs[-1]
+  assert entry["refused"] is False and entry["streamed"] is True and entry["model"] == "served"
+  assert entry["prompt_tokens"] == 3 and "tool_calls" not in entry
+  cfg2 = _cfg()
+  runner._log_chat(cfg2, None, usage={})
+  assert logs[-1]["model"] == "unknown" and logs[-1]["provider"] == "unknown"
+  cfg3 = _cfg()
+  cfg3.run_info["model"] = "info-model"
+  runner._log_chat(cfg3, None)
+  assert logs[-1]["model"] == "info-model"
+
+
+# --- routes ---------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_agent_route_context_and_duration(chat, logs, monkeypatch):
+  seen = {}
+
+  async def fake_agent(messages, provider, ctx, max_iters, max_tokens):
+    seen["documents"] = ctx.allowed_document_ids
+    yield AgentEvent(type="usage", data={"prompt_tokens": 1})
+    yield AgentEvent(type="done", data={})
+
+  chat.provider = FakeProvider(tools=True)
+  monkeypatch.setenv("AI_AGENT_MODE", "true")
+  monkeypatch.setattr(runner, "run_agent", fake_agent)
+  _ticks(monkeypatch, 10.0, 12.0)
+  items = await _collect(runner.run_agentic_chat_stream(runner.AgenticChatConfig(query="q")))
+  usage = next(i for i in items if isinstance(i, AgentEvent) and i.type == "usage")
+  assert seen["documents"] == [] and usage.data["duration_ms"] == 2000.0
+
+
+@pytest.mark.asyncio
+async def test_sections_route_duration_and_failed_sections(chat, logs, monkeypatch):
+  async def fake_sections(**kwargs):
+    yield "texto"
+
+  plan = SimpleNamespace(sections=[1, 2], title="T", extension="md", chat_intro="")
+
+  async def fake_plan(**kwargs):
+    return plan
+
+  monkeypatch.setenv("AI_SECTION_GENERATION", "true")
+  monkeypatch.setattr(runner, "is_section_generation_candidate", lambda intent, query: True)
+  monkeypatch.setattr(runner, "plan_document", fake_plan)
+  monkeypatch.setattr(runner, "generate_sections_stream", fake_sections)
+  _ticks(monkeypatch, 10.0, 13.0)
+  items = await _collect(runner.run_agentic_chat_stream(runner.AgenticChatConfig(query="q")))
+  usage = next(i for i in items if isinstance(i, AgentEvent) and i.type == "usage")
+  assert usage.data["duration_ms"] == 3000.0
+  assert logs[-1]["failed_sections"] == [] and logs[-1]["sections"] == 2
+
+
+def _plain_chat(chat, streams, monkeypatch):
+  chat.provider = FakeProvider(streams=streams)
+  monkeypatch.setattr(runner, "resolve_max_continuations", lambda intent: 1)
+
+
+@pytest.mark.asyncio
+async def test_plain_answer_is_truncated_when_the_model_stopped_on_length(chat, logs, monkeypatch):
+  _plain_chat(chat, [(["uno"], {"finish_reason": "length"}), (["dos"], {"finish_reason": "length"})], monkeypatch)
+  cfg = runner.AgenticChatConfig(query="q")
+  await _collect(runner.run_agentic_chat_stream(cfg))
+  assert cfg.run_info["truncated"] is True and logs[-1]["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_plain_answer_is_truncated_when_an_artifact_is_left_open(chat, logs, monkeypatch):
+  _plain_chat(chat, [(['<artifact title="a" extension="md">mitad'], {"finish_reason": "stop"}), ([], {})], monkeypatch)
+  cfg = runner.AgenticChatConfig(query="q")
+  await _collect(runner.run_agentic_chat_stream(cfg))
+  assert cfg.run_info["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_complete_plain_answer_is_not_truncated_and_keeps_its_usage(chat, logs, monkeypatch, caplog):
+  _plain_chat(chat, [(["listo"], {"finish_reason": "stop", "prompt_tokens": 5, "tool_calls": [1]})], monkeypatch)
+  cfg = runner.AgenticChatConfig(query="q")
+  await _collect(runner.run_agentic_chat_stream(cfg))
+  assert "truncated" not in cfg.run_info and logs[-1]["truncated"] is False
+  assert logs[-1]["prompt_tokens"] == 5 and "tool_calls" not in logs[-1] and logs[-1]["continuations"] == 0
+
+
+@pytest.mark.asyncio
+async def test_truncation_warning_reports_the_continuations_made(chat, logs, monkeypatch, caplog):
+  _plain_chat(chat, [(["uno"], {"finish_reason": "length"}), (["dos"], {"finish_reason": "length"})], monkeypatch)
+  with caplog.at_level(logging.WARNING):
+    await _collect(runner.run_agentic_chat_stream(runner.AgenticChatConfig(query="q")))
+  assert any("after 1 continuation(s)" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_usage_event_of_the_plain_route_reports_its_continuations(chat, logs, monkeypatch):
+  _plain_chat(chat, [(["uno"], {"finish_reason": "length"}), (["dos"], {"finish_reason": "stop"})], monkeypatch)
+  items = await _collect(runner.run_agentic_chat_stream(runner.AgenticChatConfig(query="q")))
+  usage = next(i for i in items if isinstance(i, AgentEvent) and i.type == "usage")
+  assert usage.data["continuations"] == 1 and usage.data["finish_reason"] == "stop"
+
+
+# --- routing --------------------------------------------------------------
+
+@pytest.mark.parametrize("flag,candidate,expected", [
+  ("true", True, True), ("false", True, False), ("true", False, False), ("false", False, False),
+])
+def test_sections_are_wanted_only_when_enabled_and_the_request_is_a_candidate(monkeypatch, flag, candidate, expected):
+  monkeypatch.setenv("AI_SECTION_GENERATION", flag)
+  monkeypatch.setattr(runner, "is_section_generation_candidate", lambda intent, query: candidate)
+  assert runner._wants_sections(_cfg()) is expected
+
+
+@pytest.mark.asyncio
+async def test_agent_route_wins_over_section_planning(chat, logs, monkeypatch):
+  planned = []
+
+  async def fake_plan(**kwargs):
+    planned.append(1)
+
+  async def fake_agent(messages, provider, ctx, max_iters, max_tokens):
+    yield AgentEvent(type="done", data={})
+
+  chat.provider = FakeProvider(tools=True)
+  monkeypatch.setenv("AI_AGENT_MODE", "true")
+  monkeypatch.setenv("AI_SECTION_GENERATION", "true")
+  monkeypatch.setattr(runner, "is_section_generation_candidate", lambda intent, query: True)
+  monkeypatch.setattr(runner, "plan_document", fake_plan)
+  monkeypatch.setattr(runner, "run_agent", fake_agent)
+  cfg = runner.AgenticChatConfig(query="q")
+  await _collect(runner.run_agentic_chat_stream(cfg))
+  assert planned == [] and cfg.run_info["route"] == "agent"
+
+
+@pytest.mark.asyncio
+async def test_no_planning_when_sections_are_not_wanted(chat, logs, monkeypatch):
+  planned = []
+
+  async def fake_plan(**kwargs):
+    planned.append(1)
+
+  chat.provider = FakeProvider(streams=[(["ok"], {"finish_reason": "stop"})])
+  monkeypatch.setattr(runner, "plan_document", fake_plan)
+  await _collect(runner.run_agentic_chat_stream(runner.AgenticChatConfig(query="q")))
+  assert planned == []
+
+
+@pytest.mark.asyncio
+async def test_failed_chat_run_is_logged_with_its_traceback(chat, logs, monkeypatch, caplog):
+  class Broken(FakeProvider):
+    async def complete_stream(self, *a, **k):
+      raise ValueError("boom")
+      yield
+
+  chat.provider = Broken()
+  with caplog.at_level(logging.WARNING), pytest.raises(ValueError):
+    await _collect(runner.run_agentic_chat_stream(runner.AgenticChatConfig(query="q")))
+  record = next(r for r in caplog.records if "Chat run failed" in r.getMessage())
+  assert record.exc_info and logs[-1]["error_code"] == "ValueError"
+
+
+# --- continuation limits and context trimming -----------------------------
+
+@pytest.mark.asyncio
+async def test_streamed_continuation_stops_when_the_text_does_not_grow():
+  prov = FakeProvider(streams=[([""], {"finish_reason": "length"}), (["more"], {"finish_reason": "stop"})])
+  out = await _collect(runner.continue_if_truncated(["start"], prov, [], finish_reason="length", max_continuations=5))
+  assert out == [""] and len(prov.stream_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_completion_continues_at_most_the_allowed_number_of_times():
+  prov = FakeProvider(completions=[_completion(letter, "length") for letter in "abcdef"])
+  res = await runner.complete_with_continuation(prov, [], max_tokens=1, max_continuations=2)
+  assert res.text == "abc" and len(prov.complete_calls) == 3
+  prov = FakeProvider(completions=[_completion("a", "length"), _completion("b", "stop", prompt_tokens=5)])
+  assert (await runner.complete_with_continuation(prov, [], max_tokens=1)).prompt_tokens == 5
+
+
+class _Bundle:
+  def __init__(self, count):
+    self.chunks = list(range(count))
+
+  def to_prompt_block(self):
+    return "y" * (10 * len(self.chunks))
+
+
+@pytest.mark.asyncio
+async def test_bundle_is_trimmed_to_exactly_the_available_tokens(monkeypatch, caplog):
+  models = []
+  monkeypatch.setattr(runner, "count_tokens", lambda model, text: len(text))
+  monkeypatch.setattr(runner, "calculate_input_budget", lambda pid, model, out: models.append(model) or 100)
+  bundle = _Bundle(9)
+  with caplog.at_level(logging.INFO):
+    await runner._fit_bundle_to_budget(bundle, provider=SimpleNamespace(id="x"), max_output_tokens=10, fixed_texts=["x" * 30, ""])
+  assert models == ["gpt-4o"] and len(bundle.chunks) == 7
+  assert any("dropped 2 chunk(s)" in r.getMessage() for r in caplog.records)
+  caplog.clear()
+  with caplog.at_level(logging.INFO):
+    await runner._fit_bundle_to_budget(bundle, provider=SimpleNamespace(id="x", default_model="m"), max_output_tokens=10, fixed_texts=["x" * 30])
+  assert models[-1] == "m" and len(bundle.chunks) == 7 and not any("dropped" in r.getMessage() for r in caplog.records)
+
+
+def test_refusal_answer_shape():
+  assert runner._refusal("porque") == {"ok": False, "refused": True, "reason": "porque", "answer": None, "citations": []}
+
+
+@pytest.mark.asyncio
+async def test_plan_uses_docx_when_the_request_names_no_extension(chat, monkeypatch):
+  seen = []
+
+  async def fake_plan(**kwargs):
+    seen.append(kwargs["template_extension"])
+
+  monkeypatch.setattr(runner, "plan_document", fake_plan)
+  prep = await runner._prepare_chat(runner.AgenticChatConfig(query="q"))
+  await runner._plan_sections(runner.AgenticChatConfig(query="q", template_extension=None), prep)
+  await runner._plan_sections(runner.AgenticChatConfig(query="q", template_extension="xlsx"), prep)
+  assert seen == ["docx", "xlsx"]

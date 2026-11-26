@@ -12,7 +12,7 @@ retorne una lista tipada de artefactos en lugar de texto crudo con XML embebido.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 _ARTIFACT_PATTERN = re.compile(
@@ -42,121 +42,100 @@ class LLMArtifact:
 
 def has_unclosed_artifact(raw_text: str) -> bool:
     """True when an `<artifact ...>` opening tag has no matching `</artifact>`."""
-    if not raw_text or "<artifact" not in raw_text.lower():
+    if not raw_text:
         return False
     openings = len(_ARTIFACT_OPEN.findall(raw_text))
     closings = len(re.findall(r"</artifact>", raw_text, re.IGNORECASE))
     return closings < openings
 
 
+_ABRUPT_LAST_LINE = (
+    # Heading or section number without content, e.g. "2.5 ACTIVIDADES MANUALES", "### BENEFICIO".
+    re.compile(r"^(#{1,6}\s+|(?:\d+\.)+\d*\s+|[A-Z0-9\s]{4,}:?\s*$|\*\*[^*]+\*\*\s*$)"),
+    # Empty or incomplete bullet: "-", "*", "1.".
+    re.compile(r"^[-*]\s*$"),
+    re.compile(r"^\d+\.\s*$"),
+)
+_MIN_CHARS_FOR_TRUNCATION_HEURISTIC = 500
+
+
+def _ends_abruptly(raw_text: str) -> bool:
+    """Heuristic for long texts cut by a token limit: dangling heading, bullet, code fence or table row."""
+    stripped = raw_text.rstrip()
+    if len(stripped) <= _MIN_CHARS_FOR_TRUNCATION_HEURISTIC:
+        return False
+    last_line = stripped.splitlines()[-1].strip()
+    return (
+        any(pattern.match(last_line) for pattern in _ABRUPT_LAST_LINE)
+        or stripped.count("```") % 2 != 0
+        or (last_line.startswith("|") and not last_line.endswith("|"))
+    )
+
+
 def is_artifact_truncated(raw_text: str) -> bool:
     """Detecta si la generación se cortó antes de finalizar.
-    
+
     Verifica:
     1. Si hay una etiqueta <artifact ...> abierta sin su correspondiente </artifact>.
     2. Si el texto (markdown directo o dentro de artefacto) termina abruptamente
-       a mitad de una sección (ej. encabezado solo como '## BENEFICIO ESPERADO'),
-       a mitad de una línea o lista de viñetas, o con un bloque de código sin cerrar.
+       a mitad de una sección, de una línea o lista de viñetas, de una fila de tabla
+       o con un bloque de código sin cerrar.
     """
-    if not raw_text or not raw_text.strip():
-        return False
+    return bool(raw_text) and (has_unclosed_artifact(raw_text) or _ends_abruptly(raw_text))
 
-    # 1. Chequeo de etiquetas <artifact>
-    if "<artifact" in raw_text.lower():
-        openings = list(_ARTIFACT_OPEN.finditer(raw_text))
-        if openings:
-            closings = list(re.finditer(r"</artifact>", raw_text, re.IGNORECASE))
-            if len(closings) < len(openings):
-                return True
 
-    # 2. Chequeo heurístico para textos extensos (documentos o respuestas largas cortadas por token limit)
-    stripped = raw_text.rstrip()
-    if len(stripped) > 500:
-        # Termina en encabezado de markdown o número de sección sin contenido
-        # ej: "2.5 ACTIVIDADES MANUALES", "### BENEFICIO ESPERADO", "**BENEFICIO ESPERADO**"
-        last_line = stripped.splitlines()[-1].strip()
-        if re.match(r"^(#{1,6}\s+|(?:\d+\.)+\d*\s+|[A-Z0-9\s]{4,}:?\s*$|\*\*[^*]+\*\*\s*$)", last_line):
-            return True
-        # Termina en viñeta vacía o incompleta (ej. "-", "*", "1.")
-        if re.match(r"^[-*]\s*$", last_line) or re.match(r"^\d+\.\s*$", last_line):
-            return True
-        # Termina con un bloque de código markdown sin cerrar (número impar de triple backticks)
-        backtick_count = stripped.count("```")
-        if backtick_count % 2 != 0:
-            return True
-        # Termina a mitad de una fila de tabla markdown incompleta (ej: "| Col1 |")
-        if last_line.startswith("|") and not last_line.endswith("|"):
-            return True
+def _artifact_from(match: re.Match, index: int, title_group: int, extension_group: int) -> LLMArtifact:
+    title, extension, content = match.group(title_group), match.group(extension_group), match.group(3)
+    return LLMArtifact(title.strip(), extension.strip().lower(), content.strip(), index)
 
-    return False
+
+def _closed_artifacts(raw_text: str) -> list[LLMArtifact]:
+    """Artifacts with a closing tag; `title` first, else the reversed attribute order."""
+    found = [_artifact_from(m, i, 1, 2) for i, m in enumerate(_ARTIFACT_PATTERN.finditer(raw_text))]
+    return found or [_artifact_from(m, i, 2, 1) for i, m in enumerate(_ARTIFACT_PATTERN_ALT.finditer(raw_text))]
+
+
+def _recover_cut_off_artifacts(raw_text: str, openings: list[re.Match]) -> list[LLMArtifact]:
+    """Blocks cut off before the closing tag, including a partial one such as ``</art``."""
+    recovered = []
+    for idx, opening in enumerate(openings):
+        end = openings[idx + 1].start() if idx + 1 < len(openings) else len(raw_text)
+        block = raw_text[opening.end():end]
+        closing = block.find("</artifact>")
+        content = block[:closing] if closing >= 0 else re.sub(r"</art(?:ifact)?$", "", block)
+        title = opening.group(1) or opening.group(4)
+        extension = opening.group(2) or opening.group(3)
+        recovered.append(LLMArtifact(title.strip(), extension.strip().lower(), content.strip(), idx))
+    return recovered
+
+
+def _conversation_text(raw_text: str) -> str:
+    """Text without artifact tags; the `<chat>` blocks when present (several are joined in order)."""
+    clean = _ARTIFACT_OPEN.sub("", raw_text)
+    clean = re.sub(r"</artifact>|</art$", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    chat_blocks = [
+        block.strip()
+        for block in re.findall(r"<chat>(.*?)</chat>", clean, re.DOTALL | re.IGNORECASE)
+        if block.strip()
+    ]
+    if chat_blocks:
+        return "\n\n".join(chat_blocks)
+    return re.sub(r"</?chat>", "", clean).strip()
 
 
 def extract_artifacts(raw_text: str) -> tuple[list[LLMArtifact], str]:
     """Extrae bloques <artifact> del texto crudo del LLM.
 
-    Args:
-        raw_text: Texto completo retornado por el LLM, posiblemente
-                  con etiquetas <artifact> embebidas.
-
     Returns:
-        Tupla (lista_de_artefactos, texto_limpio).
-        - lista_de_artefactos: artefactos encontrados en orden de aparición.
-        - texto_limpio: el texto original con las etiquetas XML removidas y
-          espacios extra colapsados.
+        Tupla (lista_de_artefactos, texto_limpio): los artefactos en orden de aparición y el
+        texto original sin las etiquetas XML ni los espacios extra.
     """
-    artifacts: list[LLMArtifact] = []
-
-    # Match patrón principal: title primero
-    for idx, match in enumerate(_ARTIFACT_PATTERN.finditer(raw_text)):
-        artifacts.append(LLMArtifact(
-            title=match.group(1).strip(),
-            extension=match.group(2).strip().lower(),
-            content=match.group(3).strip(),
-            index=idx,
-        ))
-
-    # Si no encontró con patrón principal, intentar orden alternativo
-    if not artifacts:
-        for idx, match in enumerate(_ARTIFACT_PATTERN_ALT.finditer(raw_text)):
-            artifacts.append(LLMArtifact(
-                title=match.group(2).strip(),
-                extension=match.group(1).strip().lower(),
-                content=match.group(3).strip(),
-                index=idx,
-            ))
-
-    # Recover blocks cut off before the closing tag, including a partial
-    # closing tag such as ``</art``.
+    artifacts = _closed_artifacts(raw_text)
     openings = list(_ARTIFACT_OPEN.finditer(raw_text))
     if len(artifacts) < len(openings):
-        artifacts = []
-        for idx, opening in enumerate(openings):
-            end = openings[idx + 1].start() if idx + 1 < len(openings) else len(raw_text)
-            block = raw_text[opening.end():end]
-            closing = block.find("</artifact>")
-            content = block[:closing] if closing >= 0 else re.sub(r"</art(?:ifact)?$", "", block)
-            title = opening.group(1) or opening.group(4)
-            extension = opening.group(2) or opening.group(3)
-            artifacts.append(LLMArtifact(title.strip(), extension.strip().lower(), content.strip(), idx))
-
-    # Limpiar el texto de todas las etiquetas artifact
-    clean = _ARTIFACT_OPEN.sub("", raw_text)
-    clean = re.sub(r"</artifact>|</art$", "", clean, flags=re.IGNORECASE)
-    clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
-
-    # Si hay bloques <chat>, su contenido es el texto de conversación. Puede haber varios
-    # (p. ej. una nota final tras el artefacto): se unen en orden.
-    chat_blocks = [
-        block.strip()
-        for block in re.findall(r'<chat>(.*?)</chat>', clean, re.DOTALL | re.IGNORECASE)
-        if block.strip()
-    ]
-    if chat_blocks:
-        clean = "\n\n".join(chat_blocks)
-    else:
-        clean = re.sub(r'</?chat>', '', clean).strip()
-
-    return artifacts, clean
+        artifacts = _recover_cut_off_artifacts(raw_text, openings)
+    return artifacts, _conversation_text(raw_text)
 
 
 def build_fallback_artifact(
@@ -244,9 +223,8 @@ class ArtifactStreamSplitter:
             self._emit_chat(events, self._buf[: len(self._buf) - hold])
             self._buf = self._buf[len(self._buf) - hold:]
             return False
-        if start > 0:
-            self._emit_chat(events, self._buf[:start])
-            self._buf = self._buf[start:]
+        self._emit_chat(events, self._buf[:start])
+        self._buf = self._buf[start:]
         match = _ARTIFACT_OPEN.match(self._buf)
         if match:
             title = (match.group(1) or match.group(4) or "Documento").strip()
@@ -257,7 +235,7 @@ class ArtifactStreamSplitter:
             self._buf = self._buf[match.end():]
             return True
         end_of_tag = self._buf.find(">")
-        if end_of_tag < 0:
+        if end_of_tag == -1:
             return False  # opening tag still incomplete
         # Malformed tag: pass it through as text.
         self._emit_chat(events, self._buf[: end_of_tag + 1])

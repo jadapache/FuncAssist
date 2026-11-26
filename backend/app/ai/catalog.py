@@ -15,7 +15,6 @@ from typing import Any
 
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from app.models import AIModelInfo, ModelCatalogResponse
-from app.db.repositories.catalog_repository import AIModelCatalogRepository
 
 logger = logging.getLogger(__name__)
 
@@ -267,24 +266,23 @@ def _version_key(model_id: str) -> tuple[bool, tuple[int, ...], int]:
     return (not dated, numbers, -len(model_id))
 
 
-def catalog_chat_models(provider: str) -> list[str]:
-    """Chat model ids of a provider present in the persisted catalog."""
+def _catalog_model_ids(provider: str, task_type: str) -> list[str]:
     p_key = (provider or "").strip().lower()
     return [
         m.raw_id or m.id
         for m in load_local_catalog()
-        if m.provider.lower() == p_key and m.task_type.lower() == "chat_writing"
+        if m.provider.lower() == p_key and m.task_type.lower() == task_type
     ]
+
+
+def catalog_chat_models(provider: str) -> list[str]:
+    """Chat model ids of a provider present in the persisted catalog."""
+    return _catalog_model_ids(provider, "chat_writing")
 
 
 def catalog_transcription_models(provider: str) -> list[str]:
     """Transcription model ids of a cloud provider present in the persisted catalog."""
-    p_key = (provider or "").strip().lower()
-    return [
-        m.raw_id or m.id
-        for m in load_local_catalog()
-        if m.provider.lower() == p_key and m.task_type.lower() == "transcription"
-    ]
+    return _catalog_model_ids(provider, "transcription")
 
 
 # The catalog does not record response formats. Whisper-family models return timestamped segments
@@ -319,7 +317,7 @@ def pick_transcription_model(provider: str, configured: str | None = None) -> st
     for pattern in _TRANSCRIPTION_PREFERENCE:
         matches = [m for m in available if re.search(pattern, m, re.IGNORECASE)]
         if matches:
-            return sorted(matches, key=_version_key, reverse=True)[0]
+            return max(matches, key=_version_key)
     return None
 
 
@@ -346,7 +344,7 @@ def pick_diarization_model(provider: str, configured: str | None = None) -> tupl
         return configured, True
     if not diarizers:
         return None, True
-    return sorted(diarizers, key=_version_key, reverse=True)[0], True
+    return max(diarizers, key=_version_key), True
 
 
 def pick_model(provider: str, tier: str = "main", registry_default: str | None = None) -> str | None:
@@ -366,15 +364,20 @@ def pick_model(provider: str, tier: str = "main", registry_default: str | None =
     if not available:
         return registry_default or None
 
+    best = _best_for_tier(available, p_key, tier)
+    if best:
+        return best
+    return registry_default if registry_default in available else None
+
+
+def _best_for_tier(available: list[str], provider: str, tier: str) -> str | None:
+    """Newest non-excluded model matching the first tier pattern that matches anything."""
     candidates = [m for m in available if not _EXCLUDED_VARIANTS.search(m)]
-    for pattern in _TIER_PATTERNS.get(p_key, {}).get(tier, ()):
+    for pattern in _TIER_PATTERNS.get(provider, {}).get(tier, ()):
         regex = re.compile(pattern, re.IGNORECASE)
         matches = [m for m in candidates if regex.search(m)]
         if matches:
             return max(matches, key=_version_key)
-
-    if registry_default and registry_default in available:
-        return registry_default
     return None
 
 
@@ -389,11 +392,7 @@ def _filter_catalog_models(models: list[AIModelInfo], provider: str, task_type: 
     return filtered
 
 
-async def get_model_catalog(
-    refresh: bool = False,
-    provider: str = "all",
-    task_type: str = "all",
-) -> ModelCatalogResponse:
+async def get_model_catalog(refresh: bool = False, provider: str = "all", task_type: str = "all") -> ModelCatalogResponse:
     all_models = load_local_catalog(refresh=refresh)
     filtered = _filter_catalog_models(all_models, provider, task_type)
 

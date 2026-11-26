@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
-from app.ai.artifacts import artifacts_to_dict, extract_artifacts
 from app.context.retrieval import chunks_from_documents
 from app.context.service import assemble_context
 
@@ -69,6 +68,12 @@ def get_tools_openai_schema() -> list[dict[str, Any]]:
 
 # --- Default Tools Implementations ---
 
+def _requested_sources(args: dict[str, Any], permitted: list[str]) -> list[str]:
+    """The sources the model asked for that it may use; all permitted ones when it asked for none."""
+    requested = [s for s in (args.get("sources") or []) if isinstance(s, str)]
+    return [s for s in requested if s in permitted] if requested else permitted
+
+
 async def _search_knowledge(args: dict[str, Any], ctx: ToolContext) -> str:
     query = str(args.get("query", ""))
     if not query:
@@ -76,16 +81,13 @@ async def _search_knowledge(args: dict[str, Any], ctx: ToolContext) -> str:
     permitted = list(ctx.allowed_sources or [])
     if not permitted:
         return "[Error]: No hay fuentes de conocimiento habilitadas para esta conversación."
-    requested = [str(s) for s in (args.get("sources") or []) if isinstance(s, str)]
-    sources = [s for s in requested if s in permitted] if requested else permitted
+    sources = _requested_sources(args, permitted)
     if not sources:
         return f"[Error]: Fuentes no permitidas. Disponibles: {', '.join(permitted)}"
     bundle = await assemble_context(query=query, sources=sources, user_id=ctx.user_id)
     if bundle.is_empty:
         return "[Resultado]: No se encontró información en las fuentes conectadas."
-    parts = []
-    for c in bundle.chunks[:5]:
-        parts.append(f"[Chunk ID: {c.id} | Fuente: {c.source_label}]:\n{c.text[:800]}")
+    parts = [f"[Chunk ID: {c.id} | Fuente: {c.source_label}]:\n{c.text[:800]}" for c in bundle.chunks[:5]]
     return "\n\n---\n\n".join(parts)
 
 
