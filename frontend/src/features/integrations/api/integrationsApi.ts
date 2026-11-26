@@ -7,6 +7,15 @@ import {
 } from '../../../api/client'
 import type { JiraConnectionStatus } from '../../settings/types'
 
+export type GitLabServiceAccountPayload = { token: string; base_url?: string; selected_repos?: string[] }
+
+export type GitHubAppPayload = {
+  app_id: string
+  private_key: string
+  installation_id?: string
+  selected_repos?: string[]
+}
+
 export const integrationsApi = {
   getIntegrations: () =>
     fetch(`${API_BASE}/api/integrations`, {
@@ -26,11 +35,11 @@ export const integrationsApi = {
       handleResponse<{ authorization_url: string; state: string; auth_method: string }>(r),
     ),
 
-  connectWithPat: (
+  connectServiceAccount: (
     id: string,
-    payload: { token: string; email?: string; base_url?: string; selected_repos?: string[] },
+    payload: GitLabServiceAccountPayload | GitHubAppPayload,
   ) =>
-    fetch(`${API_BASE}/api/integrations/${id}/pat`, {
+    fetch(`${API_BASE}/api/integrations/${id}/service-account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(payload),
@@ -136,13 +145,6 @@ export const integrationsApi = {
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ auth_method: 'oauth' }),
     }).then((r) => handleResponse<{ authorization_url: string; state: string; auth_method: string }>(r)),
-
-  connectUserJiraPat: (payload: { token: string; email?: string; jira_url?: string }) =>
-    fetch(`${API_BASE}/api/me/integrations/jira/connect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ auth_method: 'pat', ...payload }),
-    }).then((r) => handleResponse<{ ok: boolean; status: string }>(r)),
 
   connectJiraOAuth: (payload: { code: string; state: string; redirect_uri?: string }) =>
     fetch(`${API_BASE}/api/me/integrations/jira/connect`, {

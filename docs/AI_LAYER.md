@@ -7,6 +7,9 @@ Referencia de `backend/app/ai/**` y del chat agéntico (`/api/doc-agent/agentic-
 | Variable | Valor por defecto | Efecto |
 |---|---|---|
 | `AI_PROVIDER` / `AI_MODEL` | — | Proveedor y modelo principal si el usuario no configuró uno. |
+| `OPENROUTER_API_KEY` / `DEEPSEEK_API_KEY` | — | Claves de OpenRouter y DeepSeek cuando el usuario no guardó una propia. El resto de proveedores usa `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` y `GROQ_API_KEY`. |
+| `AI_INJECTION_MODE` | `block` | Qué hacer con contenido externo que parece dirigido al modelo: `block` omite el fragmento y deja un marcador, `strip` quita solo las líneas sospechosas, `flag` lo conserva con una alerta y `off` desactiva la detección. Ver "Contenido externo y herramientas". |
+| `VITE_MARKDOWN_ALLOWED_HOSTS` | vacío | (Frontend, en tiempo de compilación) hosts separados por comas desde los que el chat puede cargar imágenes y abrir enlaces sin marcarlos como externos. Sin esta variable, las imágenes remotas nunca se cargan. |
 | `AI_FAST_MODEL` | elegido del catálogo | Modelo del tier rápido (planificación, resúmenes, map-reduce). |
 | `AI_FALLBACK_MODELS` | — | Lista separada por comas, máximo 3, del mismo proveedor. Se prueban en orden si el principal falla. |
 | `AI_PROMPT_CACHE` | `on` | `off` desactiva los puntos de caché explícitos (Anthropic). OpenAI, Gemini y DeepSeek cachean el prefijo de forma implícita. |
@@ -80,11 +83,24 @@ Cada petición al chat deja una entrada en `USER_DATA_DIR/ai/logs/AAAA-MM-DD.jso
 
 `GET /api/ai/logs/stats?limit=N` devuelve totales de tokens y coste, p50/p95 de duración y TTFT, `fallback_rate`, `cache_hit_rate` (`cached_tokens / prompt_tokens`), `error_rate`, `truncation_rate` y la distribución por ruta. `list_logs` lee cada archivo desde el final.
 
+## Contenido externo y herramientas
+
+Lo que escriben terceros (incidencias de Jira, pull requests y commits de GitHub y GitLab, documentos de la base de conocimiento, adjuntos y resultados de herramientas) puede traer instrucciones dirigidas al modelo. Los controles, en orden:
+
+1. **Sobre** (`ai/untrusted.py`): todo ese texto entra al prompt dentro de `<<<DATOS_EXTERNOS id=… fuente=… ref=…>>>` … `<<<FIN_DATOS_EXTERNOS id=…>>>`. El identificador es aleatorio en cada envoltura y el texto no puede cerrarla ni imitarla: se neutralizan los delimitadores, las etiquetas de la aplicación, los tokens de plantillas de chat, las líneas que fingen un rol (`system:`) y los caracteres invisibles o de control.
+2. **Instrucción permanente**: todos los prompts de sistema indican que el contenido del sobre es información y no instrucciones.
+3. **Detector** (`ai/injection.py`, `AI_INJECTION_MODE`): reconoce en español e inglés patrones como "ignora las instrucciones anteriores", cambios de rol, peticiones de llamar herramientas, intentos de ocultar información al usuario o de extraer el prompt, enlaces e imágenes que envían datos y tokens de plantillas. Con `block` (por defecto) el fragmento se sustituye por un marcador y el usuario recibe un aviso con la fuente. Es heurístico: reduce la probabilidad, no sustituye a los controles siguientes.
+4. **Herramientas**: el agente rechaza las herramientas con efecto fuera de la conversación (`external_effect`) mientras haya contenido externo, y limita cada turno a 12 llamadas. Las herramientas de integraciones usan una lista blanca explícita de solo lectura y siempre se ejecutan como el usuario que pregunta. Los servidores MCP los registra solo un administrador, cada herramienta se aprueba fijada a su descripción y esquema, y los argumentos se validan contra el esquema aprobado (`integrations/mcp_policy.py`).
+5. **Salida**: el chat no carga imágenes remotas y muestra el destino de los enlaces externos; los enlaces externos con parámetros no se pueden abrir. La política `Content-Security-Policy` de nginx limita `img-src` al propio origen.
+6. **Ingesta**: los elementos sincronizados que parecen hostiles llevan `injection_flags` y los documentos de la base de conocimiento reciben la etiqueta `posible-inyeccion`.
+
+Registro: las detecciones y las decisiones sobre herramientas se guardan, sin el contenido inspeccionado, en `USER_DATA_DIR/ai/security/AAAA-MM-DD.jsonl` (`ai/logging.py`, `list_security_events`). Cada petición del chat también anota en su entrada de log las fuentes afectadas (`injection_detected`).
+
 ## Pruebas contra proveedores reales
 
 `python -m scripts.smoke_ai_providers` (desde `backend/`) muestra, sin llamar a ningún proveedor, qué modelo principal y rápido resuelve el catálogo para cada proveedor y avisa si los valores del registro ya no están en el catálogo.
 
-Con `--live` (consume crédito) y las claves configuradas, por proveedor: una llamada del tier rápido (indicando si tuvo que recurrir al modelo principal), un plan por secciones (debe dar `sections > 0`) y, si el modelo admite herramientas, una llamada a herramienta en streaming seguida de la respuesta final. `--providers groq,claude,openai` limita los proveedores y `--user <id>` usa las claves guardadas de ese usuario. Sale con código 1 si alguna comprobación falla.
+Con `--live` (consume crédito) y las claves configuradas, por proveedor: una llamada del tier rápido (indicando si tuvo que recurrir al modelo principal), un plan por secciones (debe dar `sections > 0`) y, si el modelo admite herramientas, una llamada a herramienta en streaming seguida de la respuesta final. `--providers groq,claude,openai` limita los proveedores (por defecto se revisan Groq, Claude, OpenAI, Gemini, OpenRouter y DeepSeek; los que no tienen clave se omiten) y `--user <id>` usa las claves guardadas de ese usuario. Sale con código 1 si alguna comprobación falla.
 
 ## Datos
 

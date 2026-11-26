@@ -37,14 +37,13 @@ from app.core.storage_user_integrations import (
   save_user_integration,
 )
 from app.db.interfaces.mcp_server_repository import IMcpServerRepository
-from app.integrations.executor import validate_mcp_endpoint_url
 from app.integrations.registry import registry
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["me-configuration"])
 
-VALID_PROVIDERS = {"openai", "anthropic", "claude", "gemini", "groq"}
+VALID_PROVIDERS = {"openai", "anthropic", "claude", "gemini", "groq", "openrouter", "deepseek"}
 
 
 # ---------------------------------------------------------------------------
@@ -83,13 +82,6 @@ class ProviderCredentialInfo(BaseModel):
   updated_at: Optional[str] = None
 
 
-class JiraConnectRequest(BaseModel):
-  jira_url: Optional[str] = None
-  auth_method: str = "oauth"
-  token: Optional[str] = None
-  email: Optional[str] = None
-
-
 class JiraConnectionInfo(BaseModel):
   connected: bool
   account_email: Optional[str] = None
@@ -100,38 +92,19 @@ class JiraConnectionInfo(BaseModel):
   status: str = "disconnected"
 
 
-class McpServerCreate(BaseModel):
-  name: str = Field(min_length=1, max_length=100)
-  endpoint_url: str = Field(min_length=1)
-  description: Optional[str] = None
-  transport_type: str = "sse"
-  auth_type: str = "none"
-  auth_secret: Optional[str] = None
-  allowed_tools: List[str] = Field(default_factory=list)
-
-
-class McpServerUpdate(BaseModel):
-  name: Optional[str] = None
-  endpoint_url: Optional[str] = None
-  description: Optional[str] = None
-  transport_type: Optional[str] = None
-  auth_type: Optional[str] = None
-  auth_secret: Optional[str] = None
-  allowed_tools: Optional[List[str]] = None
-  status: Optional[str] = None
+class McpToolPublic(BaseModel):
+  name: str
+  read_only: bool = False
 
 
 class McpServerInfo(BaseModel):
+  """What a user sees of a server an administrator enabled: no endpoint, no credentials."""
+
   id: str
   name: str
   description: str = ""
-  endpoint_url: str
-  transport_type: str = "sse"
-  auth_type: str = "none"
   status: str = "configured"
-  allowed_tools: List[str] = Field(default_factory=list)
-  created_at: Optional[str] = None
-  updated_at: Optional[str] = None
+  tools: List[McpToolPublic] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -263,29 +236,11 @@ async def delete_my_provider_credential(
 
 @router.post("/integrations/jira/connect")
 async def connect_my_jira(
-  body: Optional[JiraConnectRequest] = None,
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-  """Start personal Jira connection via OAuth 2.0 or PAT."""
+  """Start the personal Jira connection through OAuth 2.0 (3LO). Jira has no token-based connection."""
   user_id = current_user["id"]
   jira_integration = registry.get("jira")
-
-  if body and body.auth_method == "pat" and body.token:
-    info = await jira_integration.connect_with_pat(
-      token=body.token,
-      email=body.email,
-      base_url=body.jira_url or "",
-    )
-    save_user_integration(user_id, "jira", {
-      "auth_method": "pat",
-      "pat_token": body.token,
-      "email": body.email,
-      "jira_url": body.jira_url,
-      "status": "connected",
-    })
-    return {"ok": True, "status": "connected", "info": info.model_dump() if hasattr(info, "model_dump") else info}
-
-  # OAuth 2.0 3LO Start
   oauth_res = await jira_integration.start_oauth(user_id=user_id)
   return oauth_res.model_dump() if hasattr(oauth_res, "model_dump") else oauth_res
 
@@ -392,102 +347,23 @@ async def disconnect_my_jira(
 # ---------------------------------------------------------------------------
 
 @router.get("/mcp-servers", response_model=List[McpServerInfo])
-async def list_my_mcp_servers(
+async def list_mcp_servers_for_users(
   current_user: dict[str, Any] = Depends(get_current_user),
   mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
 ) -> List[McpServerInfo]:
-  """List MCP servers configured for the authenticated user."""
-  user_id = current_user["id"]
-  servers = await mcp_repo.list_by_user(user_id)
-  return [McpServerInfo(**s) for s in servers]
-
-
-@router.post("/mcp-servers", response_model=McpServerInfo)
-async def create_my_mcp_server(
-  body: McpServerCreate,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> McpServerInfo:
-  """Register an external MCP server for the authenticated user."""
-  user_id = current_user["id"]
-  if not validate_mcp_endpoint_url(body.endpoint_url, resolve_dns=False):
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="URL de servidor MCP no permitida o insegura.",
+  """MCP servers enabled by administrators. Registering, editing and approving tools is admin-only."""
+  servers = await mcp_repo.list_all()
+  return [
+    McpServerInfo(
+      id=server["id"],
+      name=server["name"],
+      description=server.get("description") or "",
+      status=server.get("status") or "configured",
+      tools=[
+        McpToolPublic(name=t["name"], read_only=bool(t.get("read_only")))
+        for t in server.get("tools") or []
+        if t.get("approved")
+      ],
     )
-
-  created = await mcp_repo.create(
-    user_id=user_id,
-    name=body.name,
-    endpoint_url=body.endpoint_url,
-    description=body.description,
-    transport_type=body.transport_type,
-    auth_type=body.auth_type,
-    allowed_tools=body.allowed_tools,
-  )
-  return McpServerInfo(**created)
-
-
-@router.patch("/mcp-servers/{server_id}", response_model=McpServerInfo)
-async def update_my_mcp_server(
-  server_id: str,
-  body: McpServerUpdate,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> McpServerInfo:
-  """Update an existing MCP server configuration for the authenticated user."""
-  user_id = current_user["id"]
-  updates = body.model_dump(exclude_unset=True)
-
-  if "endpoint_url" in updates and updates["endpoint_url"] is not None:
-    if not validate_mcp_endpoint_url(updates["endpoint_url"], resolve_dns=False):
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="URL de servidor MCP no permitida o insegura.",
-      )
-
-  updated = await mcp_repo.update(server_id, user_id, updates)
-  if not updated:
-    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-
-  return McpServerInfo(**updated)
-
-
-@router.delete("/mcp-servers/{server_id}")
-async def delete_my_mcp_server(
-  server_id: str,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> dict[str, Any]:
-  """Remove an MCP server configuration for the authenticated user."""
-  user_id = current_user["id"]
-  deleted = await mcp_repo.delete(server_id, user_id)
-  if not deleted:
-    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-
-  return {"ok": True, "deleted_id": server_id}
-
-
-@router.post("/mcp-servers/{server_id}/test")
-async def test_my_mcp_server(
-  server_id: str,
-  current_user: dict[str, Any] = Depends(get_current_user),
-  mcp_repo: IMcpServerRepository = Depends(get_mcp_server_repository),
-) -> dict[str, Any]:
-  """Test connection and validate reachability of user's MCP server."""
-  user_id = current_user["id"]
-  server = await mcp_repo.get_by_id(server_id, user_id)
-  if not server:
-    raise HTTPException(status_code=404, detail="Servidor MCP no encontrado.")
-
-  is_valid = validate_mcp_endpoint_url(server["endpoint_url"], resolve_dns=False)
-  new_status = "connected" if is_valid else "error"
-  await mcp_repo.update_status(server_id, user_id, new_status)
-
-  return {
-    "ok": is_valid,
-    "status": new_status,
-    "endpoint_url": server["endpoint_url"],
-  }
-
-
+    for server in servers
+  ]

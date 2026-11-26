@@ -30,7 +30,7 @@ QA Project MGMT es una solución integrada para equipos de QA y Product Manageme
 4. **QA Features** — Suite de generadores: regression test matrices, casos de API QA, datos de prueba inteligentes.
 5. **Generador de Mejoras Funcionales** — Documento agentic de especificaciones funcionales con edición en tiempo real.
 6. **Base de Conocimiento Local** — Ingesta de PDFs, DOCXs, MDs; RAG sobre PostgreSQL para consultas grounded.
-7. **Integración Multiproveedor** — Jira (OAuth + PAT), GitHub (PAT), GitLab (Token), con sincronización de caché.
+7. **Integración Multiproveedor** — Jira (OAuth personal), GitHub (GitHub App) y GitLab (token de bot), ambos de organización y solo lectura, con sincronización de caché.
 8. **AI Multiproveedor** — Ollama local, OpenAI, Anthropic Claude, con fallback dinámico.
 
 ---

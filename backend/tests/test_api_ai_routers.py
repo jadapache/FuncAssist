@@ -122,6 +122,15 @@ class TestAIManagement:
     assert body["ok"] is True and body["response"] == "OK" and body["model"] == "m1"
     assert seen["api_key"] == "sk-o" and seen["base_url"] == "http://o" and seen["user_id"] == "test-user-id"
 
+  @pytest.mark.parametrize("field", ["openrouter_api_key", "deepseek_api_key"])
+  def test_connection_accepts_new_provider_keys(self, monkeypatch, field):
+    seen = {}
+    monkeypatch.setattr(ai_management, "get_ai_settings", lambda user_id=None: {"provider": "openrouter", "model": "m1"})
+    monkeypatch.setattr(ai_management, "resolve_provider", lambda **kw: seen.update(kw) or _FakeProvider())
+    r = _client(ai_management.router).post("/api/ai/test-connection", json={field: "candidate"})
+    assert r.json()["ok"] is True
+    assert seen["api_key"] == "candidate"
+
   def test_provider_failure_reported(self, monkeypatch):
     monkeypatch.setattr(ai_management, "get_ai_settings", lambda user_id=None: {})
     monkeypatch.setattr(ai_management, "resolve_provider", lambda **kw: _FakeProvider(fail=True))
@@ -244,6 +253,22 @@ class TestAISettings:
     monkeypatch.setenv("X_KEY_FOR_TEST", "1")
     monkeypatch.setattr(ai_settings, "find_provider_spec", lambda p: spec)
     assert _client(ai_settings.router).get("/api/ai/settings").json()["active_api_key_set"] is expected
+
+  def test_openrouter_and_deepseek_keys_reported_and_saved(self, settings_store, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    body = _client(ai_settings.router).get("/api/ai/settings").json()
+    assert body["openrouter_api_key_set"] is False and body["deepseek_api_key_set"] is False
+
+    r = _client(ai_settings.router).put(
+      "/api/ai/settings",
+      json={"provider": "openrouter", "openrouter_api_key": "or-key", "deepseek_api_key": "ds-key"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["openrouter_api_key_set"] is True and body["deepseek_api_key_set"] is True
+    assert body["active_api_key_set"] is True
+    assert "or-key" not in r.text and "ds-key" not in r.text  # keys are never echoed back
 
   def test_update_maps_inference_fields_and_normalizes(self, settings_store):
     r = _client(ai_settings.router).put(

@@ -185,7 +185,7 @@ def load_all_user_credentials(user_id: str, db: Optional[Any] = None) -> dict[st
   if not user_id:
     return results
 
-  for prov in ("openai", "claude", "groq", "gemini"):
+  for prov in ("openai", "claude", "groq", "gemini", "openrouter", "deepseek"):
     val = load_user_credential(user_id, prov, db=db)
     if val:
       results[f"{prov}_api_key"] = val

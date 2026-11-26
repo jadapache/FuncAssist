@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 class AuthMethod(str, Enum):
   OAUTH = "oauth"
-  PERSONAL_ACCESS_TOKEN = "pat"
+  SERVICE_ACCOUNT = "service_account"
 
 
 class ConnectionStatus(str, Enum):
@@ -71,17 +71,12 @@ class Integration(ABC):
   def get_capabilities(self) -> list[Capability]:
     raise NotImplementedError
 
-  @abstractmethod
   async def start_oauth(self) -> AuthStartResponse:
-    raise NotImplementedError
+    """Only integrations that sign users in with OAuth (Jira) implement this."""
+    raise NotImplementedError(f"{self.name} does not use OAuth.")
 
-  @abstractmethod
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    raise NotImplementedError
-
-  @abstractmethod
-  async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
-    raise NotImplementedError
+    raise NotImplementedError(f"{self.name} does not use OAuth.")
 
   @abstractmethod
   async def disconnect(self) -> None:

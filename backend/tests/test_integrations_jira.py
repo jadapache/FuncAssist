@@ -1,4 +1,4 @@
-"""Jira integration: pure helpers, OAuth/PAT flows and API reads with httpx mocked."""
+"""Jira integration: pure helpers, personal OAuth flow and API reads with httpx mocked."""
 
 from __future__ import annotations
 
@@ -7,33 +7,27 @@ import time
 import httpx
 import pytest
 
-from app.integrations.base import ConnectionStatus
+from app.integrations.base import AuthMethod, ConnectionStatus
 from app.integrations.jira import integration as jira
 
 REAL_CLIENT = httpx.AsyncClient
 OAUTH_CFG = {"configured": True, "client_id": "cid", "client_secret": "sec", "redirect_uri": "http://x/cb"}
-PAT = {
-  "auth_method": "pat", "pat_token": "tk", "account_email": "a@b.co",
-  "site_url": "https://acme.atlassian.net",
-}
 OAUTH = {
   "auth_method": "oauth", "access_token": "at", "refresh_token": "rt", "cloud_id": "cl",
-  "expires_at": time.time() + 3600, "site_url": "https://acme.atlassian.net",
+  "expires_at": time.time() + 3600, "site_url": "https://acme.atlassian.net", "account_email": "a@b.co",
 }
+U = "u1"
 
 
 @pytest.fixture
 def store(monkeypatch):
-  org: dict = {}
+  """Only per-user connections exist: Jira has no organization-level connection."""
   users: dict = {}
-  monkeypatch.setattr(jira, "load_connection", lambda _id: dict(org[_id]) if org.get(_id) else None)
-  monkeypatch.setattr(jira, "save_connection", lambda _id, p: org.__setitem__(_id, dict(p)))
-  monkeypatch.setattr(jira, "delete_connection", lambda _id: org.pop(_id, None))
   monkeypatch.setattr(jira, "load_user_integration", lambda uid, _id: dict(users[(uid, _id)]) if users.get((uid, _id)) else None)
   monkeypatch.setattr(jira, "save_user_integration", lambda uid, _id, p: users.__setitem__((uid, _id), dict(p)))
   monkeypatch.setattr(jira, "delete_user_integration", lambda uid, _id: users.pop((uid, _id), None))
   monkeypatch.setattr(jira, "get_jira_oauth_config", lambda: OAUTH_CFG)
-  return type("Store", (), {"org": org, "users": users})
+  return type("Store", (), {"users": users})
 
 
 def mock_http(monkeypatch, handler):
@@ -84,56 +78,81 @@ def test_oauth_scopes_with_extra(monkeypatch):
   assert jira.get_jira_oauth_scopes() == jira.JIRA_OAUTH_SCOPES_CORE
 
 
+def test_default_oauth_scopes_are_read_only():
+  """Least privilege: no default scope may grant write or admin access."""
+  for scope in jira.JIRA_OAUTH_SCOPES_CORE:
+    assert not scope.startswith(("write:", "manage:", "delete:", "admin:")), scope
+  assert all(s.startswith("read:") or s == "offline_access" for s in jira.get_jira_oauth_scopes())
+
+
 @pytest.mark.parametrize(
   "data,expected",
   [
     (None, False),
-    (PAT, True),
-    ({**PAT, "site_url": ""}, False),
     (OAUTH, True),
     ({"auth_method": "oauth", "access_token": "x"}, False),
     ({"auth_method": "other"}, False),
+    ({"auth_method": "pat", "pat_token": "x", "account_email": "a@b.co", "site_url": "https://x"}, False),
   ],
 )
 def test_is_connected(data, expected):
   assert jira.JiraIntegration()._is_connected(data) is expected
 
 
+def test_personal_access_tokens_are_not_supported():
+  integ = jira.JiraIntegration()
+  assert not hasattr(integ, "connect_with_pat")
+  assert not hasattr(AuthMethod, "PERSONAL_ACCESS_TOKEN")
+  assert [m.value for m in integ.get_info().auth_methods] == ["oauth"]
+
+
 def test_info_and_default_jql(store):
   integ = jira.JiraIntegration()
   assert integ.get_info().status == ConnectionStatus.NOT_CONNECTED
+  assert integ.get_info(user_id=U).status == ConnectionStatus.NOT_CONNECTED
   assert {c.value for c in integ.get_capabilities()} == {"get_issues", "get_projects", "get_sprints"}
 
-  store.users[("u1", "jira")] = {**PAT, "selected_project_keys": ["AAA"]}
-  info = integ.get_info(user_id="u1")
+  store.users[(U, "jira")] = {**OAUTH, "selected_project_keys": ["AAA"]}
+  info = integ.get_info(user_id=U)
   assert info.status == ConnectionStatus.CONNECTED and info.account_label == "a@b.co"
-  assert integ.selected_project_keys("u1") == ["AAA"]
-  assert integ._default_jql("u1").startswith("project = AAA")
+  assert integ.selected_project_keys(U) == ["AAA"]
+  assert integ._default_jql(U).startswith("project = AAA")
 
-  store.users[("u1", "jira")]["selected_project_keys"] = ["AAA", "BBB"]
-  assert "project in (AAA, BBB)" in integ._default_jql("u1")
+  store.users[(U, "jira")]["selected_project_keys"] = ["AAA", "BBB"]
+  assert "project in (AAA, BBB)" in integ._default_jql(U)
   assert integ._default_jql().startswith("updated >= -14d")
-  # user without a personal connection falls back to the organization one
-  store.org["jira"] = dict(PAT)
-  assert integ.get_info(user_id="nobody").status == ConnectionStatus.CONNECTED
+
+
+def test_a_user_never_sees_another_users_connection(store):
+  integ = jira.JiraIntegration()
+  store.users[(U, "jira")] = {**OAUTH, "selected_project_keys": ["AAA"]}
+  assert integ.get_info(user_id="someone-else").status == ConnectionStatus.NOT_CONNECTED
+  assert integ.selected_project_keys("someone-else") == []
+  assert integ._resolve_connection_data(None) is None
 
 
 # ----------------------------------------------------------------- OAuth
 
 
 @pytest.mark.asyncio
-async def test_start_oauth_org_and_user(store, monkeypatch):
+async def test_start_oauth_requires_a_user(store, monkeypatch):
   integ = jira.JiraIntegration()
-  res = await integ.start_oauth()
-  assert store.org["jira"]["oauth_state"] == res.state and "::" not in res.state
-  assert "client_id=cid" in res.authorization_url
+  with pytest.raises(ValueError, match="personal"):
+    await integ.start_oauth()
 
-  res = await integ.start_oauth(user_id="u1")
-  assert res.state.startswith("u1::") and store.users[("u1", "jira")]["status"] == "pending_oauth"
+  res = await integ.start_oauth(user_id=U)
+  assert res.state.startswith(f"{U}::") and store.users[(U, "jira")]["status"] == "pending_oauth"
+  assert "client_id=cid" in res.authorization_url
+  assert jira.JiraIntegration.user_id_from_state(res.state) == U
 
   monkeypatch.setattr(jira, "get_jira_oauth_config", lambda: {"configured": False})
   with pytest.raises(ValueError, match="not configured"):
-    await integ.start_oauth()
+    await integ.start_oauth(user_id=U)
+
+
+@pytest.mark.parametrize("state,expected", [("u1::123::abc", "u1"), ("", None), (None, None), ("bogus", None), ("::1::x", None)])
+def test_user_id_from_state(state, expected):
+  assert jira.JiraIntegration.user_id_from_state(state) == expected
 
 
 def _oauth_handler(resources=None, me_status=200, token_status=200):
@@ -153,30 +172,26 @@ def _oauth_handler(resources=None, me_status=200, token_status=200):
 
 
 @pytest.mark.asyncio
-async def test_oauth_callback_org_flow(store, monkeypatch):
+async def test_oauth_callback_saves_a_personal_connection(store, monkeypatch):
   integ = jira.JiraIntegration()
-  with pytest.raises(ValueError, match="Invalid OAuth state"):
-    await integ.handle_oauth_callback("c", "bogus")
-
-  res = await integ.start_oauth()
+  res = await integ.start_oauth(user_id=U)
   mock_http(monkeypatch, _oauth_handler())
   info = await integ.handle_oauth_callback("code", res.state)
   assert info.status == ConnectionStatus.CONNECTED and info.account_label == "a@b.co"
-  saved = store.org["jira"]
+  saved = store.users[(U, "jira")]
   assert saved["cloud_id"] == "cl" and saved["selected_project_keys"] == ["ACME"]
-  # state is consumed: replaying it fails
+  # the state is consumed: replaying it fails
   with pytest.raises(ValueError, match="Invalid OAuth state"):
     await integ.handle_oauth_callback("code", res.state)
 
 
 @pytest.mark.asyncio
-async def test_oauth_callback_user_flow_and_errors(store, monkeypatch):
+async def test_oauth_callback_errors(store, monkeypatch):
   integ = jira.JiraIntegration()
-  res = await integ.start_oauth(user_id="u1")
+  res = await integ.start_oauth(user_id=U)
   mock_http(monkeypatch, _oauth_handler(me_status=500))
   info = await integ.handle_oauth_callback("code", res.state)
-  assert ("u1", "jira") in store.users and store.users[("u1", "jira")]["cloud_id"] == "cl"
-  assert info.status == ConnectionStatus.CONNECTED
+  assert store.users[(U, "jira")]["cloud_id"] == "cl" and info.status == ConnectionStatus.CONNECTED
 
   res = await integ.start_oauth(user_id="u2")
   mock_http(monkeypatch, _oauth_handler(token_status=400))
@@ -192,97 +207,96 @@ async def test_oauth_callback_user_flow_and_errors(store, monkeypatch):
   with pytest.raises(ValueError, match="expired"):
     await integ.handle_oauth_callback("code", stale)
 
-  # malformed timestamp -> treated as an org-level state, which does not match
-  with pytest.raises(ValueError):
-    await integ.handle_oauth_callback("code", "u5::notanint::abc")
 
-
-# ----------------------------------------------------------------- PAT / selection
+@pytest.mark.parametrize("state", ["bogus", "u5::notanint::abc", "::123::abc", ""])
+@pytest.mark.asyncio
+async def test_oauth_callback_rejects_states_without_a_user(store, state):
+  with pytest.raises(ValueError, match="Invalid OAuth state"):
+    await jira.JiraIntegration().handle_oauth_callback("code", state)
 
 
 @pytest.mark.asyncio
-async def test_connect_with_pat(store, monkeypatch):
+async def test_oauth_callback_rejects_forged_state_for_another_user(store):
   integ = jira.JiraIntegration()
-  with pytest.raises(ValueError, match="requires token"):
-    await integ.connect_with_pat("t", email="a@b.co")
+  await integ.start_oauth(user_id=U)  # u1 has a pending state; an attacker forges one for u1
+  forged = f"{U}::{int(time.time())}::forged"
+  with pytest.raises(ValueError, match="Invalid OAuth state"):
+    await integ.handle_oauth_callback("code", forged)
 
-  mock_http(monkeypatch, lambda req: httpx.Response(401))
-  with pytest.raises(ValueError, match="authentication failed"):
-    await integ.connect_with_pat("t", email="a@b.co", base_url="https://acme.atlassian.net")
 
-  def ok(req: httpx.Request):
-    if "myself" in req.url.path:
-      assert req.headers["authorization"].startswith("Basic ")
-      return httpx.Response(200, json={"displayName": "Ana"})
-    return httpx.Response(200, json={"values": [{"key": "ACME", "name": "Acme"}]})
-
-  mock_http(monkeypatch, ok)
-  info = await integ.connect_with_pat("t", account_email="a@b.co", site_url="https://acme.atlassian.net/")
-  assert info.status == ConnectionStatus.CONNECTED
-  assert store.org["jira"]["site_name"] == "acme.atlassian.net" and store.org["jira"]["selected_project_keys"] == ["ACME"]
+# ----------------------------------------------------------------- selection
 
 
 @pytest.mark.asyncio
 async def test_update_selected_projects_and_disconnect(store):
   integ = jira.JiraIntegration()
   with pytest.raises(ValueError, match="not connected"):
+    await integ.update_selected_projects(["a"], user_id=U)
+  with pytest.raises(ValueError):  # a user is required
     await integ.update_selected_projects(["a"])
 
-  store.org["jira"] = dict(PAT)
-  info = await integ.update_selected_projects([" aaa ", "", "bbb"])
+  store.users[(U, "jira")] = dict(OAUTH)
+  info = await integ.update_selected_projects([" aaa ", "", "bbb"], user_id=U)
   assert info.details["selected_project_keys"] == ["AAA", "BBB"]
-  store.users[("u1", "jira")] = dict(PAT)
-  await integ.update_selected_projects(["ccc"], user_id="u1")
-  assert store.users[("u1", "jira")]["selected_project_keys"] == ["CCC"]
+  await integ.update_selected_projects(["ccc"], user_id=U)
+  assert store.users[(U, "jira")]["selected_project_keys"] == ["CCC"]
 
-  await integ.disconnect(user_id="u1")
-  assert ("u1", "jira") not in store.users and "jira" not in store.org
+  with pytest.raises(ValueError, match="personal"):
+    await integ.disconnect()
+  await integ.disconnect(user_id=U)
+  assert (U, "jira") not in store.users
 
 
 @pytest.mark.asyncio
 async def test_auto_select_projects_edge_cases(store, monkeypatch):
   integ = jira.JiraIntegration()
-  store.org["jira"] = {**PAT, "selected_project_keys": ["KEEP"]}
-  await integ.auto_select_projects_from_url("https://acme.atlassian.net")  # already selected -> no-op
-  assert store.org["jira"]["selected_project_keys"] == ["KEEP"]
+  store.users[(U, "jira")] = {**OAUTH, "selected_project_keys": ["KEEP"]}
+  await integ.auto_select_projects_from_url("https://acme.atlassian.net", user_id=U)  # already selected
+  assert store.users[(U, "jira")]["selected_project_keys"] == ["KEEP"]
 
-  store.org["jira"] = dict(PAT)
-  await integ.auto_select_projects_from_url("https://example.com")  # no hint
-  assert "selected_project_keys" not in store.org["jira"]
+  store.users[(U, "jira")] = dict(OAUTH)
+  await integ.auto_select_projects_from_url("https://example.com", user_id=U)  # no hint
+  assert "selected_project_keys" not in store.users[(U, "jira")]
 
   mock_http(monkeypatch, lambda req: httpx.Response(500))
-  await integ.auto_select_projects_from_url("https://acme.atlassian.net")  # swallowed error
-  assert "selected_project_keys" not in store.org["jira"]
+  await integ.auto_select_projects_from_url("https://acme.atlassian.net", user_id=U)  # swallowed error
+  assert "selected_project_keys" not in store.users[(U, "jira")]
+
+  mock_http(monkeypatch, _oauth_handler())
+  await integ.auto_select_projects_from_url("https://acme.atlassian.net", user_id=U)
+  assert store.users[(U, "jira")]["selected_project_keys"] == ["ACME"]
 
 
 # ----------------------------------------------------------------- auth / reads
 
 
 @pytest.mark.asyncio
-async def test_authenticate_variants(store, monkeypatch):
+async def test_authenticate_variants(store):
   integ = jira.JiraIntegration()
-  assert await integ.authenticate() is False
-  store.org["jira"] = dict(PAT)
-  assert await integ.authenticate() is True
-  store.org["jira"] = {"auth_method": "other"}
-  assert await integ.authenticate() is False
-  store.org["jira"] = dict(OAUTH)
-  assert await integ.authenticate() is True
-  store.org["jira"] = {"auth_method": "oauth", "expires_at": 0, "access_token": "old"}
+  assert await integ.authenticate() is False  # no user, no connection
+  assert await integ.authenticate(user_id=U) is False
+  store.users[(U, "jira")] = {"auth_method": "other"}
+  assert await integ.authenticate(user_id=U) is False
+  store.users[(U, "jira")] = {"auth_method": "pat", "pat_token": "x"}
+  assert await integ.authenticate(user_id=U) is False  # PATs are not a connection
+  store.users[(U, "jira")] = dict(OAUTH)
+  assert await integ.authenticate(user_id=U) is True
+  assert await integ.authenticate(user_id="someone-else") is False
+  store.users[(U, "jira")] = {"auth_method": "oauth", "expires_at": 0, "access_token": "old"}
   with pytest.raises(ValueError, match="no refresh token"):
-    await integ.authenticate()
+    await integ.authenticate(user_id=U)
 
 
 @pytest.mark.asyncio
-async def test_refresh_token_persists(store, monkeypatch):
+async def test_refresh_token_persists_for_the_user(store, monkeypatch):
   integ = jira.JiraIntegration()
   mock_http(monkeypatch, lambda req: httpx.Response(200, json={"access_token": "new", "refresh_token": "rt2", "expires_in": 3600}))
   expired = {**OAUTH, "expires_at": 0}
-  store.users[("u1", "jira")] = dict(expired)
-  data = await integ._ensure_fresh_oauth_token(dict(expired), user_id="u1")
-  assert data["access_token"] == "new" and store.users[("u1", "jira")]["refresh_token"] == "rt2"
-  data = await integ._ensure_fresh_oauth_token(dict(expired))
-  assert store.org["jira"]["access_token"] == "new"
+  store.users[(U, "jira")] = dict(expired)
+  data = await integ._ensure_fresh_oauth_token(dict(expired), user_id=U)
+  assert data["access_token"] == "new" and store.users[(U, "jira")]["refresh_token"] == "rt2"
+  with pytest.raises(ValueError, match="personal"):
+    await integ._ensure_fresh_oauth_token(dict(expired))
   fresh = {**OAUTH}
   assert await integ._ensure_fresh_oauth_token(fresh) is fresh
 
@@ -291,13 +305,9 @@ async def test_refresh_token_persists(store, monkeypatch):
 async def test_test_connection(store, monkeypatch):
   integ = jira.JiraIntegration()
   assert (await integ.test_connection()).message == "Jira is not connected."
+  assert (await integ.test_connection(user_id=U)).message == "Jira is not connected."
 
-  store.org["jira"] = dict(PAT)
-  mock_http(monkeypatch, lambda req: httpx.Response(200, json={"displayName": "Ana"}))
-  res = await integ.test_connection()
-  assert res.ok and "PAT" in res.message and res.details["account"] == "Ana"
-
-  store.org["jira"] = dict(OAUTH)
+  store.users[(U, "jira")] = dict(OAUTH)
   paths = []
 
   def handler(req: httpx.Request):
@@ -305,20 +315,21 @@ async def test_test_connection(store, monkeypatch):
     return httpx.Response(200, json={"displayName": "Ana"})
 
   mock_http(monkeypatch, handler)
-  res = await integ.test_connection()
-  assert res.ok and "OAuth" in res.message and paths == ["/ex/jira/cl/rest/api/3/myself"]
+  res = await integ.test_connection(user_id=U)
+  assert res.ok and "OAuth" in res.message and res.details["account"] == "Ana"
+  assert paths == ["/ex/jira/cl/rest/api/3/myself"]
 
   mock_http(monkeypatch, lambda req: httpx.Response(500))
-  assert (await integ.test_connection()).ok is False
+  assert (await integ.test_connection(user_id=U)).ok is False
 
 
 @pytest.mark.asyncio
-async def test_projects_and_issues_pat(store, monkeypatch):
+async def test_projects_and_issues(store, monkeypatch):
   integ = jira.JiraIntegration()
   with pytest.raises(ValueError, match="not connected"):
-    await integ.get_projects()
+    await integ.get_projects(user_id=U)
 
-  store.org["jira"] = {**PAT, "selected_project_keys": ["AAA"]}
+  store.users[(U, "jira")] = {**OAUTH, "selected_project_keys": ["AAA"]}
   seen = {}
 
   def handler(req: httpx.Request):
@@ -335,21 +346,40 @@ async def test_projects_and_issues_pat(store, monkeypatch):
     ]})
 
   mock_http(monkeypatch, handler)
-  projects = await integ.get_projects()
+  projects = await integ.get_projects(user_id=U)
   assert [(p["key"], p["selected"]) for p in projects] == [("aaa", True), ("BBB", False)]
 
-  issues = await integ.get_issues()
+  issues = await integ.get_issues(user_id=U)
   assert seen["jql"].startswith("project = AAA")
   assert issues[0]["description"] == "desc" and issues[0]["assignee"] == "e@x" and issues[0]["type"] == "Bug"
   assert issues[1]["description"] == "plain" and issues[2]["labels"] == []
-  await integ.get_issues(jql="assignee = me")
+  await integ.get_issues(jql="assignee = me", user_id=U)
   assert seen["jql"] == "assignee = me"
+
+
+@pytest.mark.asyncio
+async def test_reads_use_the_callers_own_token(store, monkeypatch):
+  """Two users with different Jira accounts must each reach Jira with their own token."""
+  integ = jira.JiraIntegration()
+  store.users[("alice", "jira")] = {**OAUTH, "access_token": "alice-token", "cloud_id": "alice-cloud"}
+  store.users[("bob", "jira")] = {**OAUTH, "access_token": "bob-token", "cloud_id": "bob-cloud"}
+  seen = []
+
+  def handler(req: httpx.Request):
+    seen.append((req.url.path, req.headers["authorization"]))
+    return httpx.Response(200, json={"values": []})
+
+  mock_http(monkeypatch, handler)
+  await integ.get_projects(user_id="alice")
+  await integ.get_projects(user_id="bob")
+  assert seen[0] == ("/ex/jira/alice-cloud/rest/api/3/project/search", "Bearer alice-token")
+  assert seen[1] == ("/ex/jira/bob-cloud/rest/api/3/project/search", "Bearer bob-token")
 
 
 @pytest.mark.asyncio
 async def test_sprints_oauth(store, monkeypatch):
   integ = jira.JiraIntegration()
-  store.org["jira"] = dict(OAUTH)
+  store.users[(U, "jira")] = dict(OAUTH)
 
   def handler(req: httpx.Request):
     path = req.url.path
@@ -360,8 +390,8 @@ async def test_sprints_oauth(store, monkeypatch):
     return httpx.Response(500)
 
   mock_http(monkeypatch, handler)
-  sprints = await integ.get_sprints()
+  sprints = await integ.get_sprints(user_id=U)
   assert [(s["id"], s["board_name"]) for s in sprints] == [(10, "B1")]
 
   mock_http(monkeypatch, lambda req: httpx.Response(500))
-  assert await integ.get_sprints() == []
+  assert await integ.get_sprints(user_id=U) == []

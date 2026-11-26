@@ -6,6 +6,7 @@ import re
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
+from app.ai.injection import prepare_untrusted
 from app.context.memory import ConversationMemory, ProjectKnowledge
 from app.context.models import ContextChunk
 
@@ -151,7 +152,8 @@ class ContextBuilder:
         accumulated_tokens = estimate_tokens(lines[0])
 
         for idx, chunk in enumerate(unique_chunks, start=1):
-            block = f"[{idx}] {chunk.title} ({chunk.source_label}):\n{chunk.text.strip()}"
+            body = prepare_untrusted(chunk.source_type, chunk.source_label, f"{chunk.title}\n{chunk.text}", max_chars=None)
+            block = f"[{idx}] {body}"
             block_tokens = estimate_tokens(block)
             if accumulated_tokens + block_tokens > reserve:
                 truncated.append("rag_context")

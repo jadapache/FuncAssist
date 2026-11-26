@@ -16,6 +16,10 @@ class IMcpServerRepository(ABC):
     pass
 
   @abstractmethod
+  async def list_all(self) -> List[Dict[str, Any]]:
+    """Every server of the organization. Servers are enabled by administrators for all users."""
+
+  @abstractmethod
   async def create(
     self,
     user_id: str,
@@ -24,28 +28,28 @@ class IMcpServerRepository(ABC):
     description: Optional[str] = None,
     transport_type: str = "sse",
     auth_type: str = "none",
-    allowed_tools: Optional[List[str]] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
   ) -> Dict[str, Any]:
-    pass
+    """`user_id` is the administrator who registered the server. `tools` are approval entries."""
 
   @abstractmethod
   async def update(
     self,
     server_id: str,
-    user_id: str,
+    user_id: Optional[str],
     updates: Dict[str, Any],
   ) -> Optional[Dict[str, Any]]:
-    pass
+    """`user_id=None` applies no owner restriction (administrators manage every server)."""
 
   @abstractmethod
-  async def delete(self, server_id: str, user_id: str) -> bool:
+  async def delete(self, server_id: str, user_id: Optional[str] = None) -> bool:
     pass
 
   @abstractmethod
   async def update_status(
     self,
     server_id: str,
-    user_id: str,
+    user_id: Optional[str],
     status: str,
   ) -> Optional[Dict[str, Any]]:
     pass

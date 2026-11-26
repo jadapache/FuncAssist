@@ -1,4 +1,4 @@
-"""Jira / Atlassian OAuth 3LO + optional PAT adapter."""
+"""Jira / Atlassian OAuth 3LO adapter. Connections are personal: one per user, read-only scopes."""
 
 from __future__ import annotations
 
@@ -12,11 +12,8 @@ import httpx
 
 from app.core.integration_config import get_jira_oauth_config
 from app.core.storage import (
-  delete_connection,
   delete_user_integration,
-  load_connection,
   load_user_integration,
-  save_connection,
   save_user_integration,
 )
 from app.integrations.base import (
@@ -141,18 +138,27 @@ class JiraIntegration(Integration):
   def _is_connected(self, data: dict | None) -> bool:
     if not data:
       return False
-    if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
-      return bool(data.get("pat_token") and data.get("account_email") and data.get("site_url"))
     if data.get("auth_method") == AuthMethod.OAUTH.value:
       return bool(data.get("access_token") and data.get("cloud_id"))
     return False
 
   def _resolve_connection_data(self, user_id: str | None = None) -> dict[str, Any] | None:
-    if user_id:
-      personal = load_user_integration(user_id, self.id)
-      if personal:
-        return personal
-    return load_connection(self.id)
+    """The user's own connection. There is no organization-level Jira connection to fall back to."""
+    if not user_id:
+      return None
+    return load_user_integration(user_id, self.id) or None
+
+  @staticmethod
+  def user_id_from_state(state: str | None) -> str | None:
+    """The user a pending OAuth state belongs to (the state is `user::timestamp::nonce`)."""
+    parts = (state or "").split("::", 2)
+    return parts[0] if len(parts) == 3 and parts[0] else None
+
+  @staticmethod
+  def _require_user(user_id: str | None) -> str:
+    if not user_id:
+      raise ValueError("Jira connections are personal: a user is required.")
+    return user_id
 
   def get_info(self, user_id: str | None = None) -> IntegrationInfo:
     data = self._resolve_connection_data(user_id)
@@ -164,7 +170,7 @@ class JiraIntegration(Integration):
         name=self.name,
         description=self.description,
         status=ConnectionStatus.NOT_CONNECTED,
-        auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
+        auth_methods=[AuthMethod.OAUTH],
         capabilities=self.get_capabilities(),
         oauth_configured=oauth_configured,
       )
@@ -175,7 +181,7 @@ class JiraIntegration(Integration):
       name=self.name,
       description=self.description,
       status=ConnectionStatus.CONNECTED,
-      auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
+      auth_methods=[AuthMethod.OAUTH],
       capabilities=self.get_capabilities(),
       account_label=data.get("account_email") or data.get("account_label"),
       workspace_label=data.get("site_url") or data.get("workspace_label"),
@@ -197,22 +203,15 @@ class JiraIntegration(Integration):
         "or set JIRA_CLIENT_ID and JIRA_CLIENT_SECRET in .env"
       )
 
+    user_id = self._require_user(user_id)
     raw_state = secrets.token_urlsafe(24)
-    state = f"{user_id}::{int(time.time())}::{raw_state}" if user_id else raw_state
-    now = time.time()
-    if user_id:
-      save_user_integration(user_id, self.id, {
-        "oauth_state": state,
-        "oauth_user_id": user_id,
-        "oauth_started_at": now,
-        "status": "pending_oauth",
-      })
-    else:
-      pending = load_connection(self.id) or {}
-      pending["oauth_state"] = state
-      pending["oauth_user_id"] = user_id
-      pending["oauth_started_at"] = now
-      save_connection(self.id, pending)
+    state = f"{user_id}::{int(time.time())}::{raw_state}"
+    save_user_integration(user_id, self.id, {
+      "oauth_state": state,
+      "oauth_user_id": user_id,
+      "oauth_started_at": time.time(),
+      "status": "pending_oauth",
+    })
 
     params = {
       "audience": "api.atlassian.com",
@@ -233,32 +232,26 @@ class JiraIntegration(Integration):
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
     oauth = get_jira_oauth_config()
 
-    user_id = None
-    if "::" in state:
-      try:
-        parts = state.split("::", 2)
-        user_id = parts[0]
-        state_ts = int(parts[1])
-        # Enforce 10-minute state expiration window
-        if time.time() - state_ts > 600:
-          raise ValueError("OAuth authorization request has expired. Please try connecting again.")
-      except ValueError:
-        raise
-      except Exception:
-        user_id = None
+    parts = state.split("::", 2)
+    if len(parts) != 3 or not parts[0]:
+      raise ValueError("Invalid OAuth state. Restart the Jira connection flow.")
+    user_id = parts[0]
+    try:
+      state_ts = int(parts[1])
+    except ValueError as exc:
+      raise ValueError("Invalid OAuth state. Restart the Jira connection flow.") from exc
+    # Enforce 10-minute state expiration window
+    if time.time() - state_ts > 600:
+      raise ValueError("OAuth authorization request has expired. Please try connecting again.")
 
-    pending = (load_user_integration(user_id, self.id) if user_id else None) or load_connection(self.id) or {}
+    pending = load_user_integration(user_id, self.id) or {}
     expected = pending.get("oauth_state")
     if not expected or expected != state:
       raise ValueError("Invalid OAuth state. Restart the Jira connection flow.")
 
     # Immediately consume the state to prevent replay attacks
-    if user_id:
-      pending["oauth_state"] = None
-      save_user_integration(user_id, self.id, pending)
-    else:
-      pending["oauth_state"] = None
-      save_connection(self.id, pending)
+    pending["oauth_state"] = None
+    save_user_integration(user_id, self.id, pending)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
       token_response = await client.post(
@@ -308,55 +301,12 @@ class JiraIntegration(Integration):
         {"id": r.get("id"), "name": r.get("name"), "url": r.get("url")} for r in resources
       ],
     }
-    user_id = pending.get("oauth_user_id")
-    if not user_id and "::" in state:
-      try:
-        user_id = state.split("::", 2)[0]
-      except Exception:
-        user_id = None
-
-    if user_id:
-      save_user_integration(user_id, self.id, payload)
-    else:
-      save_connection(self.id, payload)
-
+    save_user_integration(user_id, self.id, payload)
     await self.auto_select_projects_from_url(site.get("url") or "", user_id=user_id)
     return self.get_info(user_id=user_id)
 
-  async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
-    email = kwargs.get("email") or kwargs.get("account_email")
-    base_url = (kwargs.get("base_url") or kwargs.get("site_url") or "").rstrip("/")
-    if not token or not email or not base_url:
-      raise ValueError("PAT connection requires token, email, and base_url (e.g. https://company.atlassian.net)")
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-      response = await client.get(
-        f"{base_url}/rest/api/3/myself",
-        auth=(email, token),
-        headers={"Accept": "application/json"},
-      )
-      if response.status_code >= 400:
-        raise ValueError(f"Jira PAT authentication failed ({response.status_code})")
-      me = response.json()
-
-    payload = {
-      "auth_method": AuthMethod.PERSONAL_ACCESS_TOKEN.value,
-      "pat_token": token,
-      "account_email": email,
-      "account_name": me.get("displayName"),
-      "account_label": email,
-      "site_url": base_url,
-      "workspace_label": base_url,
-      "site_name": base_url.replace("https://", "").replace("http://", ""),
-    }
-    save_connection(self.id, payload)
-    await self.auto_select_projects_from_url(base_url)
-    return self.get_info()
-
   async def disconnect(self, user_id: str | None = None) -> None:
-    if user_id:
-      delete_user_integration(user_id, self.id)
-    delete_connection(self.id)
+    delete_user_integration(self._require_user(user_id), self.id)
 
   def selected_project_keys(self, user_id: str | None = None) -> list[str]:
     data = self._resolve_connection_data(user_id) or {}
@@ -368,10 +318,7 @@ class JiraIntegration(Integration):
       raise ValueError("Jira is not connected.")
     cleaned = [key.strip().upper() for key in project_keys if key and key.strip()]
     data["selected_project_keys"] = cleaned
-    if user_id:
-      save_user_integration(user_id, self.id, data)
-    else:
-      save_connection(self.id, data)
+    save_user_integration(self._require_user(user_id), self.id, data)
     return self.get_info(user_id=user_id)
 
   async def auto_select_projects_from_url(self, url: str, user_id: str | None = None) -> None:
@@ -389,10 +336,7 @@ class JiraIntegration(Integration):
       if match and match.get("key"):
         data = self._resolve_connection_data(user_id) or {}
         data["selected_project_keys"] = [str(match["key"]).upper()]
-        if user_id:
-          save_user_integration(user_id, self.id, data)
-        else:
-          save_connection(self.id, data)
+        save_user_integration(self._require_user(user_id), self.id, data)
     except Exception:
       return
 
@@ -409,8 +353,6 @@ class JiraIntegration(Integration):
     data = self._resolve_connection_data(user_id)
     if not data:
       return False
-    if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
-      return bool(data.get("pat_token") and data.get("account_email") and data.get("site_url"))
     if data.get("auth_method") == AuthMethod.OAUTH.value:
       if data.get("refresh_token") or data.get("access_token"):
         await self._ensure_fresh_oauth_token(data, user_id=user_id)
@@ -423,21 +365,6 @@ class JiraIntegration(Integration):
       return TestConnectionResult(ok=False, message="Jira is not connected.")
 
     try:
-      if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-          response = await client.get(
-            f"{data['site_url']}/rest/api/3/myself",
-            auth=(data["account_email"], data["pat_token"]),
-            headers={"Accept": "application/json"},
-          )
-          response.raise_for_status()
-          me = response.json()
-        return TestConnectionResult(
-          ok=True,
-          message="Jira PAT connection is healthy.",
-          details={"account": me.get("displayName"), "email": data.get("account_email")},
-        )
-
       data = await self._ensure_fresh_oauth_token(data, user_id=user_id)
       cloud_id = data["cloud_id"]
       headers = {
@@ -490,10 +417,7 @@ class JiraIntegration(Integration):
     if tokens.get("refresh_token"):
       data["refresh_token"] = tokens["refresh_token"]
     data["expires_at"] = time.time() + int(tokens.get("expires_in", 3600)) - 60
-    if user_id:
-      save_user_integration(user_id, self.id, data)
-    else:
-      save_connection(self.id, data)
+    save_user_integration(self._require_user(user_id), self.id, data)
     return data
 
   async def _jira_get(self, path: str, params: dict[str, Any] | None = None, user_id: str | None = None) -> Any:
@@ -503,17 +427,6 @@ class JiraIntegration(Integration):
     data = self._resolve_connection_data(user_id)
     assert data is not None
     params = params or {}
-
-    if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
-      async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-          f"{data['site_url']}{path}",
-          auth=(data["account_email"], data["pat_token"]),
-          headers={"Accept": "application/json"},
-          params=params,
-        )
-        response.raise_for_status()
-        return response.json()
 
     data = await self._ensure_fresh_oauth_token(data, user_id=user_id)
     headers = {

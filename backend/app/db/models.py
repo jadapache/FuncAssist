@@ -433,10 +433,13 @@ class McpServerModel(Base):
   user = relationship("UserModel", foreign_keys=[user_id])
 
   def to_dict(self) -> Dict[str, Any]:
+    from app.integrations.mcp_policy import approved_names, normalize_tools
+
     try:
-      allowed_tools = json.loads(self.allowed_tools_json) if self.allowed_tools_json else []
+      tools = normalize_tools(json.loads(self.allowed_tools_json) if self.allowed_tools_json else [])
     except Exception:
-      allowed_tools = []
+      tools = []
+    allowed_tools = approved_names(tools)
     try:
       meta = json.loads(self.metadata_json) if self.metadata_json else {}
     except Exception:
@@ -451,6 +454,7 @@ class McpServerModel(Base):
       "transport_type": self.transport_type,
       "auth_type": self.auth_type,
       "status": self.status,
+      "tools": tools,
       "allowed_tools": allowed_tools,
       "metadata": meta,
       "created_at": self.created_at.isoformat() if self.created_at else None,

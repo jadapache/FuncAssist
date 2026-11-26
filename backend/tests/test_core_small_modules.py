@@ -387,11 +387,7 @@ def test_json_history_aliases():
 def oauth_env(monkeypatch):
   from app.core import integration_config as ic
   store: dict = {}
-  settings = SimpleNamespace(
-    jira_client_id="", jira_client_secret="", jira_redirect_uri="",
-    github_client_id="", github_client_secret="", github_redirect_uri="",
-    gitlab_client_id="", gitlab_client_secret="", gitlab_redirect_uri="", gitlab_base_url="",
-  )
+  settings = SimpleNamespace(jira_client_id="", jira_client_secret="", jira_redirect_uri="")
   monkeypatch.setattr(ic, "get_settings", lambda: settings)
   monkeypatch.setattr(ic, "load_app_settings", lambda: dict(store))
   monkeypatch.setattr(ic, "save_app_settings", lambda patch: store.update(patch))
@@ -403,39 +399,34 @@ def test_oauth_config_defaults_env_and_local(oauth_env):
   cfg = ic.get_jira_oauth_config()
   assert cfg["configured"] is False and cfg["source"] == "none"
   assert cfg["redirect_uri"].endswith("/jira/callback")
-  assert ic.get_gitlab_oauth_config()["base_url"] == "https://gitlab.com"
 
-  settings.github_client_id, settings.github_client_secret = "envid", "envsec"
-  gh = ic.get_github_oauth_config()
-  assert gh["configured"] and gh["source"] == "env" and gh["client_id"] == "envid"
+  settings.jira_client_id, settings.jira_client_secret = "envid", "envsec"
+  jira = ic.get_jira_oauth_config()
+  assert jira["configured"] and jira["source"] == "env" and jira["client_id"] == "envid"
 
-  store["github_oauth"] = {"client_id": " localid ", "client_secret": "s"}
-  gh = ic.get_github_oauth_config()
-  assert gh["client_id"] == "localid" and gh["source"] == "local"
+  store["jira_oauth"] = {"client_id": " localid ", "client_secret": "s"}
+  jira = ic.get_jira_oauth_config()
+  assert jira["client_id"] == "localid" and jira["source"] == "local"
 
-  settings.jira_client_id = "jenv"
-  assert ic.get_jira_oauth_config()["source"] == "env"
-  settings.gitlab_client_id = "glenv"
-  assert ic.get_gitlab_oauth_config()["source"] == "env"
+
+def test_only_jira_has_oauth_config(oauth_env):
+  ic, _, _ = oauth_env
+  for name in ("get_github_oauth_config", "get_gitlab_oauth_config", "save_github_oauth_config",
+               "save_gitlab_oauth_config", "get_github_oauth_public", "get_gitlab_oauth_public"):
+    assert not hasattr(ic, name)
 
 
 def test_oauth_public_masks_and_save(oauth_env):
   ic, store, settings = oauth_env
-  pub = ic.save_github_oauth_config(client_id=" abcdefghijkl ", client_secret=" sec ", redirect_uri=" http://r ")
-  assert store["github_oauth"] == {"client_id": "abcdefghijkl", "client_secret": "sec", "redirect_uri": "http://r"}
+  pub = ic.save_jira_oauth_config(client_id=" abcdefghijkl ", client_secret=" sec ", redirect_uri=" http://r ")
+  assert store["jira_oauth"] == {"client_id": "abcdefghijkl", "client_secret": "sec", "redirect_uri": "http://r"}
   assert pub["client_id"] == "abcdefgh…" and pub["client_secret_set"] and pub["configured"]
-  assert "base_url" not in pub
+  assert pub["scopes"] and "scope_guide" in pub
 
   # Blank secret keeps existing one.
-  ic.save_github_oauth_config(client_id="short", client_secret="  ")
-  assert store["github_oauth"]["client_secret"] == "sec"
-  assert ic.get_github_oauth_public()["client_id"] == "short"
-
-  pub = ic.save_gitlab_oauth_config(client_id="gl", client_secret="s", base_url="https://git.example.com/")
-  assert pub["base_url"] == "https://git.example.com" and store["gitlab_oauth"]["base_url"] == "https://git.example.com"
-
-  pub = ic.save_jira_oauth_config(client_id="jid", client_secret="js")
-  assert pub["configured"] and pub["scopes"] and "scope_guide" in pub
+  ic.save_jira_oauth_config(client_id="short", client_secret="  ")
+  assert store["jira_oauth"]["client_secret"] == "sec"
+  assert ic.get_jira_oauth_public()["client_id"] == "short"
 
 
 # ---------------------------------------------------------------- document agent validator

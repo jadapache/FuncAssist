@@ -5,21 +5,22 @@ import { useIntegrationsManager } from '../hooks/useIntegrationsManager'
 import { useToast } from '../../../context/ToastContext'
 
 export type SourceCodeIntegrationsPanelProps = {
+  isAdmin?: boolean
   integrationsManager?: ReturnType<typeof useIntegrationsManager>
 }
 
 export const SourceCodeIntegrationsPanel = ({
   integrationsManager: externalManager,
+  isAdmin = false,
 }: SourceCodeIntegrationsPanelProps) => {
   const internalManager = useIntegrationsManager()
   const {
     loadingIntegrations,
     loadIntegrations,
     busyIntegrationId,
-    handleOAuthConnect,
     handleDisconnect,
     handleTest,
-    handlePatConnected,
+    handleConnected,
     github,
     gitlab,
   } = externalManager || internalManager
@@ -57,14 +58,10 @@ export const SourceCodeIntegrationsPanel = ({
             <IntegrationCard
               integration={github}
               busy={busyIntegrationId === 'github'}
-              onOAuth={() => void handleOAuthConnect('github')}
+              canManage={isAdmin}
               onDisconnect={() => void handleDisconnect('github')}
               onTest={() => void handleTest('github')}
-              onPatConnected={() => handlePatConnected('github', 'GitHub')}
-              onOAuthSaved={async () => {
-                await loadIntegrations()
-                toast.success('Credenciales OAuth de GitHub guardadas con éxito.')
-              }}
+              onConnected={() => handleConnected('github', 'GitHub')}
               onError={(err) => toast.error(err)}
             />
           ) : null}
@@ -73,14 +70,10 @@ export const SourceCodeIntegrationsPanel = ({
             <IntegrationCard
               integration={gitlab}
               busy={busyIntegrationId === 'gitlab'}
-              onOAuth={() => void handleOAuthConnect('gitlab')}
+              canManage={isAdmin}
               onDisconnect={() => void handleDisconnect('gitlab')}
               onTest={() => void handleTest('gitlab')}
-              onPatConnected={() => handlePatConnected('gitlab', 'GitLab')}
-              onOAuthSaved={async () => {
-                await loadIntegrations()
-                toast.success('Credenciales OAuth de GitLab guardadas con éxito.')
-              }}
+              onConnected={() => handleConnected('gitlab', 'GitLab')}
               onError={(err) => toast.error(err)}
             />
           ) : null}

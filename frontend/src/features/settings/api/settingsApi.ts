@@ -44,50 +44,6 @@ export const settingsApi = {
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
-  getGitHubOAuth: () =>
-    fetch(`${API_BASE}/api/settings/github-oauth`, {
-      headers: { ...getAuthHeaders() },
-    }).then((r) =>
-      handleResponse<{
-        configured: boolean
-        client_id_set: boolean
-        client_secret_set: boolean
-        redirect_uri: string
-      }>(r),
-    ),
-
-  saveGitHubOAuth: (payload: { client_id: string; client_secret?: string; redirect_uri?: string }) =>
-    fetch(`${API_BASE}/api/settings/github-oauth`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify(payload),
-    }).then((r) => handleResponse<Record<string, unknown>>(r)),
-
-  getGitLabOAuth: () =>
-    fetch(`${API_BASE}/api/settings/gitlab-oauth`, {
-      headers: { ...getAuthHeaders() },
-    }).then((r) =>
-      handleResponse<{
-        configured: boolean
-        client_id_set: boolean
-        client_secret_set: boolean
-        redirect_uri: string
-        base_url?: string
-      }>(r),
-    ),
-
-  saveGitLabOAuth: (payload: {
-    client_id: string
-    client_secret?: string
-    redirect_uri?: string
-    base_url?: string
-  }) =>
-    fetch(`${API_BASE}/api/settings/gitlab-oauth`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify(payload),
-    }).then((r) => handleResponse<Record<string, unknown>>(r)),
-
   health: () =>
     fetch(`${API_BASE}/api/health`, {
       headers: { ...getAuthHeaders() },

@@ -32,6 +32,10 @@ class Tool:
     schema: dict[str, Any]
     handler: Callable[[dict[str, Any], ToolContext], Awaitable[str]]
     read_only: bool = True
+    # True for a tool that acts outside the conversation (sends, changes or deletes something elsewhere).
+    # Such a tool never runs while the conversation holds external content: instructions hidden in that
+    # content must not be able to trigger it.
+    external_effect: bool = False
 
 
 _TOOL_REGISTRY: dict[str, Tool] = {}

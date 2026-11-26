@@ -44,6 +44,10 @@ export type WritingModelSectionProps = {
   setOpenaiKey: (k: string) => void
   claudeKey: string
   setClaudeKey: (k: string) => void
+  openrouterKey: string
+  setOpenRouterKey: (k: string) => void
+  deepseekKey: string
+  setDeepSeekKey: (k: string) => void
   showKey: boolean
   setShowKey: (show: boolean) => void
   savingAi: boolean
@@ -81,6 +85,10 @@ export const WritingModelSection = ({
   setOpenaiKey,
   claudeKey,
   setClaudeKey,
+  openrouterKey,
+  setOpenRouterKey,
+  deepseekKey,
+  setDeepSeekKey,
   showKey,
   setShowKey,
   savingAi,
@@ -155,6 +163,8 @@ export const WritingModelSection = ({
               <option value="gemini">Google Gemini (API)</option>
               <option value="openai">OpenAI (API)</option>
               <option value="claude">Claude (API)</option>
+              <option value="openrouter">OpenRouter (API)</option>
+              <option value="deepseek">DeepSeek (API)</option>
             </select>
           </div>
 
@@ -195,6 +205,10 @@ export const WritingModelSection = ({
               setOpenaiKey={setOpenaiKey}
               claudeKey={claudeKey}
               setClaudeKey={setClaudeKey}
+              openrouterKey={openrouterKey}
+              setOpenRouterKey={setOpenRouterKey}
+              deepseekKey={deepseekKey}
+              setDeepSeekKey={setDeepSeekKey}
               showKey={showKey}
               setShowKey={setShowKey}
             />

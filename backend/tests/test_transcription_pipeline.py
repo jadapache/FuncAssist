@@ -197,7 +197,7 @@ class TestHelpers:
 
     state = install_fakes(monkeypatch)
     p = make_pipeline("llmprov-0001")
-    p.settings = {"provider": "ollama"}
+    p.settings = {"provider": "webllm"}
     assert p._llm_cleanup_provider() is None
     p.settings = {}
 
@@ -212,6 +212,11 @@ class TestHelpers:
     cloud = type("P", (), {"id": "openai"})()
     monkeypatch.setattr(factory, "resolve_provider", lambda **kw: cloud)
     assert p._llm_cleanup_provider() is cloud
+    # Remote Ollama is a third-party endpoint: usable for cleanup, protected by the provider DLP.
+    p.settings = {"provider": "ollama_remote"}
+    remote = type("P", (), {"id": "ollama_remote"})()
+    monkeypatch.setattr(factory, "resolve_provider", lambda **kw: remote)
+    assert p._llm_cleanup_provider() is remote
 
 
 class TestRun:

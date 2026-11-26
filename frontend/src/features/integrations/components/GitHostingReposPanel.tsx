@@ -77,7 +77,7 @@ export const GitHostingReposPanel = ({
         <p className="text-sm text-[var(--color-ink-muted)]">Cargando repositorios...</p>
       ) : repos.length === 0 ? (
         <p className="text-sm text-[var(--color-ink-muted)]">
-          No se encontraron repositorios. Comprueba que tu token o aplicación OAuth tenga acceso a los repositorios de esta cuenta.
+          No se encontraron repositorios. Comprueba que la cuenta de servicio o la GitHub App tenga acceso a los repositorios de esta cuenta.
         </p>
       ) : (
         <div className="max-h-56 space-y-2 overflow-auto rounded-md border border-[var(--color-border)] bg-white p-3">

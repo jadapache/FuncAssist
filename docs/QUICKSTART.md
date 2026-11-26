@@ -38,29 +38,6 @@ Copia el template y edita si es necesario:
 cp .env.example .env
 ```
 
-Contenido por defecto en `.env`:
-
-```env
-# Backend
-FASTAPI_ENV=development
-PMQA_SECRET_KEY=         # (opcional) dejar vacío para usar keyring del sistema
-
-# Frontend
-VITE_API_BASE=http://127.0.0.1:8000
-
-# Integrations (opcional por ahora)
-JIRA_CLIENT_ID=
-JIRA_CLIENT_SECRET=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-
-# AI Provider (deja vacío por ahora, configurable desde UI)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-GROQ_API_KEY=
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-```
-
 > No necesitas credenciales aún. Puedes configurarlas desde la interfaz más adelante.
 
 ### 3. Instalar dependencias del Backend
@@ -158,7 +135,7 @@ curl http://127.0.0.1:8000/api/health
 Respuesta esperada:
 
 ```json
-{"status": "ok", "app": "QA Project MGMT"}
+{"status":"ok","app":"FuncAssist","version":"0.8.0","build":"latest"}
 ```
 
 ### 2. Generar Standup (sin contexto)
@@ -193,17 +170,34 @@ curl -X POST http://127.0.0.1:8000/api/knowledge/retrieve \
 ### Jira
 
 1. Navega a **Configuración** → **Integraciones** → **Jira**
-2. Elige **OAuth** o **PAT**:
-   - **OAuth**: Click en "Conectar" (abre Atlassian login)
-   - **PAT**: Genera token en Jira Cloud Settings → Security → API Tokens, pega en el formulario
-3. Click en "Conectar" y luego "Probar conexión"
+2. Click en "Conectar" (abre el inicio de sesión de Atlassian). La conexión es personal y de solo lectura.
+3. Luego "Probar conexión"
 
 ### GitHub
 
-1. **Configuración** → **Integraciones** → **GitHub**
-2. Genera PAT en GitHub → Settings → Developer Settings → Personal Access Tokens → Tokens (classic)
-3. Scopes mínimos: `repo`, `read:user`
-4. Pega en el formulario y "Conectar"
+1. Un administrador abre **Configuración** → **Integraciones** → **GitHub**
+2. Click en "Conectar" y autoriza con OAuth. La conexión queda disponible para todos los usuarios.
+3. No se admiten tokens de acceso personal (PAT). Está previsto sustituir esta conexión por una GitHub App de solo lectura, que aún no está disponible.
+
+### GitHub (GitHub App)
+
+1. En GitHub, ve a **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App** (en la organización, no en una cuenta personal). Desactiva *Webhook*.
+2. En **Permissions** concede **solo lectura** a: *Metadata* (obligatorio), *Contents* (obligatorio), *Pull requests* (obligatorio) e *Issues* (opcional). Ningún otro permiso, y nada de escritura ni administración.
+3. En **Where can this GitHub App be installed?** elige *Only on this account*.
+4. Crea la App y apunta su **App ID**. En **Private keys** pulsa *Generate a private key* y guarda el `.pem`.
+5. En **Install App**, instálala en la organización eligiendo **Only select repositories** y marca solo los repositorios que FuncAssist debe ver. Apunta el ID de instalación (el número al final de la URL de la instalación) si la App tiene varias.
+6. Un administrador abre **Configuración** → **Integraciones** → **GitHub**, pega el App ID, la clave privada (el contenido completo del `.pem`) y, si hace falta, el ID de instalación. La conexión se rechaza si la App tiene permisos de escritura o de más.
+7. Elige los repositorios que expone FuncAssist (la lista blanca del administrador; siempre dentro de lo que la instalación permite).
+8. **Rotación de la clave**: genera una clave nueva en la App, conéctala de nuevo (sustituye a la anterior) y elimina la antigua en GitHub.
+9. **Revocación**: desinstala la App o elimina su clave en GitHub y pulsa **Desconectar** en la integración. Si alguien amplía los permisos de la App más tarde, **Probar conexión** lo detecta y lo rechaza.
+
+### GitLab (cuenta de servicio)
+
+1. En GitLab, crea un **token de acceso de proyecto o de grupo** (o una cuenta de servicio) con rol **Reporter** y solo estos permisos: `read_api` (obligatorio), `read_repository` y `read_user`. Ponle una fecha de caducidad.
+2. Un administrador abre **Configuración** → **Integraciones** → **GitLab**, pega el token y, si tu GitLab es propio, su URL (debe ser `https`).
+3. Antes de guardarlo se comprueba que el token esté activo, no haya caducado y no tenga permisos de escritura; si los tiene, se rechaza. Después elige los proyectos que quedarán disponibles: solo esos se consultan.
+4. **Rotación**: crea un token nuevo con los mismos permisos, conéctalo (sustituye al anterior) y revoca el antiguo en GitLab. La conexión avisa cuando el token está a menos de 14 días de caducar.
+5. **Revocación**: revoca el token en GitLab y pulsa **Desconectar** en la integración. Si alguien amplía sus permisos más tarde, **Probar conexión** lo detecta y lo rechaza.
 
 ### Ollama (Local, Recomendado para Desarrollo)
 
@@ -276,14 +270,14 @@ LOGLEVEL=DEBUG python -m uvicorn app.main:app --reload
 
 ## 🐛 Troubleshooting Rápido
 
-### "Port 8000 already in use"
+### "Port 6728 already in use"
 
 ```bash
 # Linux/Mac
 lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill -9
 
 # Windows PowerShell
-Get-Process -Id (Get-NetTCPConnection -LocalPort 8000).OwningProcess | Stop-Process -Force
+Get-Process -Id (Get-NetTCPConnection -LocalPort 6728).OwningProcess | Stop-Process -Force
 ```
 
 Luego re-inicia el backend.

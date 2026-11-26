@@ -101,7 +101,7 @@ FuncAssist/
 │   │   ├── core/           # Settings, security, secrets (Fernet), storage
 │   │   ├── db/             # Repository pattern, interfaces, SQLAlchemy ORM, PostgreSQL
 │   │   ├── features/       # Servicios (standup, mejoras funcionales)
-│   │   ├── integrations/   # Adaptadores (Jira OAuth/PAT, GitHub PAT, GitLab PAT)
+│   │   ├── integrations/   # Adaptadores (Jira OAuth personal, GitHub App y GitLab con cuenta de servicio)
 │   │   ├── models/         # Pydantic models (AI catalog)
 │   │   ├── schemas/        # Schemas de validación (user, chat, prd, test_plan)
 │   │   └── main.py         # Entry point
@@ -163,9 +163,8 @@ FuncAssist/
 
 ### 🔌 Integraciones Desacopladas
 
-- **Jira**: OAuth 2.0 (Atlassian 3LO) + Personal Access Token (PAT)
-- **GitHub**: PAT con selección de repositorios
-- **GitLab**: PAT con inspección de proyectos
+- **Jira**: OAuth 2.0 (Atlassian 3LO) personal, de solo lectura; cada usuario vincula su cuenta y solo ve su información
+- **GitHub** y **GitLab**: conexión de organización que habilita el administrador, con selección de repositorios. No se admiten tokens de acceso personal (PAT); está prevista su sustitución por cuentas de servicio de solo lectura
 - Sincronización automática de caché sin bloqueos
 
 ### 🤖 Motor de IA Multiproveedor
@@ -226,5 +225,5 @@ FuncAssist utiliza una arquitectura **Client-First** para garantizar privacidad,
 
 - **Redaccion y Chat Local:** Ejecutado en el navegador mediante WebLLM y WebGPU (`@mlc-ai/web-llm`). Compatible con Llama 3.2 y Qwen 2.5, almacenados directamente en la cache del navegador.
 - **Transcripcion de Audio Local:** Ejecutada en el navegador mediante un Web Worker con `@huggingface/transformers` (Whisper ONNX sobre WebGPU/WASM).
-- **APIs Cloud y Ollama Remoto:** Proveedores externos como OpenAI, Anthropic, Google Gemini, Groq y Ollama Remoto (sobre HTTPS publico estricto) son canalizados a traves de la API de backend con LiteLLM.
+- **APIs Cloud y Ollama Remoto:** Proveedores externos como OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, DeepSeek y Ollama Remoto (sobre HTTPS publico estricto) son canalizados a traves de la API de backend con LiteLLM.
 - **Cero Pesos en Servidor:** El backend no ejecuta GGUF ni Whisper en Python. Los directorios legados en disco (`data/models/whisper`, `data/models/builtin`, `~/.cache/whisper`) pueden eliminarse con total seguridad.

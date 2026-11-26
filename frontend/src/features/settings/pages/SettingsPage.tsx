@@ -28,12 +28,6 @@ export const SettingsPage = () => {
     ) {
       return t as TabType
     }
-    if (
-      window.location.search.includes('github=') ||
-      window.location.search.includes('gitlab=')
-    ) {
-      return 'integrations'
-    }
     return 'knowledge'
   })
 
@@ -60,8 +54,6 @@ export const SettingsPage = () => {
       tab === 'approvals'
     ) {
       next = tab as TabType
-    } else if (searchParams.get('github') || searchParams.get('gitlab')) {
-      next = 'integrations'
     }
 
     if (next) {
@@ -179,7 +171,7 @@ export const SettingsPage = () => {
       {canSeeIntegrations && (
         <div className={activeTab === 'integrations' ? 'block' : 'hidden'}>
           {integrationsMounted && (
-            <SourceCodeIntegrationsPanel integrationsManager={integrationsManager} />
+            <SourceCodeIntegrationsPanel integrationsManager={integrationsManager} isAdmin={isAdmin} />
           )}
         </div>
       )}

@@ -45,3 +45,12 @@ def override_test_auth(request, monkeypatch):
   yield
   main_module.app.dependency_overrides.pop(get_current_user, None)
   main_module.app.dependency_overrides.pop(get_current_admin_user, None)
+
+
+@pytest.fixture(autouse=True)
+def isolated_security_log(tmp_path, monkeypatch):
+  """Security decisions are logged to disk; tests must never write into the real data directory."""
+  from app.ai import logging as ai_logging
+
+  monkeypatch.setattr(ai_logging, "SECURITY_DIR", tmp_path / "security-log")
+  yield

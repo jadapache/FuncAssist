@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, ExternalLink, Key, RefreshCw, Trash2, X } from 'lucide-react'
+import { CheckCircle2, ExternalLink, RefreshCw, Trash2, X } from 'lucide-react'
 import { IntegrationLogo } from './IntegrationLogo'
 import { JiraProjectsPanel } from '../../../integrations/components/JiraProjectsPanel'
 import { GitHostingReposPanel } from '../../../integrations/components/GitHostingReposPanel'
@@ -13,7 +13,6 @@ interface IntegrationConfigModalProps {
   onClose: () => void
   onRefresh: () => Promise<void>
   onConnectOAuth: (id: string) => Promise<void>
-  onConnectPat: (id: string, token: string, email?: string, url?: string) => Promise<void>
   onDisconnect: (id: string) => Promise<void>
 }
 
@@ -23,14 +22,9 @@ export const IntegrationConfigModal = ({
   onClose,
   onRefresh,
   onConnectOAuth,
-  onConnectPat,
   onDisconnect,
 }: IntegrationConfigModalProps) => {
   const { toast } = useToast()
-  const [authMode, setAuthMode] = useState<'oauth' | 'pat'>('pat')
-  const [token, setToken] = useState('')
-  const [email, setEmail] = useState('')
-  const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
 
   if (!isOpen || !integration) return null
@@ -38,23 +32,6 @@ export const IntegrationConfigModal = ({
   const isConnected = integration.status === 'connected'
   const isJira = integration.id === 'jira'
   const isGit = integration.id === 'github' || integration.id === 'gitlab'
-
-  const handleConnectPat = async () => {
-    if (!token.trim()) {
-      toast.warning('Ingresa el token de acceso personal.')
-      return
-    }
-    setBusy(true)
-    try {
-      await onConnectPat(integration.id, token.trim(), email.trim() || undefined, url.trim() || undefined)
-      setToken('')
-      setEmail('')
-      setUrl('')
-      await onRefresh()
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const handleTest = async () => {
     setBusy(true)
@@ -156,94 +133,29 @@ export const IntegrationConfigModal = ({
         ) : (
           /* Connection setup form */
           <div className="space-y-4">
-            <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200/70">
-              <button
-                type="button"
-                onClick={() => setAuthMode('pat')}
-                className={`flex-1 rounded-lg py-1.5 text-xs font-bold transition cursor-pointer ${
-                  authMode === 'pat' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Personal Access Token (PAT)
-              </button>
-              <button
-                type="button"
-                onClick={() => setAuthMode('oauth')}
-                className={`flex-1 rounded-lg py-1.5 text-xs font-bold transition cursor-pointer ${
-                  authMode === 'oauth' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                OAuth 2.0
-              </button>
-            </div>
-
-            {authMode === 'oauth' ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+              {isGit ? (
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Conéctate directamente autorizando a FuncAssist a través de la interfaz web de {integration.name}.
+                  {integration.name} se conecta con una cuenta de servicio de solo lectura. Un administrador la configura en
+                  Ajustes → Integraciones.
                 </p>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onConnectOAuth(integration.id)}
-                  className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-xs transition"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  <span>Conectar con {integration.name} (OAuth)</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700">Token de Acceso (PAT)</label>
-                  <div className="relative mt-1">
-                    <Key className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input
-                      type="password"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      placeholder="Pega aquí tu Personal Access Token..."
-                      className="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                </div>
-
-                {isJira && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700">Correo Electrónico (Atlassian Account)</label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="tu.correo@empresa.com"
-                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700">
-                    URL Base / Instancia ({isJira ? 'Opcional si usas cloud' : 'Opcional si usas cloud'})
-                  </label>
-                  <input
-                    type="url"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder={isJira ? 'https://tu-organizacion.atlassian.net' : 'https://git.mi-empresa.com'}
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  disabled={busy || !token.trim()}
-                  onClick={handleConnectPat}
-                  className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-xs transition"
-                >
-                  {busy ? 'Verificando y conectando...' : 'Guardar y Conectar PAT'}
-                </button>
-              </div>
-            )}
+              ) : (
+                <>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Conéctate directamente autorizando a FuncAssist a través de la interfaz web de {integration.name}.
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onConnectOAuth(integration.id)}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-xs transition"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span>Conectar con {integration.name} (OAuth)</span>
+              </button>
+                </>
+              )}
+            </div>
           </div>
         )}
 

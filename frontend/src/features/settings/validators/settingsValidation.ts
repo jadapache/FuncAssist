@@ -45,11 +45,13 @@ export type AiSettingsValidationParams = {
   geminiKey?: string
   openaiKey?: string
   claudeKey?: string
+  openrouterKey?: string
+  deepseekKey?: string
   isKeyConfigured?: boolean
 }
 
 export function validateAiSettingsPayload(params: AiSettingsValidationParams): ValidationResult {
-  const { provider, model, ollamaUrl, groqKey, geminiKey, openaiKey, claudeKey, isKeyConfigured } = params
+  const { provider, model, ollamaUrl, groqKey, geminiKey, openaiKey, claudeKey, openrouterKey, deepseekKey, isKeyConfigured } = params
 
   if (!model || !model.trim()) {
     return {
@@ -76,72 +78,19 @@ export function validateAiSettingsPayload(params: AiSettingsValidationParams): V
     }
   }
 
-  if (['groq', 'gemini', 'openai', 'claude'].includes(provider)) {
+  if (['groq', 'gemini', 'openai', 'claude', 'openrouter', 'deepseek'].includes(provider)) {
     let key = ''
     if (provider === 'groq') key = groqKey || ''
     if (provider === 'gemini') key = geminiKey || ''
     if (provider === 'openai') key = openaiKey || ''
     if (provider === 'claude') key = claudeKey || ''
+    if (provider === 'openrouter') key = openrouterKey || ''
+    if (provider === 'deepseek') key = deepseekKey || ''
 
     if (!isKeyConfigured && !key.trim()) {
       return {
         isValid: false,
         error: `Debes ingresar una clave de API válida para el proveedor ${provider.toUpperCase()}.`,
-      }
-    }
-  }
-
-  return { isValid: true }
-}
-
-export type PatValidationParams = {
-  token: string
-  email?: string
-  baseUrl?: string
-}
-
-export function validatePatPayload(integrationId: string, params: PatValidationParams): ValidationResult {
-  const { token, email, baseUrl } = params
-
-  if (!token || !token.trim()) {
-    return {
-      isValid: false,
-      error: 'El Personal Access Token (PAT) es obligatorio.',
-    }
-  }
-
-  if (integrationId === 'jira') {
-    if (!email || !email.trim()) {
-      return {
-        isValid: false,
-        error: 'El correo electrónico de Atlassian es obligatorio para Jira.',
-      }
-    }
-    if (!isValidEmail(email)) {
-      return {
-        isValid: false,
-        error: 'Ingresa un correo electrónico con formato válido para Atlassian.',
-      }
-    }
-    if (!baseUrl || !baseUrl.trim()) {
-      return {
-        isValid: false,
-        error: 'La URL del sitio Jira es obligatoria (ejemplo: https://mi-dominio.atlassian.net).',
-      }
-    }
-    if (!isValidHttpUrl(baseUrl.trim())) {
-      return {
-        isValid: false,
-        error: 'La URL de Jira debe incluir el protocolo https:// o http://.',
-      }
-    }
-  }
-
-  if (integrationId === 'gitlab' && baseUrl && baseUrl.trim()) {
-    if (!isValidHttpUrl(baseUrl.trim())) {
-      return {
-        isValid: false,
-        error: 'La URL personalizada de GitLab debe ser válida (ejemplo: https://gitlab.mi-empresa.com).',
       }
     }
   }

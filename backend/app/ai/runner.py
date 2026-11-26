@@ -31,6 +31,8 @@ from app.ai.policies import (
 )
 from app.ai.providers.base import AICompletion, AIMessage, AIProvider
 from app.ai.providers.factory import resolve_provider
+from app.ai.injection import begin_report, drain_report, prepare_untrusted, report_message
+from app.ai.untrusted import UNTRUSTED_NOTICE
 from app.ai.request_types import (
     DocumentFeatureRequest,
     GroundedFeatureRequest,
@@ -640,13 +642,17 @@ def _format_rule_for_intent(intent: str, extension: str = "docx") -> str:
     )
 
 
+# Every prompt that can receive external content tells the model how to treat it (see app.ai.untrusted).
+_UNTRUSTED_SUFFIX = "\n\n" + UNTRUSTED_NOTICE
+
+
 async def _build_base_system_prompt(intent: str, feature: str | None = None) -> str:
     """System prompt without the output-format rule (sections add their own instructions)."""
     target_feature = intent if intent and intent != "chat" else (feature or "chat")
     try:
         tmpl = await get_prompt(target_feature)
         if tmpl and tmpl.get("system"):
-            return tmpl["system"]
+            return tmpl["system"] + _UNTRUSTED_SUFFIX
     except Exception as exc:
         logger.info("No prompt template for %s (%s); using the default system prompt", target_feature, exc)
 
@@ -654,6 +660,7 @@ async def _build_base_system_prompt(intent: str, feature: str | None = None) -> 
         "Eres un asistente experto en Aseguramiento de Calidad (QA), Gestión de Requerimientos y Arquitectura de Software. "
         "Responde con claridad, didáctica y precisión técnica utilizando formato Markdown enriquecido. "
         "Utiliza el contexto de los documentos cargados, historial de chat y las imágenes adjuntas cuando estén presentes."
+        + _UNTRUSTED_SUFFIX
     )
 
 
@@ -757,7 +764,10 @@ async def _prepare_chat(cfg: AgenticChatConfig) -> _ChatPrep:
         used_sources = list(bundle.used_sources)
 
     if upload_chunks:
-        parts = [f"[{i+1}] (upload · {c.source_label}) {c.title}\n{c.text}" for i, c in enumerate(upload_chunks)]
+        parts = [
+            f"[{i+1}] " + prepare_untrusted("upload", c.source_label, f"{c.title}\n{c.text}", max_chars=None)
+            for i, c in enumerate(upload_chunks)
+        ]
         bundle_text = f"{bundle_text}\n\n" + "\n\n".join(parts)
         bundle_text = bundle_text.strip()
         if "uploads" not in used_sources:
@@ -765,7 +775,7 @@ async def _prepare_chat(cfg: AgenticChatConfig) -> _ChatPrep:
 
     if cfg.attached_docs:
         doc_parts = [
-            f"[Documento adjunto en chat: {d.get('filename', 'documento')}]\n{d.get('content', '')}"
+            prepare_untrusted("adjunto", d.get("filename", "documento"), d.get("content", ""), max_chars=None)
             for d in cfg.attached_docs
             if d.get("content")
         ]
@@ -1063,7 +1073,12 @@ async def run_agentic_chat_stream(cfg: AgenticChatConfig) -> AsyncIterator[str |
     prep: _ChatPrep | None = None
     try:
         yield AgentEvent(type="status", data={"message": "Preparando contexto...", "stage": "context"})
+        begin_report()
         prep = await _prepare_chat(cfg)
+        omitted = drain_report()
+        if omitted:
+            info["injection_detected"] = omitted
+            yield AgentEvent(type="status", data={"message": report_message(omitted), "stage": "security"})
 
         if _flag("AI_AGENT_MODE", "false"):
             if _supports_agent(prep.provider):

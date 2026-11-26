@@ -41,6 +41,8 @@ export type AISettings = {
   claude_api_key_set: boolean
   groq_api_key_set: boolean
   gemini_api_key_set?: boolean
+  openrouter_api_key_set?: boolean
+  deepseek_api_key_set?: boolean
   transcription_groq_api_key_set?: boolean
   transcription_openai_api_key_set?: boolean
   ollama_base_url: string
@@ -203,7 +205,27 @@ export type JiraConnectionStatus = {
   auth_mode?: string
 }
 
+export type McpToolInfo = {
+  name: string
+  read_only: boolean
+}
+
 export type McpServerInfo = {
+  id: string
+  name: string
+  description: string
+  status: string
+  tools: McpToolInfo[]
+}
+
+export type McpAdminTool = McpToolInfo & {
+  approved: boolean
+  fingerprint: string
+  approved_by?: string | null
+  approved_at?: string | null
+}
+
+export type McpAdminServer = {
   id: string
   name: string
   description: string
@@ -211,18 +233,27 @@ export type McpServerInfo = {
   transport_type: string
   auth_type: string
   status: string
+  tools: McpAdminTool[]
   allowed_tools: string[]
   created_at?: string | null
   updated_at?: string | null
 }
 
-export type McpServerPayload = {
+export type McpServerCreatePayload = {
   name: string
   endpoint_url: string
   description?: string
   transport_type?: string
   auth_type?: string
-  auth_secret?: string
-  allowed_tools?: string[]
+}
+
+export type McpServerUpdatePayload = Partial<McpServerCreatePayload> & { status?: string }
+
+export type McpToolApprovalInput = {
+  name: string
+  description?: string
+  input_schema?: Record<string, unknown>
+  read_only?: boolean
+  approved?: boolean
 }
 

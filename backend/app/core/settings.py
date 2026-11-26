@@ -124,14 +124,6 @@ class Settings(BaseSettings):
   jira_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/jira/callback"
   jira_oauth_extra_scopes: str = ""
 
-  github_client_id: str = ""
-  github_client_secret: str = ""
-  github_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/github/callback"
-
-  gitlab_client_id: str = ""
-  gitlab_client_secret: str = ""
-  gitlab_redirect_uri: str = "http://127.0.0.1:6728/api/integrations/gitlab/callback"
-  gitlab_base_url: str = "https://gitlab.com"
   cors_origins_str: str = ""
 
   # Database Connection

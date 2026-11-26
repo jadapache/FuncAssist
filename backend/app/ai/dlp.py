@@ -1,7 +1,7 @@
 """Data Loss Prevention for prompts sent to cloud AI providers.
 
 Policy (see docs/SECURITY_COMPLIANCE.md):
-- Content classified as CONFIDENTIAL is processed only by on-premise engines (Ollama / WebLLM).
+- Content classified as CONFIDENTIAL is processed only by on-premise engines (WebLLM). Remote Ollama is a third-party endpoint and is treated as cloud.
   Any message carrying a confidential marker is blocked before reaching a cloud provider.
 - INTERNAL content may go to cloud providers after sanitization: personal identifiers and
   secrets are replaced with placeholders so they never leave the organization.
@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from app.ai.errors import AIError
+from app.ai.untrusted import contains_envelope
 
 # Markers that classify a text as confidential (case-insensitive).
 CONFIDENTIAL_MARKERS = re.compile(
@@ -70,12 +71,13 @@ def _sanitize_content(content: Any) -> Any:
 def enforce_cloud_policy(messages: list[dict[str, Any]], provider_name: str) -> list[dict[str, Any]]:
   """Block confidential content and sanitize the rest before a cloud provider call."""
   for message in messages:
-    if message.get("role") == "system":
-      continue  # system prompts are application-authored templates
-    if any(is_confidential(text) for text in _iter_text_parts(message.get("content"))):
+    texts = list(_iter_text_parts(message.get("content")))
+    if message.get("role") == "system" and not any(contains_envelope(t) for t in texts):
+      continue  # system prompts are application-authored templates, unless external content ended up in one
+    if any(is_confidential(text) for text in texts):
       raise AIError(
         "confidential_data_blocked",
         f"El contenido está clasificado como confidencial y no puede enviarse a {provider_name}. "
-        "Usa un modelo local (Ollama o el modelo en el navegador).",
+        "Usa el modelo en el navegador.",
       )
   return [{**m, "content": _sanitize_content(m.get("content"))} for m in messages]

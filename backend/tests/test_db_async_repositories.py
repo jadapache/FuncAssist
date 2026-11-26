@@ -433,36 +433,54 @@ async def test_organization_repository_crud(session):
 
 async def test_mcp_server_repository_crud(session):
   repo = McpServerRepository(session)
-  s = await repo.create("u1", "  srv  ", " http://x/sse ", description=" d ", allowed_tools=["a"])
+  tool = {"name": "snapshot", "read_only": True, "approved": True, "fingerprint": "f1"}
+  s = await repo.create("u1", "  srv  ", " http://x/sse ", description=" d ", tools=[tool])
   assert s["name"] == "srv" and s["endpoint_url"] == "http://x/sse" and s["description"] == "d"
-  assert s["status"] == "configured" and s["allowed_tools"] == ["a"]
+  assert s["status"] == "configured" and s["allowed_tools"] == ["snapshot"]
+  assert s["tools"][0]["fingerprint"] == "f1" and s["tools"][0]["read_only"] is True
 
   bare = await repo.create("u1", "b", "http://y")
-  assert bare["description"] == "" and bare["allowed_tools"] == []
+  assert bare["description"] == "" and bare["allowed_tools"] == [] and bare["tools"] == []
 
   assert (await repo.get_by_id(s["id"], user_id="u1"))["id"] == s["id"]
   assert await repo.get_by_id(s["id"], user_id="u2") is None
   assert (await repo.get_by_id(s["id"]))["id"] == s["id"]
   assert len(await repo.list_by_user("u1")) == 2
   assert await repo.list_by_user("u2") == []
+  assert {x["id"] for x in await repo.list_all()} == {s["id"], bare["id"]}
 
   upd = await repo.update(s["id"], "u1", {
     "name": " n2 ", "description": " d2 ", "endpoint_url": " http://z ",
-    "transport_type": "http", "auth_type": "bearer", "allowed_tools": ["b", "c"],
+    "transport_type": "http", "auth_type": "bearer",
+    "tools": [{"name": "b", "approved": True, "fingerprint": "x"}, {"name": "c"}, "legacy"],
     "status": None,
   })
   assert upd["name"] == "n2" and upd["description"] == "d2" and upd["endpoint_url"] == "http://z"
-  assert upd["transport_type"] == "http" and upd["auth_type"] == "bearer"
-  assert upd["allowed_tools"] == ["b", "c"] and upd["status"] == "configured"
+  assert upd["transport_type"] == "http" and upd["auth_type"] == "bearer" and upd["status"] == "configured"
+  # only tools an administrator approved (with a pinned fingerprint) count as allowed
+  assert upd["allowed_tools"] == ["b"]
+  assert [t["name"] for t in upd["tools"]] == ["b", "c", "legacy"]
   assert await repo.update(s["id"], "u2", {"name": "hack"}) is None
 
   assert (await repo.update_status(s["id"], "u1", "connected"))["status"] == "connected"
 
+  # administrators manage every server regardless of who registered it
+  assert (await repo.update(s["id"], None, {"name": "by-admin"}))["name"] == "by-admin"
+  assert (await repo.update_status(s["id"], None, "error"))["status"] == "error"
+  assert await repo.update("missing", None, {"name": "x"}) is None
+
   assert await repo.delete(s["id"], "u2") is False
   assert await repo.delete(s["id"], "u1") is True
+  assert await repo.delete(bare["id"]) is True
   assert await repo.get_by_id(s["id"]) is None
+  assert await repo.list_all() == []
 
 
+async def test_mcp_server_legacy_tool_names_authorize_nothing(session):
+  repo = McpServerRepository(session)
+  s = await repo.create("u1", "old", "http://x", tools=["a", "b"])  # bare names, as stored before tool approvals existed
+  assert s["allowed_tools"] == []
+  assert [(t["name"], t["approved"]) for t in s["tools"]] == [("a", False), ("b", False)]
 
 
 # ---------------------------------------------------------------------------

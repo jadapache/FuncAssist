@@ -28,6 +28,8 @@ class AISettingsUpdate(BaseModel):
     claude_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    deepseek_api_key: Optional[str] = None
     transcription_groq_api_key: Optional[str] = None
     transcription_openai_api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
@@ -152,6 +154,8 @@ async def get_settings_endpoint(
         "claude_api_key_set": bool(config.get("claude_api_key") or os.getenv("ANTHROPIC_API_KEY")),
         "groq_api_key_set": bool(config.get("groq_api_key") or os.getenv("GROQ_API_KEY")),
         "gemini_api_key_set": bool(config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")),
+        "openrouter_api_key_set": bool(config.get("openrouter_api_key") or os.getenv("OPENROUTER_API_KEY")),
+        "deepseek_api_key_set": bool(config.get("deepseek_api_key") or os.getenv("DEEPSEEK_API_KEY")),
         "transcription_groq_api_key_set": bool(
             config.get("transcription_groq_api_key") or config.get("groq_api_key") or os.getenv("GROQ_API_KEY")
         ),

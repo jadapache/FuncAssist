@@ -45,6 +45,8 @@ export function useAiSettingsManager() {
   const [geminiKey, setGeminiKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
   const [claudeKey, setClaudeKey] = useState('')
+  const [openrouterKey, setOpenRouterKey] = useState('')
+  const [deepseekKey, setDeepSeekKey] = useState('')
   const [ollamaUrl, setOllamaUrl] = useState('')
   const [showKey, setShowKey] = useState(false)
 
@@ -152,6 +154,8 @@ export function useAiSettingsManager() {
     if (p === 'gemini') return Boolean(ai?.gemini_api_key_set)
     if (p === 'openai') return Boolean(ai?.openai_api_key_set)
     if (p === 'claude') return Boolean(ai?.claude_api_key_set)
+    if (p === 'openrouter') return Boolean(ai?.openrouter_api_key_set)
+    if (p === 'deepseek') return Boolean(ai?.deepseek_api_key_set)
     return true
   }
 
@@ -166,6 +170,8 @@ export function useAiSettingsManager() {
       geminiKey,
       openaiKey,
       claudeKey,
+      openrouterKey,
+      deepseekKey,
       isKeyConfigured: checkIsKeyConfigured(provider),
     })
 
@@ -197,6 +203,8 @@ export function useAiSettingsManager() {
     if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim()
     if (openaiKey.trim()) payload.openai_api_key = openaiKey.trim()
     if (claudeKey.trim()) payload.claude_api_key = claudeKey.trim()
+    if (openrouterKey.trim()) payload.openrouter_api_key = openrouterKey.trim()
+    if (deepseekKey.trim()) payload.deepseek_api_key = deepseekKey.trim()
 
     try {
       const updated = await api.updateAiSettings(payload)
@@ -210,6 +218,8 @@ export function useAiSettingsManager() {
       setGeminiKey('')
       setOpenaiKey('')
       setClaudeKey('')
+      setOpenRouterKey('')
+      setDeepSeekKey('')
       toast.success('Configuración guardada exitosamente.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar la configuración.')
@@ -227,6 +237,8 @@ export function useAiSettingsManager() {
       geminiKey,
       openaiKey,
       claudeKey,
+      openrouterKey,
+      deepseekKey,
       isKeyConfigured: checkIsKeyConfigured(provider),
     })
 
@@ -267,6 +279,8 @@ export function useAiSettingsManager() {
     if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim()
     if (openaiKey.trim()) payload.openai_api_key = openaiKey.trim()
     if (claudeKey.trim()) payload.claude_api_key = claudeKey.trim()
+    if (openrouterKey.trim()) payload.openrouter_api_key = openrouterKey.trim()
+    if (deepseekKey.trim()) payload.deepseek_api_key = deepseekKey.trim()
 
     try {
       const res = await api.testAiConnection(payload)
@@ -356,6 +370,10 @@ export function useAiSettingsManager() {
     setOpenaiKey,
     claudeKey,
     setClaudeKey,
+    openrouterKey,
+    setOpenRouterKey,
+    deepseekKey,
+    setDeepSeekKey,
     showKey,
     setShowKey,
     savingAi,

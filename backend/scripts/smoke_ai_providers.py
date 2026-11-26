@@ -27,7 +27,7 @@ backend_root = Path(__file__).resolve().parent.parent
 if str(backend_root) not in sys.path:
   sys.path.insert(0, str(backend_root))
 
-DEFAULT_PROVIDERS = ("groq", "claude", "openai", "gemini")
+DEFAULT_PROVIDERS = ("groq", "claude", "openai", "gemini", "openrouter", "deepseek")
 PLAN_REQUEST = "Genera un plan de pruebas para el módulo de inicio de sesión de una aplicación web."
 TOOL_SCHEMA = {
   "type": "function",
@@ -52,7 +52,7 @@ class Report:
   def line(self, status: str, provider: str, check: str, detail: str = "") -> None:
     if status == "FAIL":
       self.failures += 1
-    print(f"[{status:<4}] {provider:<8} {check:<16} {detail}")
+    print(f"[{status:<4}] {provider:<10} {check:<16} {detail}")
 
 
 def check_catalog(provider: str, report: Report) -> None:

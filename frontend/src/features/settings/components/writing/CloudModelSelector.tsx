@@ -15,6 +15,10 @@ export interface CloudModelSelectorProps {
   setOpenaiKey: (k: string) => void
   claudeKey: string
   setClaudeKey: (k: string) => void
+  openrouterKey: string
+  setOpenRouterKey: (k: string) => void
+  deepseekKey: string
+  setDeepSeekKey: (k: string) => void
   showKey: boolean
   setShowKey: (show: boolean) => void
 }
@@ -33,6 +37,10 @@ export const CloudModelSelector = ({
   setOpenaiKey,
   claudeKey,
   setClaudeKey,
+  openrouterKey,
+  setOpenRouterKey,
+  deepseekKey,
+  setDeepSeekKey,
   showKey,
   setShowKey,
 }: CloudModelSelectorProps) => {
@@ -87,6 +95,30 @@ export const CloudModelSelector = ({
           setShowKey={setShowKey}
           hasSavedKey={Boolean(ai?.claude_api_key_set)}
           placeholder="sk-ant-..."
+        />
+      )}
+
+      {provider === 'openrouter' && (
+        <ApiKeyInput
+          label="Clave API"
+          value={openrouterKey}
+          onChange={setOpenRouterKey}
+          showKey={showKey}
+          setShowKey={setShowKey}
+          hasSavedKey={Boolean(ai?.openrouter_api_key_set)}
+          placeholder="sk-or-v1-..."
+        />
+      )}
+
+      {provider === 'deepseek' && (
+        <ApiKeyInput
+          label="Clave API"
+          value={deepseekKey}
+          onChange={setDeepSeekKey}
+          showKey={showKey}
+          setShowKey={setShowKey}
+          hasSavedKey={Boolean(ai?.deepseek_api_key_set)}
+          placeholder="sk-..."
         />
       )}
 
