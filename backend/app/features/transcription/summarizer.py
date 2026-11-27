@@ -49,6 +49,42 @@ def resolve_transcript_character_budget(provider_id: str) -> int:
   return 15_000
 
 
+def _head_lines(lines: List[str], budget: int) -> list[str]:
+  """Leading lines that fit the budget; a first line longer than the budget is cut."""
+  taken: list[str] = []
+  used = 0
+  for line in lines:
+    if used + len(line) + 1 > budget:
+      return taken or [line[:budget]]
+    taken.append(line)
+    used += len(line) + 1
+  return taken
+
+
+def _tail_lines(lines: List[str], budget: int) -> list[str]:
+  """Trailing lines that fit the budget, in their original order; a last line longer than the budget is cut."""
+  taken: list[str] = []
+  used = 0
+  for line in reversed(lines):
+    if used + len(line) + 1 > budget:
+      return taken or [line[-budget:]]
+    taken.insert(0, line)
+    used += len(line) + 1
+  return taken
+
+
+def _middle_sample(pool: List[str], budget: int) -> list[str]:
+  """About ten evenly spaced lines of the middle, as many as fit the budget."""
+  taken: list[str] = []
+  used = 0
+  for line in pool[:: max(1, len(pool) // 10)]:
+    if used + len(line) + 1 > budget:
+      break
+    taken.append(line)
+    used += len(line) + 1
+  return taken
+
+
 def condense_transcript_lines(lines: List[str], max_chars: int) -> str:
   if not lines:
     return ""
@@ -56,150 +92,93 @@ def condense_transcript_lines(lines: List[str], max_chars: int) -> str:
   if len(joined) <= max_chars:
     return joined
 
-  head_budget = int(max_chars * 0.30)
-  tail_budget = int(max_chars * 0.30)
-  mid_budget = max_chars - head_budget - tail_budget
+  edge_budget = int(max_chars * 0.30)
+  head = _head_lines(lines, edge_budget)
+  tail = _tail_lines(lines, edge_budget)
+  middle_start = len(head)
+  middle = _middle_sample(lines[middle_start:max(middle_start, len(lines) - len(tail))], max_chars - 2 * edge_budget)
 
-  head_lines: list[str] = []
-  head_chars = 0
-  for line in lines:
-    if head_chars + len(line) + 1 > head_budget:
-      if not head_lines:
-        head_lines.append(line[:head_budget])
-      break
-    head_lines.append(line)
-    head_chars += len(line) + 1
-
-  tail_lines: list[str] = []
-  tail_chars = 0
-  for line in reversed(lines):
-    if tail_chars + len(line) + 1 > tail_budget:
-      if not tail_lines:
-        tail_lines.insert(0, line[-tail_budget:])
-      break
-    tail_lines.insert(0, line)
-    tail_chars += len(line) + 1
-
-  mid_start = len(head_lines)
-  mid_end = max(mid_start, len(lines) - len(tail_lines))
-  mid_pool = lines[mid_start:mid_end]
-  mid_lines: list[str] = []
-  if mid_pool:
-    step = max(1, len(mid_pool) // 10)
-    sampled = mid_pool[::step]
-    mid_chars = 0
-    for line in sampled:
-      if mid_chars + len(line) + 1 > mid_budget:
-        break
-      mid_lines.append(line)
-      mid_chars += len(line) + 1
-
-  sections: list[str] = []
-  if head_lines:
-    sections.append("\n".join(head_lines))
-  if mid_lines:
-    sections.append("...\n" + "\n".join(mid_lines))
-  if tail_lines:
-    sections.append("...\n" + "\n".join(tail_lines))
-
-  result = "\n\n".join(sections).strip()
-  return result if result else joined[:max_chars]
+  sections = ["\n".join(head), "...\n" + "\n".join(middle) if middle else "", "...\n" + "\n".join(tail)]
+  result = "\n\n".join(section for section in sections if section).strip()
+  return result or joined[:max_chars]
 
 
-def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
-  participants: List[str] = []
-  topics: List[str] = []
-  decisions: List[str] = []
-  requirements: List[str] = []
-  action_items: List[str] = []
-  key_insights: List[str] = []
-  summary_paragraphs: List[str] = []
+# Section headers in the order they are tried; the first one found in a line decides the section.
+_SECTION_HEADERS = (
+  ("key_insights", ("key insight", "puntos clave", "conclusiones clave", "insights clave")),
+  ("summary", ("# summary", "## summary", "# resumen", "## resumen")),
+  ("participants", ("participante", "asistente", "participants")),
+  ("topics", ("tema", "temas tratados", "topics")),
+  ("decisions", ("decisión", "decisiones", "decisions", "acuerdos")),
+  ("requirements", ("requerimiento", "requerimientos", "requirements", "requisitos")),
+  ("action_items", ("compromiso", "compromisos", "acción", "acciones", "action items")),
+)
+_LIST_SECTIONS = ("key_insights", "participants", "topics", "decisions", "requirements", "action_items")
 
-  # Try parsing JSON if model returned codeblock
-  json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-  if json_match:
-    try:
-      parsed = json.loads(json_match.group(1))
-      return TranscriptionSummary(
-        summary_text=parsed.get("summary") or parsed.get("summary_text"),
-        key_insights=parsed.get("key_insights", []),
-        participants=parsed.get("participants", []),
-        topics=parsed.get("topics", []),
-        decisions=parsed.get("decisions", []),
-        requirements=parsed.get("requirements", []),
-        action_items=parsed.get("action_items", []),
-      )
-    except Exception:
-      pass
 
-  current_section: str = "summary"
-  lines = text.splitlines()
+def _header_section(lower_line: str) -> Optional[str]:
+  return next((section for section, headers in _SECTION_HEADERS if any(h in lower_line for h in headers)), None)
 
-  for line in lines:
+
+def _summary_from_json_block(text: str) -> Optional[TranscriptionSummary]:
+  """The summary a model returned as a fenced JSON object, or None when there is none or it is unusable."""
+  match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+  if not match:
+    return None
+  try:
+    parsed = json.loads(match.group(1))
+    return TranscriptionSummary(
+      summary_text=parsed.get("summary") or parsed.get("summary_text"),
+      **{name: parsed.get(name, []) for name in _LIST_SECTIONS},
+    )
+  except Exception:
+    return None
+
+
+def _read_sections(text: str) -> dict[str, List[str]]:
+  """Bullet items per section; a bullet outside the known sections counts as a key insight."""
+  items: dict[str, List[str]] = {name: [] for name in _LIST_SECTIONS}
+  current = "summary"
+  for line in text.splitlines():
     stripped = line.strip()
     if not stripped:
       continue
+    header = _header_section(stripped.lower())
+    if header:
+      current = header
+    elif _BULLET.match(stripped):
+      item = _BULLET.sub("", stripped).strip()
+      if item:
+        items[current if current in items else "key_insights"].append(item)
+  return items
 
-    lower = stripped.lower()
-    # Check section headers
-    if any(h in lower for h in ["key insight", "puntos clave", "conclusiones clave", "insights clave"]):
-      current_section = "key_insights"
-      continue
-    elif any(h in lower for h in ["# summary", "## summary", "# resumen", "## resumen"]):
-      current_section = "summary"
-      continue
-    elif any(h in lower for h in ["participante", "asistente", "participants"]):
-      current_section = "participants"
-      continue
-    elif any(h in lower for h in ["tema", "temas tratados", "topics"]):
-      current_section = "topics"
-      continue
-    elif any(h in lower for h in ["decisión", "decisiones", "decisions", "acuerdos"]):
-      current_section = "decisions"
-      continue
-    elif any(h in lower for h in ["requerimiento", "requerimientos", "requirements", "requisitos"]):
-      current_section = "requirements"
-      continue
-    elif any(h in lower for h in ["compromiso", "compromisos", "acción", "acciones", "action items"]):
-      current_section = "action_items"
-      continue
 
-    # Extract bullet points
-    if _BULLET.match(stripped):
-      item_text = _BULLET.sub("", stripped, count=1).strip()
-      if item_text:
-        if current_section == "key_insights":
-          key_insights.append(item_text)
-        elif current_section == "participants":
-          participants.append(item_text)
-        elif current_section == "topics":
-          topics.append(item_text)
-        elif current_section == "decisions":
-          decisions.append(item_text)
-        elif current_section == "requirements":
-          requirements.append(item_text)
-        elif current_section == "action_items":
-          action_items.append(item_text)
-        else:
-          key_insights.append(item_text)
-    else:
-      # Paragraph line
-      if current_section == "summary" and not stripped.startswith("#"):
-        summary_paragraphs.append(stripped)
+# What a summary shows for a section the model left empty.
+_SECTION_DEFAULTS = {
+  "key_insights": ["Reunión de levantamiento y acuerdos iniciales del proyecto."],
+  "participants": ["Participante 1", "Participante 2"],
+  "topics": ["Requerimientos funcionales"],
+  "decisions": ["Acuerdos de arquitectura y flujo funcional"],
+  "requirements": ["Requerimientos funcionales capturados en la transcripción"],
+  "action_items": ["Generar documento de Inventario (.xlsx) y Levantamiento (.docx)"],
+}
 
-  summary_str = text.strip() if text.strip() else ("\n\n".join(summary_paragraphs) if summary_paragraphs else None)
-  if not key_insights and topics:
-    key_insights = topics + decisions
 
-  return TranscriptionSummary(
-    summary_text=summary_str,
-    key_insights=key_insights if key_insights else ["Reunión de levantamiento y acuerdos iniciales del proyecto."],
-    participants=participants if participants else ["Participante 1", "Participante 2"],
-    topics=topics if topics else (key_insights[:3] if key_insights else ["Requerimientos funcionales"]),
-    decisions=decisions if decisions else ["Acuerdos de arquitectura y flujo funcional"],
-    requirements=requirements if requirements else ["Requerimientos funcionales capturados en la transcripción"],
-    action_items=action_items if action_items else ["Generar documento de Inventario (.xlsx) y Levantamiento (.docx)"],
-  )
+def _sections_with_defaults(items: dict[str, List[str]]) -> dict[str, List[str]]:
+  key_insights = items["key_insights"]
+  if not key_insights and items["topics"]:
+    key_insights = items["topics"] + items["decisions"]
+  filled = {name: items[name] or _SECTION_DEFAULTS[name] for name in _LIST_SECTIONS}
+  filled["key_insights"] = key_insights or _SECTION_DEFAULTS["key_insights"]
+  filled["topics"] = items["topics"] or key_insights[:3] or _SECTION_DEFAULTS["topics"]
+  return filled
+
+
+def parse_summary_markdown_or_json(text: str) -> TranscriptionSummary:
+  from_json = _summary_from_json_block(text)
+  if from_json:
+    return from_json
+  return TranscriptionSummary(summary_text=text.strip() or None, **_sections_with_defaults(_read_sections(text)))
 
 
 async def _fit_transcript(lines: List[str], max_chars: int, title: str, user_id: Optional[str]) -> str:

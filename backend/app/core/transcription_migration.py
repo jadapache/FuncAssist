@@ -35,6 +35,42 @@ COLUMNS: dict[str, tuple[str, str]] = {
 INDEX_NAME = "ix_transcriptions_user_id"
 
 
+def _take_lock(session, dialect: str) -> bool:
+  """PostgreSQL transaction advisory lock, so concurrent starts do not migrate at once."""
+  if dialect != "postgresql":
+    return False
+  try:
+    session.execute(text(f"SELECT pg_advisory_xact_lock({TRANSCRIPTION_MIGRATION_LOCK_ID});"))
+    return True
+  except Exception as lock_exc:
+    logger.debug("Advisory lock acquisition skipped or failed: %s", lock_exc)
+    return False
+
+
+def _add_column(session, dialect: str, name: str, pg_type: str, generic_type: str) -> None:
+  if dialect == "postgresql":
+    session.execute(text(f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS {name} {pg_type};"))
+  else:
+    session.execute(text(f"ALTER TABLE {TABLE} ADD COLUMN {name} {generic_type};"))
+
+
+def _add_missing(session, bind, dialect: str) -> list[str]:
+  inspector = inspect(bind)
+  if not inspector.has_table(TABLE):
+    logger.info("Table %s does not exist yet; nothing to migrate.", TABLE)
+    return []
+  existing = {col["name"] for col in inspector.get_columns(TABLE)}
+  added = [name for name in COLUMNS if name not in existing]
+  for name in added:
+    _add_column(session, dialect, name, *COLUMNS[name])
+  if dialect == "postgresql":
+    session.execute(text(f"CREATE INDEX IF NOT EXISTS {INDEX_NAME} ON {TABLE} (user_id);"))
+  session.commit()
+  if added:
+    logger.info("Added columns to %s: %s", TABLE, ", ".join(added))
+  return added
+
+
 def migrate_transcriptions_if_needed() -> list[str]:
   """Add the job/ownership columns when missing. Returns the columns that were added."""
   added: list[str] = []
@@ -42,32 +78,9 @@ def migrate_transcriptions_if_needed() -> list[str]:
     with get_sync_db() as session:
       bind = session.get_bind()
       dialect = bind.dialect.name
-      has_lock = False
-      if dialect == "postgresql":
-        try:
-          session.execute(text(f"SELECT pg_advisory_xact_lock({TRANSCRIPTION_MIGRATION_LOCK_ID});"))
-          has_lock = True
-        except Exception as lock_exc:
-          logger.debug("Advisory lock acquisition skipped or failed: %s", lock_exc)
+      has_lock = _take_lock(session, dialect)
       try:
-        inspector = inspect(bind)
-        if not inspector.has_table(TABLE):
-          logger.info("Table %s does not exist yet; nothing to migrate.", TABLE)
-          return added
-        existing = {col["name"] for col in inspector.get_columns(TABLE)}
-        for name, (pg_type, generic_type) in COLUMNS.items():
-          if name in existing:
-            continue
-          if dialect == "postgresql":
-            session.execute(text(f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS {name} {pg_type};"))
-          else:
-            session.execute(text(f"ALTER TABLE {TABLE} ADD COLUMN {name} {generic_type};"))
-          added.append(name)
-        if dialect == "postgresql":
-          session.execute(text(f"CREATE INDEX IF NOT EXISTS {INDEX_NAME} ON {TABLE} (user_id);"))
-        session.commit()
-        if added:
-          logger.info("Added columns to %s: %s", TABLE, ", ".join(added))
+        added = _add_missing(session, bind, dialect)
       finally:
         # The transaction lock is released by this transaction's commit/rollback. A session lock leaked
         # here: after commit, the unlock could run on another pooled connection and never release it.

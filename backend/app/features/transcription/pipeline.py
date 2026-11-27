@@ -157,7 +157,7 @@ class TranscriptionPipeline:
 
   def _vocabulary(self) -> str:
     parts = [self.options.vocabulary or "", self.settings.get("transcription_vocabulary") or ""]
-    return ". ".join(p.strip() for p in parts if p and p.strip())[:1000]
+    return ". ".join(part for part in (p.strip() for p in parts) if part)[:1000]
 
   # --- run -----------------------------------------------------------------------------------
 
@@ -243,13 +243,9 @@ class TranscriptionPipeline:
       plan = json.loads(plan_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
       return None
-    same = (
-      plan.get("version") == PLAN_VERSION
-      and plan.get("diarize") == bool(self.target and self.target.diarize)
-      and plan.get("provider") == (self.target.provider if self.target else None)
-      and plan.get("chunk_s") == config.chunk_seconds()
-    )
-    return plan if same else None
+    expected = {"version": PLAN_VERSION, "diarize": bool(self.target and self.target.diarize), "chunk_s": config.chunk_seconds()}
+    expected["provider"] = self.target.provider if self.target else None
+    return plan if all(plan.get(key) == value for key, value in expected.items()) else None
 
   @staticmethod
   def _chunks_from_plan(plan: dict[str, Any]) -> list[ChunkPlan]:
@@ -283,38 +279,24 @@ class TranscriptionPipeline:
     if previous:
       text = " ".join(s.get("text_raw", "") for s in previous.get("segments", []))
       tail, _ = RuleCleaner(self.language or "es", self._extra_fillers()).clean(text[-PROMPT_MAX_CHARS * 2 :])
-      budget = PROMPT_MAX_CHARS - len(vocabulary) - 2
-      tail = tail[-budget:] if budget > 0 else ""
+      tail = tail[-(PROMPT_MAX_CHARS - len(vocabulary) - 2):]  # the glossary is at most half the budget, so this is positive
     return ". ".join(p for p in (vocabulary.strip(" ."), tail.strip()) if p)
 
-  async def _transcribe(
-    self, client: SpeechClient, chunks: list[ChunkPlan], audio_wav: Path
-  ) -> tuple[dict[int, dict[str, Any]], Optional[str]]:
-    started = time.monotonic()
-    self.chunk_dir.mkdir(parents=True, exist_ok=True)
-    results: dict[int, dict[str, Any]] = {}
-    for chunk in chunks:
-      loaded = self._load_result(chunk)
-      if loaded is not None:
-        results[chunk.index] = loaded
-    total = sum(c.speech_s for c in chunks)
-    done = sum(c.speech_s for c in chunks if c.index in results)
-    self.reporter.set_audio_work(total, done)
-    await self._report_chunks(chunks, results)
+  def _finished_chunks(self, chunks: list[ChunkPlan]) -> dict[int, dict[str, Any]]:
+    """Results of earlier runs found on disk, so a retry only sends the chunks that did not finish."""
+    loaded = {chunk.index: self._load_result(chunk) for chunk in chunks}
+    return {index: result for index, result in loaded.items() if result is not None}
 
-    pending = [c for c in chunks if c.index not in results]
-    known: list[tuple[str, Path]] = []
+  async def _run_pending(
+    self,
+    client: SpeechClient,
+    pending: list[ChunkPlan],
+    audio_wav: Path,
+    results: dict[int, dict[str, Any]],
+    known: list[tuple[str, Path]],
+  ) -> None:
     assert self.target is not None
-    if self.target.diarize and pending:
-      first = chunks[0]
-      if first.index not in results:
-        results[first.index] = await self._run_chunk(client, first, audio_wav, results, [])
-        pending = [c for c in pending if c.index != first.index]
-      if pending:
-        known = await self._reference_clips(chunks[0], results[chunks[0].index], audio_wav)
-
     semaphore = asyncio.Semaphore(config.chunk_concurrency(self.target.provider))
-
     failed = asyncio.Event()
 
     async def _worker(chunk: ChunkPlan) -> None:
@@ -335,9 +317,30 @@ class TranscriptionPipeline:
     except BaseExceptionGroup as group_error:
       raise _first_error(group_error) from group_error
 
+  async def _transcribe(
+    self, client: SpeechClient, chunks: list[ChunkPlan], audio_wav: Path
+  ) -> tuple[dict[int, dict[str, Any]], Optional[str]]:
+    started = time.monotonic()
+    self.chunk_dir.mkdir(parents=True, exist_ok=True)
+    results = self._finished_chunks(chunks)
+    self.reporter.set_audio_work(sum(c.speech_s for c in chunks), sum(c.speech_s for c in chunks if c.index in results))
+    await self._report_chunks(chunks, results)
+
+    pending = [c for c in chunks if c.index not in results]
+    known: list[tuple[str, Path]] = []
+    assert self.target is not None
+    if self.target.diarize and pending:
+      # The first chunk goes alone: its speakers become the references that keep labels stable in the rest.
+      first = chunks[0]
+      if first.index not in results:
+        results[first.index] = await self._run_chunk(client, first, audio_wav, results, [])
+        pending = [c for c in pending if c.index != first.index]
+      if pending:
+        known = await self._reference_clips(first, results[first.index], audio_wav)
+
+    await self._run_pending(client, pending, audio_wav, results, known)
     self._timed("transcribing", started)
-    language = next((r.get("language") for r in results.values() if r.get("language")), None)
-    return results, language
+    return results, next((r.get("language") for r in results.values() if r.get("language")), None)
 
   async def _run_chunk(
     self,
@@ -371,14 +374,8 @@ class TranscriptionPipeline:
     total = self.metrics.get("chunks") or (len(chunks) if chunks else 0)
     done = len(results)
     message = f"Transcribiendo fragmento {min(done + 1, total)} de {total}…" if done < total else "Transcripción recibida."
-    await self.reporter.update(
-      "transcribing",
-      self.reporter.audio_fraction,
-      message,
-      chunks_done=done,
-      chunks_total=total,
-      preview=(preview[0].get("text_raw") if preview else self.reporter.snapshot.get("preview")),
-    )
+    shown = preview[0].get("text_raw") if preview else self.reporter.snapshot.get("preview")
+    await self.reporter.update("transcribing", self.reporter.audio_fraction, message, chunks_done=done, chunks_total=total, preview=shown)
 
   async def _reference_clips(self, first: ChunkPlan, result: dict[str, Any], audio_wav: Path) -> list[tuple[str, Path]]:
     mapper = SpeakerLabelMapper()
@@ -452,6 +449,40 @@ class TranscriptionPipeline:
       return None
     return None if getattr(provider, "id", "") in LOCAL_WRITING_PROVIDERS else provider
 
+  def _completed_fields(
+    self,
+    segments: list[dict[str, Any]],
+    speakers: dict[str, Any],
+    stats: CleanupStats,
+    duration: float,
+    trimmed: float,
+    language: Optional[str],
+  ) -> dict[str, Any]:
+    """What a finished job writes onto its record."""
+    target = self.target
+    return {
+      "segments": segments,
+      "speakers": speakers,
+      "diarization": "openai" if target and target.diarize else "none",
+      "language": language or self.language or "es",
+      "duration_seconds": round(duration, 3),
+      "text": full_text(segments),
+      "cleanup": stats.to_dict(self._stats_mode),
+      "silence_trimmed_s": round(trimmed, 1),
+      "status": "complete",
+      "model_info": target.label if target else "Whisper",
+      "provider": target.provider if target else None,
+      "model": target.model if target else None,
+      "job_options": self.options.to_dict(),
+      "source": "cloud",
+      "summary_status": "pending" if self.options.summarize else "skipped",
+      "summary_error": None,
+      "error": None,
+      "error_code": None,
+      "retryable": False,
+      "turn_gap_s": config.turn_gap_s(),
+    }
+
   async def _save(
     self,
     record: dict[str, Any],
@@ -471,34 +502,10 @@ class TranscriptionPipeline:
       seg["speaker"] = speakers.get(seg["speaker_id"], {}).get("name", "Participante 1")
       seg.setdefault("marked", False)
 
-    def _apply(current: dict[str, Any]) -> None:
-      current.update({
-        "segments": segments,
-        "speakers": speakers,
-        "diarization": "openai" if self.target and self.target.diarize else "none",
-        "language": language or self.language or "es",
-        "duration_seconds": round(duration, 3),
-        "text": full_text(segments),
-        "cleanup": stats.to_dict(self._stats_mode),
-        "silence_trimmed_s": round(trimmed, 1),
-        "status": "complete",
-        "model_info": self.target.label if self.target else "Whisper",
-        "provider": self.target.provider if self.target else None,
-        "model": self.target.model if self.target else None,
-        "job_options": self.options.to_dict(),
-        "source": "cloud",
-        "summary_status": "pending" if self.options.summarize else "skipped",
-        "summary_error": None,
-        "error": None,
-        "error_code": None,
-        "retryable": False,
-        "turn_gap_s": config.turn_gap_s(),
-      })
-
-    saved = await records.update_record(self.job_id, _apply)
+    fields = self._completed_fields(segments, speakers, stats, duration, trimmed, language)
+    saved = await records.update_record(self.job_id, lambda current: current.update(fields))
     if saved is None:
       raise TranscriptionJobError("internal", "La transcripción se eliminó durante el proceso.")
     self._timed("saving", started)
-    if self.target:
-      self.metrics["cost_estimate"] = self.target.estimate_cost(duration - trimmed)
+    self.metrics["cost_estimate"] = self.target.estimate_cost(duration - trimmed)
     return saved

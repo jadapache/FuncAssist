@@ -84,6 +84,27 @@ class JobManager:
 
   # --- run -------------------------------------------------------------------------------------
 
+  def _dequeue(self, job_id: str) -> None:
+    if job_id in self._queue:
+      self._queue.remove(job_id)
+
+  async def _leave_queue(self, job_id: str, reporter: ProgressReporter) -> None:
+    self._dequeue(job_id)
+    await self._refresh_queue_positions()
+    reporter.snapshot["queue_position"] = None
+
+  async def _complete(self, job_id: str, user_id: Optional[str], options: JobOptions, reporter: ProgressReporter, record: dict[str, Any]) -> None:
+    clear_error = {"error": None, "error_code": None, "retryable": False}
+    done = await reporter.update("complete", 1.0, "Transcripción completada.", summary_status=record.get("summary_status"), **clear_error)
+    await records.save_progress(job_id, done, finished=True)
+    if options.summarize:
+      await self._summarize(job_id, user_id, reporter, record)
+
+  async def _abandon_summary(self, job_id: str, reporter: ProgressReporter) -> None:
+    """Cancelled while summarising: the transcript is kept, only the summary is abandoned."""
+    await records.update_record(job_id, lambda r: r.update(summary_status="skipped"))
+    await reporter.update("complete", 1.0, "Transcripción completada; resumen cancelado.", summary_status="skipped")
+
   async def _run(self, job_id: str, user_id: Optional[str], options: JobOptions, reporter: ProgressReporter) -> None:
     started = time.monotonic()
     pipeline = TranscriptionPipeline(job_id, user_id, options, reporter)
@@ -91,27 +112,16 @@ class JobManager:
     error: Optional[TranscriptionJobError] = None
     try:
       async with self._sem():
-        if job_id in self._queue:
-          self._queue.remove(job_id)
-        await self._refresh_queue_positions()
-        reporter.snapshot["queue_position"] = None
+        await self._leave_queue(job_id, reporter)
         result = await pipeline.run()
       status = "complete"
-      done = await reporter.update(
-        "complete", 1.0, "Transcripción completada.", summary_status=result.record.get("summary_status"),
-        error=None, error_code=None, retryable=False,
-      )
-      await records.save_progress(job_id, done, finished=True)
-      if options.summarize:
-        await self._summarize(job_id, user_id, reporter, result.record)
+      await self._complete(job_id, user_id, options, reporter, result.record)
     except asyncio.CancelledError:
       if status == "complete":
-        # Cancelled while summarising: the transcript is kept, only the summary is abandoned.
-        await records.update_record(job_id, lambda r: r.update(summary_status="skipped"))
-        await reporter.update("complete", 1.0, "Transcripción completada; resumen cancelado.", summary_status="skipped")
+        await self._abandon_summary(job_id, reporter)
         return
-      error = TranscriptionJobError("interrupted" if self._shutting_down else "cancelled")
       status = "interrupted" if self._shutting_down else "cancelled"
+      error = TranscriptionJobError(status)
       await self._finish_failed(job_id, reporter, error, status)
       if status == "cancelled":
         storage.delete_chunks(job_id)
@@ -123,8 +133,7 @@ class JobManager:
       )
       await self._finish_failed(job_id, reporter, error, "failed")
     finally:
-      if job_id in self._queue:
-        self._queue.remove(job_id)
+      self._dequeue(job_id)
       self._reporters.pop(job_id, None)
       pipeline.metrics["stage_ms"]["total"] = int((time.monotonic() - started) * 1000)
       await metrics.log_job({
@@ -194,13 +203,31 @@ class JobManager:
       return True
     # Not running in this process (stale state): mark it cancelled directly.
     error = TranscriptionJobError("cancelled")
-    snapshot = {**(latest(job_id) or {"id": job_id, "media_id": job_id}), "stage": "cancelled", "status": "cancelled",
-                "error": error.user_message, "error_code": "cancelled", "retryable": False, "message": error.user_message}
+    snapshot = dict(latest(job_id) or {"id": job_id, "media_id": job_id})
+    snapshot["stage"] = snapshot["status"] = snapshot["error_code"] = "cancelled"
+    snapshot["message"] = snapshot["error"] = error.user_message
+    snapshot["retryable"] = False
     publish(job_id, snapshot)
     updated = await records.update_record(job_id, lambda r: r.update(status="cancelled", error=error.user_message, error_code="cancelled", progress=snapshot))
     return updated is not None
 
   # --- recovery / maintenance ------------------------------------------------------------------
+
+  async def _mark_interrupted(self, record: dict[str, Any], error: TranscriptionJobError) -> None:
+    job_id = record["id"]
+    title = (record.get("metadata") or {}).get("title")
+    snapshot = dict(record.get("progress") or {"id": job_id, "media_id": job_id, "title": title})
+    snapshot["stage"] = snapshot["status"] = "interrupted"
+    snapshot["message"] = snapshot["error"] = error.user_message
+    snapshot["error_code"] = "interrupted"
+    snapshot["retryable"] = True
+    snapshot["eta"] = snapshot["eta_seconds"] = None
+    try:
+      await records.update_record(job_id, lambda r: r.update(
+        status="interrupted", error=error.user_message, error_code="interrupted", retryable=True, progress=snapshot,
+      ))
+    except Exception as exc:
+      logger.warning("Could not mark transcription %s as interrupted: %s", job_id, exc)
 
   async def recover_interrupted_jobs(self) -> int:
     """Jobs left in an active stage by a previous process can never finish: mark them interrupted."""
@@ -211,24 +238,7 @@ class JobManager:
       return 0
     error = TranscriptionJobError("interrupted")
     for record in stale:
-      job_id = record["id"]
-      snapshot = {
-        **(record.get("progress") or {"id": job_id, "media_id": job_id, "title": (record.get("metadata") or {}).get("title")}),
-        "stage": "interrupted",
-        "status": "interrupted",
-        "message": error.user_message,
-        "error": error.user_message,
-        "error_code": "interrupted",
-        "retryable": True,
-        "eta": None,
-        "eta_seconds": None,
-      }
-      try:
-        await records.update_record(job_id, lambda r, s=snapshot: r.update(
-          status="interrupted", error=error.user_message, error_code="interrupted", retryable=True, progress=s,
-        ))
-      except Exception as exc:
-        logger.warning("Could not mark transcription %s as interrupted: %s", job_id, exc)
+      await self._mark_interrupted(record, error)
     if stale:
       logger.info("Marked %d transcription job(s) as interrupted", len(stale))
     await self._recover_open_summaries()
@@ -269,19 +279,11 @@ class JobManager:
     if not ttl:
       return 0
     cutoff = datetime.now(timezone.utc) - timedelta(days=ttl)
-    removed = 0
-    for record in await records.list_by_status({"complete"}):
-      finished = record.get("finished_at") or record.get("created_at")
-      try:
-        when = datetime.fromisoformat(str(finished).replace("Z", "+00:00"))
-      except ValueError:
-        continue
-      if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-      if when < cutoff and storage.get_transcription_dir(record["id"]).exists():
-        storage.delete_folder(record["id"])
-        removed += 1
-    return removed
+    candidates = [record["id"] for record in await records.list_by_status({"complete"}) if _is_older(record, cutoff)]
+    expired = [job_id for job_id in candidates if storage.get_transcription_dir(job_id).exists()]
+    for job_id in expired:
+      storage.delete_folder(job_id)
+    return len(expired)
 
   async def shutdown(self) -> None:
     self._shutting_down = True
@@ -292,6 +294,21 @@ class JobManager:
       task.cancel()
     if tasks:
       await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _is_older(record: dict[str, Any], cutoff: datetime) -> bool:
+  finished = _finished_at(record)
+  return finished is not None and finished < cutoff
+
+
+def _finished_at(record: dict[str, Any]) -> Optional[datetime]:
+  """When the job finished (else when it was created), as an aware datetime; None when unparseable."""
+  finished = record.get("finished_at") or record.get("created_at")
+  try:
+    when = datetime.fromisoformat(str(finished).replace("Z", "+00:00"))
+  except ValueError:
+    return None
+  return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
 
 
 job_manager = JobManager()

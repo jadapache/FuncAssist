@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -72,34 +72,40 @@ def _percentile(values: list[float], pct: float) -> float | None:
   return round(ordered[lower] + (ordered[upper] - ordered[lower]) * (k - lower), 4)
 
 
+def _total(group: list[dict[str, Any]], key: str, cast=float) -> float:
+  return sum(cast(g.get(key) or 0) for g in group)
+
+
+def _status_count(group: list[dict[str, Any]], status: str) -> int:
+  return sum(1 for g in group if g.get("status") == status)
+
+
+def _block(group: list[dict[str, Any]]) -> dict[str, Any]:
+  """Totals of a group of jobs; audio, speed, cleanup and cost count completed jobs only."""
+  ok = [g for g in group if g.get("status") == "complete"]
+  rtf = [float(g["rtf"]) for g in ok if g.get("rtf") is not None]
+  return {
+    "jobs": len(group),
+    "completed": len(ok),
+    "failed": _status_count(group, "failed"),
+    "cancelled": _status_count(group, "cancelled"),
+    "audio_hours": round(_total(ok, "audio_s") / 3600, 2),
+    "silence_trimmed_hours": round(_total(ok, "silence_trimmed_s") / 3600, 2),
+    "rtf_p50": _percentile(rtf, 50),
+    "rtf_p95": _percentile(rtf, 95),
+    "retries": _total(group, "retries", int),
+    "fillers_removed": _total(ok, "fillers_removed", int),
+    "hallucinations_removed": _total(ok, "hallucinations_removed", int),
+    "cost_estimate": round(_total(ok, "cost_estimate"), 4),
+  }
+
+
 def summarize(entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
   items = list(entries)
   by_provider: dict[str, list[dict[str, Any]]] = defaultdict(list)
   for item in items:
     by_provider[str(item.get("provider") or "unknown")].append(item)
-
-  def _block(group: list[dict[str, Any]]) -> dict[str, Any]:
-    ok = [g for g in group if g.get("status") == "complete"]
-    rtf = [float(g["rtf"]) for g in ok if g.get("rtf") is not None]
-    return {
-      "jobs": len(group),
-      "completed": len(ok),
-      "failed": sum(1 for g in group if g.get("status") == "failed"),
-      "cancelled": sum(1 for g in group if g.get("status") == "cancelled"),
-      "audio_hours": round(sum(float(g.get("audio_s") or 0) for g in ok) / 3600, 2),
-      "silence_trimmed_hours": round(sum(float(g.get("silence_trimmed_s") or 0) for g in ok) / 3600, 2),
-      "rtf_p50": _percentile(rtf, 50),
-      "rtf_p95": _percentile(rtf, 95),
-      "retries": sum(int(g.get("retries") or 0) for g in group),
-      "fillers_removed": sum(int(g.get("fillers_removed") or 0) for g in ok),
-      "hallucinations_removed": sum(int(g.get("hallucinations_removed") or 0) for g in ok),
-      "cost_estimate": round(sum(float(g.get("cost_estimate") or 0) for g in ok), 4),
-    }
-
-  errors: dict[str, int] = defaultdict(int)
-  for item in items:
-    if item.get("error_code"):
-      errors[str(item["error_code"])] += 1
+  errors = Counter(str(item["error_code"]) for item in items if item.get("error_code"))
   return {
     "total": _block(items),
     "providers": {name: _block(group) for name, group in by_provider.items()},

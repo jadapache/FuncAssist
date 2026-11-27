@@ -55,47 +55,64 @@ def full_text(segments: list[dict[str, Any]]) -> str:
   return " ".join((s.get("text") or "").strip() for s in segments if (s.get("text") or "").strip())
 
 
-def normalize_record(record: dict[str, Any]) -> dict[str, Any]:
-  """Bring any stored record (including pre-v2 ones) to the current shape, in place."""
-  segments: list[dict[str, Any]] = [dict(s) for s in (record.get("segments") or []) if isinstance(s, dict)]
-  speakers: dict[str, dict[str, Any]] = {
-    k: dict(v) for k, v in (record.get("speakers") or {}).items() if isinstance(v, dict)
-  }
-  name_to_id = {v.get("name"): k for k, v in speakers.items()}
-  ensure_segment_ids(segments)
+def _speaker_id_for(seg: dict[str, Any], speakers: dict[str, dict[str, Any]], name_to_id: dict[Any, str]) -> str:
+  """The segment's speaker id; a segment known only by name gets (or creates) the speaker of that name."""
+  speaker_id = seg.get("speaker_id")
+  if speaker_id and speaker_id in speakers:
+    return speaker_id
+  name = (seg.get("speaker") or "").strip() or default_speaker_name(1)
+  speaker_id = name_to_id.get(name)
+  if not speaker_id:
+    speaker_id = new_speaker_id(speakers)
+    speakers[speaker_id] = {"name": name, "color_index": _next_color(speakers)}
+    name_to_id[name] = speaker_id
+  return speaker_id
 
-  for seg in segments:
-    speaker_id = seg.get("speaker_id")
-    if not speaker_id or speaker_id not in speakers:
-      name = (seg.get("speaker") or "").strip() or default_speaker_name(1)
-      speaker_id = name_to_id.get(name)
-      if not speaker_id:
-        speaker_id = new_speaker_id(speakers)
-        speakers[speaker_id] = {"name": name, "color_index": _next_color(speakers)}
-        name_to_id[name] = speaker_id
-      seg["speaker_id"] = speaker_id
-    seg["speaker"] = speakers[speaker_id].get("name") or default_speaker_name(_speaker_number(speaker_id))
-    if seg.get("text_raw") is None:
-      seg["text_raw"] = seg.get("text") or ""
-    seg.setdefault("text", seg["text_raw"])
-    if not isinstance(seg.get("tags"), list):
-      seg["tags"] = []
-    seg["marked"] = bool(seg.get("marked", False))
-    seg["start"] = float(seg.get("start", 0.0) or 0.0)
-    seg["end"] = float(seg.get("end", seg["start"]) or seg["start"])
 
-  record["segments"] = segments
-  record["speakers"] = speakers
+def _normalize_segment(seg: dict[str, Any], speakers: dict[str, dict[str, Any]], name_to_id: dict[Any, str]) -> None:
+  seg["speaker_id"] = speaker_id = _speaker_id_for(seg, speakers, name_to_id)
+  seg["speaker"] = speakers[speaker_id].get("name") or default_speaker_name(_speaker_number(speaker_id))
+  if seg.get("text_raw") is None:
+    seg["text_raw"] = seg.get("text") or ""
+  seg.setdefault("text", seg["text_raw"])
+  if not isinstance(seg.get("tags"), list):
+    seg["tags"] = []
+  seg["marked"] = bool(seg.get("marked", False))
+  seg["start"] = float(seg.get("start", 0.0) or 0.0)
+  seg["end"] = float(seg.get("end", seg["start"]) or seg["start"])
+
+
+def _source_of(record: dict[str, Any]) -> str:
+  """Where a record without a `source` came from, judged by the engine that produced it."""
+  engine = str((record.get("metadata") or {}).get("engine") or record.get("model_info") or "").lower()
+  return "browser" if "client" in engine or "navegador" in engine else "cloud"
+
+
+def _fill_record_defaults(record: dict[str, Any]) -> None:
   if not record.get("diarization"):
-    record["diarization"] = "none" if len(speakers) <= 1 else "legacy"
+    record["diarization"] = "none" if len(record["speakers"]) <= 1 else "legacy"
   record.setdefault("turn_gap_s", config.turn_gap_s())
   if not record.get("summary_status"):
     record["summary_status"] = "done" if record.get("summary") else "skipped"
   record.setdefault("cleanup", None)
   record.setdefault("silence_trimmed_s", 0.0)
   if not record.get("source"):
-    engine = str((record.get("metadata") or {}).get("engine") or record.get("model_info") or "")
-    record["source"] = "browser" if "client" in engine.lower() or "navegador" in engine.lower() else "cloud"
+    record["source"] = _source_of(record)
+
+
+def normalize_record(record: dict[str, Any]) -> dict[str, Any]:
+  """Bring any stored record (including pre-v2 ones) to the current shape, in place."""
+  segments: list[dict[str, Any]] = [dict(s) for s in (record.get("segments") or []) if isinstance(s, dict)]
+  stored_speakers = record.get("speakers") or {}
+  speakers: dict[str, dict[str, Any]] = {k: dict(v) for k, v in stored_speakers.items() if isinstance(v, dict)}
+  name_to_id = {v.get("name"): k for k, v in speakers.items()}
+  ensure_segment_ids(segments)
+  for seg in segments:
+    _normalize_segment(seg, speakers, name_to_id)
+
+  record["segments"] = segments
+  record["speakers"] = speakers
+  _fill_record_defaults(record)
   return record
 
 
@@ -129,12 +146,8 @@ def _sync(record: dict[str, Any], renamed: Optional[dict[str, str]] = None) -> d
   record["text"] = full_text(record.get("segments") or [])
   summary = record.get("summary")
   if renamed and isinstance(summary, dict) and isinstance(summary.get("participants"), list):
-    updated: list[str] = []
-    for p in summary["participants"]:
-      new = renamed.get(p, p)
-      if new not in updated:
-        updated.append(new)
-    summary["participants"] = updated
+    # Renamed participants, without the duplicates a merge can create; first occurrence wins.
+    summary["participants"] = list(dict.fromkeys(renamed.get(p, p) for p in summary["participants"]))
   return record
 
 
@@ -185,11 +198,11 @@ def rename_by_name(record: dict[str, Any], speaker_map: dict[str, str]) -> dict[
   changes: dict[str, str] = {}
   for old_name, new_name in speaker_map.items():
     speaker_id = by_name.get(old_name)
-    if not speaker_id or speaker_id not in speakers:
+    if not speaker_id:
       continue
     clean = _clean_name(new_name)
     existing = by_name.get(clean)
-    if existing and existing != speaker_id and existing in speakers:
+    if existing in speakers:  # merging a speaker into itself changes nothing; a merged-away one no longer exists
       changes.update(merge_speakers(record, speaker_id, existing))
     else:
       changes[old_name] = clean
@@ -253,11 +266,11 @@ def split_segment(record: dict[str, Any], segment_id: str, at: int) -> dict[str,
   text = seg.get("text") or ""
   if not 0 < at < len(text):
     raise EditError("La posición de división debe estar dentro del texto del segmento.")
-  cut = _split_point(text, at / len(text)) if not text[at - 1 : at].isspace() else at - 1
+  cut = _split_point(text, at / len(text))
   first_text, second_text = text[:cut].strip(), text[cut:].strip()
   if not first_text or not second_text:
     raise EditError("La división dejaría un segmento vacío.")
-  ratio = len(first_text) / max(1, len(first_text) + len(second_text))
+  ratio = len(first_text) / (len(first_text) + len(second_text))
   raw = seg.get("text_raw") or ""
   raw_cut = _split_point(raw, ratio)
   start, end = float(seg["start"]), float(seg["end"])

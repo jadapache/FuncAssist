@@ -60,26 +60,41 @@ def _keys(cfg: dict[str, Any]) -> dict[str, str]:
   }
 
 
+def _transcription_model(provider: str, cfg: dict[str, Any]) -> str:
+  """The catalog model for the provider; the configured one only when the catalog confirms it."""
+  configured_model = (cfg.get("transcription_model") or "").strip()
+  model = pick_transcription_model(provider, configured_model) or FALLBACK_MODEL[provider]
+  if configured_model and model != configured_model:
+    logger.info(
+      "Transcription model %r is not a %s catalog model with timestamped segments; using %s",
+      configured_model, provider, model,
+    )
+  return model
+
+
 def resolve_speech_target(user_id: Optional[str]) -> SpeechTarget:
   """Provider/model for plain transcription, respecting `transcription_provider`."""
   cfg = get_ai_settings(user_id=user_id)
   keys = _keys(cfg)
   configured = (cfg.get("transcription_provider") or "auto").lower()
   order = ["openai", "groq"] if configured == "openai" else ["groq", "openai"]
-  for provider in order:
-    if not keys[provider]:
-      continue
+  for provider in (p for p in order if keys[p]):
     if configured in {"groq", "openai"} and provider != configured:
       logger.warning("Transcription provider %s has no API key; using %s instead", configured, provider)
-    configured_model = (cfg.get("transcription_model") or "").strip()
-    model = pick_transcription_model(provider, configured_model) or FALLBACK_MODEL[provider]
-    if configured_model and model != configured_model:
-      logger.info(
-        "Transcription model %r is not a %s catalog model with timestamped segments; using %s",
-        configured_model, provider, model,
-      )
-    return SpeechTarget(provider=provider, api_key=keys[provider], model=model)
+    return SpeechTarget(provider=provider, api_key=keys[provider], model=_transcription_model(provider, cfg))
   raise TranscriptionJobError("no_credentials")
+
+
+def _diarization_model(configured: str) -> Optional[str]:
+  """The model to diarize with, or None when the catalog knows of no OpenAI diarization model."""
+  model, catalog_known = pick_diarization_model("openai", configured)
+  if not catalog_known:
+    return configured  # empty or unreachable catalog: trust the configured model
+  if model is None:
+    logger.warning("No OpenAI diarization model in the catalog (configured %r); transcribing without speakers", configured)
+  elif model != configured:
+    logger.info("Diarization model %r is not in the catalog; using %s", configured, model)
+  return model
 
 
 def resolve_diarization_target(user_id: Optional[str], requested: bool) -> Optional[SpeechTarget]:
@@ -87,21 +102,11 @@ def resolve_diarization_target(user_id: Optional[str], requested: bool) -> Optio
   if not requested:
     return None
   cfg = get_ai_settings(user_id=user_id)
-  if (cfg.get("transcription_diarization") or "auto").lower() == "off":
-    return None
   key = _keys(cfg)["openai"]
-  if not key:
+  if (cfg.get("transcription_diarization") or "auto").lower() == "off" or not key:
     return None
-  configured = config.diarize_model()
-  model, catalog_known = pick_diarization_model("openai", configured)
-  if not catalog_known:
-    model = configured  # empty or unreachable catalog: trust the configured model
-  elif model is None:
-    logger.warning("No OpenAI diarization model in the catalog (configured %r); transcribing without speakers", configured)
-    return None
-  elif model != configured:
-    logger.info("Diarization model %r is not in the catalog; using %s", configured, model)
-  return SpeechTarget(provider="openai", api_key=key, model=model, diarize=True)
+  model = _diarization_model(config.diarize_model())
+  return SpeechTarget(provider="openai", api_key=key, model=model, diarize=True) if model else None
 
 
 def available_providers(user_id: Optional[str]) -> dict[str, bool]:
@@ -120,15 +125,12 @@ def _retry_after(response: httpx.Response) -> Optional[float]:
 def _error_detail(response: httpx.Response) -> str:
   try:
     body = response.json()
-    if isinstance(body, dict):
-      err = body.get("error")
-      if isinstance(err, dict):
-        return str(err.get("message") or response.text)
-      if err:
-        return str(err)
   except ValueError:
-    pass
-  return response.text[:500]
+    return response.text[:500]
+  err = body.get("error") if isinstance(body, dict) else None
+  if isinstance(err, dict):
+    return str(err.get("message") or response.text)
+  return str(err) if err else response.text[:500]
 
 
 class SpeechClient:
@@ -148,32 +150,33 @@ class SpeechClient:
   async def __aexit__(self, *exc: object) -> None:
     await self.aclose()
 
+  async def _send(self, path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """One request; a non-200 reply becomes a typed error."""
+    mime = "audio/mpeg" if path.suffix == ".mp3" else "application/octet-stream"
+    with path.open("rb") as fh:
+      response = await self._client.post(
+        ENDPOINTS[self.target.provider],
+        headers={"Authorization": f"Bearer {self.target.api_key}"},
+        data=data,
+        files={"file": (path.name, fh, mime)},
+      )
+    if response.status_code == 200:
+      return response.json()
+    raise error_from_status(response.status_code, _error_detail(response), _retry_after(response))
+
   async def _post(self, path: Path, data: dict[str, Any]) -> dict[str, Any]:
     attempts = config.num_retries() + 1
-    for attempt in range(attempts):
+    for attempt in range(attempts - 1):
       try:
-        with path.open("rb") as fh:
-          response = await self._client.post(
-            ENDPOINTS[self.target.provider],
-            headers={"Authorization": f"Bearer {self.target.api_key}"},
-            data=data,
-            files={"file": (path.name, fh, "audio/mpeg" if path.suffix == ".mp3" else "application/octet-stream")},
-          )
-        if response.status_code == 200:
-          return response.json()
-        raise error_from_status(response.status_code, _error_detail(response), _retry_after(response))
+        return await self._send(path, data)
       except (TranscriptionJobError, httpx.HTTPError) as exc:
-        if attempt + 1 >= attempts or not is_transient(exc):
+        if not is_transient(exc):
           raise
         self.retries += 1
-        retry_after = getattr(exc, "retry_after", None)
-        delay = min(60.0, retry_after if retry_after else (2 ** attempt) * 2 + random.uniform(0, 1))
-        logger.warning(
-          "Transient %s error (%s); retry %d/%d in %.1fs",
-          self.target.provider, exc, attempt + 1, attempts - 1, delay,
-        )
+        delay = _backoff_delay(exc, attempt)
+        logger.warning("Transient %s error (%s); retry %d/%d in %.1fs", self.target.provider, exc, attempt + 1, attempts - 1, delay)
         await asyncio.sleep(delay)
-    raise TranscriptionJobError("internal", detail="retry loop exhausted")  # pragma: no cover
+    return await self._send(path, data)
 
   async def transcribe(self, path: Path, *, language: Optional[str], prompt: str = "") -> dict[str, Any]:
     """Whisper `verbose_json`: segments carry no_speech_prob / avg_logprob / compression_ratio."""
@@ -183,24 +186,10 @@ class SpeechClient:
     if prompt:
       data["prompt"] = prompt
     body = await self._post(path, data)
-    segments = []
-    for seg in body.get("segments") or []:
-      text = (seg.get("text") or "").strip()
-      if not text:
-        continue
-      segments.append({
-        "start": float(seg.get("start", 0.0)),
-        "end": float(seg.get("end", 0.0)),
-        "text_raw": text,
-        "_metrics": {
-          "no_speech_prob": seg.get("no_speech_prob"),
-          "avg_logprob": seg.get("avg_logprob"),
-          "compression_ratio": seg.get("compression_ratio"),
-        },
-      })
+    segments = _segments(body, _whisper_segment)
     if not segments and (body.get("text") or "").strip():
       segments.append({"start": 0.0, "end": float(body.get("duration") or 0.0), "text_raw": body["text"].strip(), "_metrics": {}})
-    return {"language": body.get("language") or language, "segments": segments, "text": body.get("text") or ""}
+    return _result(body, language, segments)
 
   async def diarize(
     self,
@@ -221,19 +210,36 @@ class SpeechClient:
       data["known_speaker_names[]"] = [name for name, _ in known_speakers]
       data["known_speaker_references[]"] = [_data_url(clip) for _, clip in known_speakers]
     body = await self._post(path, data)
-    segments = []
-    for seg in body.get("segments") or []:
-      text = (seg.get("text") or "").strip()
-      if not text:
-        continue
-      segments.append({
-        "start": float(seg.get("start", 0.0)),
-        "end": float(seg.get("end", 0.0)),
-        "text_raw": text,
-        "speaker_label": str(seg.get("speaker") or "A"),
-        "_metrics": {},
-      })
-    return {"language": body.get("language") or language, "segments": segments, "text": body.get("text") or ""}
+    return _result(body, language, _segments(body, _speaker_segment))
+
+
+def _backoff_delay(exc: BaseException, attempt: int) -> float:
+  """The provider's `retry-after` when it gave one, else exponential backoff with jitter; at most a minute."""
+  retry_after = getattr(exc, "retry_after", None)
+  return min(60.0, retry_after or (2 ** attempt) * 2 + random.uniform(0, 1))
+
+
+def _timed_segment(seg: dict[str, Any], text: str) -> dict[str, Any]:
+  return {"start": float(seg.get("start", 0.0)), "end": float(seg.get("end", 0.0)), "text_raw": text}
+
+
+def _whisper_segment(seg: dict[str, Any], text: str) -> dict[str, Any]:
+  metrics = {key: seg.get(key) for key in ("no_speech_prob", "avg_logprob", "compression_ratio")}
+  return {**_timed_segment(seg, text), "_metrics": metrics}
+
+
+def _speaker_segment(seg: dict[str, Any], text: str) -> dict[str, Any]:
+  return {**_timed_segment(seg, text), "speaker_label": str(seg.get("speaker") or "A"), "_metrics": {}}
+
+
+def _segments(body: dict[str, Any], build) -> list[dict[str, Any]]:
+  """The response's segments that carry text, shaped by `build(segment, stripped_text)`."""
+  texts = [(seg, (seg.get("text") or "").strip()) for seg in body.get("segments") or []]
+  return [build(seg, text) for seg, text in texts if text]
+
+
+def _result(body: dict[str, Any], language: Optional[str], segments: list[dict[str, Any]]) -> dict[str, Any]:
+  return {"language": body.get("language") or language, "segments": segments, "text": body.get("text") or ""}
 
 
 def _data_url(path: Path) -> str:
@@ -246,4 +252,4 @@ async def transcribe_short_audio(path: Path, user_id: Optional[str], language: O
   target = resolve_speech_target(user_id)
   async with SpeechClient(target) as client:
     result = await client.transcribe(path, language=language)
-  return " ".join(s["text_raw"] for s in result["segments"]).strip() or (result.get("text") or "").strip()
+  return " ".join(s["text_raw"] for s in result["segments"]).strip()

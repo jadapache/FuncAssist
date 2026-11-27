@@ -39,35 +39,55 @@ def format_heartbeat(protocol: str) -> str:
   return 'data: {"event": "heartbeat", "stage": "heartbeat"}\n\n'
 
 
+async def _next_update(queue: asyncio.Queue) -> Optional[dict[str, Any]]:
+  """The next progress update, or None when nothing arrived within the heartbeat interval."""
+  try:
+    return await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_S)
+  except asyncio.TimeoutError:
+    return None
+
+
+def _seq(snapshot: dict[str, Any]) -> int:
+  return int(snapshot.get("seq") or 0)
+
+
+def _closing_event(job_id: str, last_seq: int, protocol: str) -> Optional[str]:
+  """The final state, when it was published after the last event this client received."""
+  final = progress.latest(job_id)
+  return format_event(final, protocol) if final and _seq(final) > last_seq else None
+
+
+async def _follow_updates(queue: asyncio.Queue, job_id: str, last_seq: int, protocol: str) -> AsyncGenerator[str, None]:
+  """Every update newer than `last_seq`, with heartbeats while quiet, until the job or its summary finishes."""
+  while True:
+    update = await _next_update(queue)
+    if update is None:
+      yield format_heartbeat(protocol)
+      if job_manager.is_running(job_id):
+        continue
+      closing = _closing_event(job_id, last_seq, protocol)
+      if closing:
+        yield closing
+      return
+    if _seq(update) and _seq(update) <= last_seq:
+      continue
+    last_seq = _seq(update) or last_seq
+    yield format_event(update, protocol)
+    if progress.is_stream_finished(update):
+      return
+
+
 async def progress_events(job_id: str, initial: dict[str, Any], protocol: str = "v1") -> AsyncGenerator[str, None]:
   """Current state first, then every update until the job (and its summary) is finished."""
   queue = progress.subscribe(job_id)
   try:
     current = job_manager.snapshot(job_id) or progress.latest(job_id) or initial
     yield format_event(current, protocol)
-    if progress.is_stream_finished(current):
+    # A job that is not running here is stale persisted state: nothing will update it and the client falls back to /status.
+    if progress.is_stream_finished(current) or not job_manager.is_running(job_id):
       return
-    if not job_manager.is_running(job_id):
-      return  # stale persisted state: nothing will update it; the client falls back to /status
-    last_seq = int(current.get("seq") or 0)
-    while True:
-      try:
-        update = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_S)
-      except asyncio.TimeoutError:
-        yield format_heartbeat(protocol)
-        if not job_manager.is_running(job_id):
-          final = progress.latest(job_id)
-          if final and int(final.get("seq") or 0) > last_seq:
-            yield format_event(final, protocol)
-          return
-        continue
-      seq = int(update.get("seq") or 0)
-      if seq and seq <= last_seq:
-        continue
-      last_seq = seq or last_seq
-      yield format_event(update, protocol)
-      if progress.is_stream_finished(update):
-        return
+    async for event in _follow_updates(queue, job_id, _seq(current), protocol):
+      yield event
   finally:
     progress.unsubscribe(job_id, queue)
 

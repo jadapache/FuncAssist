@@ -142,7 +142,7 @@ class RuleCleaner:
     removed += n
     text = _tidy(text)
     while True:  # "Bueno, o sea, …" -> strip markers one at a time
-      text, n = self._start_markers.subn(r"\1", text, count=1)
+      text, n = self._start_markers.subn(r"\1", text)
       if not n:
         break
       removed += n
@@ -176,11 +176,26 @@ def normalize_for_match(text: str) -> str:
 
 def _is_known_hallucination(text: str) -> bool:
   norm = normalize_for_match(text)
-  if not norm:
-    return False
   if "amara org" in norm:
     return True
   return any(norm.startswith(p) and len(norm) <= len(p) + 15 for p in KNOWN_HALLUCINATIONS)
+
+
+def _segment_text(seg: dict[str, Any]) -> str:
+  return seg.get("text_raw") or seg.get("text") or ""
+
+
+def _is_unreliable(metrics: dict[str, Any]) -> bool:
+  """Whisper's own signals: confident silence (high no-speech, low log-probability) or a looping output."""
+  no_speech, logprob, compression = metrics.get("no_speech_prob"), metrics.get("avg_logprob"), metrics.get("compression_ratio")
+  silent = no_speech is not None and logprob is not None and no_speech > 0.6 and logprob < -1.0
+  looping = compression is not None and compression > 2.4
+  return silent or looping
+
+
+def _repeats_previous(previous: dict[str, Any], seg: dict[str, Any]) -> bool:
+  text = normalize_for_match(_segment_text(seg))
+  return bool(text) and text == normalize_for_match(_segment_text(previous)) and previous.get("speaker_id") == seg.get("speaker_id")
 
 
 def filter_hallucinations(segments: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
@@ -188,25 +203,13 @@ def filter_hallucinations(segments: Sequence[dict[str, Any]]) -> tuple[list[dict
   kept: list[dict[str, Any]] = []
   removed = 0
   for seg in segments:
-    metrics = seg.get("_metrics") or {}
-    no_speech = metrics.get("no_speech_prob")
-    logprob = metrics.get("avg_logprob")
-    compression = metrics.get("compression_ratio")
-    text = seg.get("text_raw") or seg.get("text") or ""
-    if (
-      (no_speech is not None and logprob is not None and no_speech > 0.6 and logprob < -1.0)
-      or (compression is not None and compression > 2.4)
-      or _is_known_hallucination(text)
-    ):
+    if _is_unreliable(seg.get("_metrics") or {}) or _is_known_hallucination(_segment_text(seg)):
       removed += 1
-      continue
-    if kept and normalize_for_match(text) and normalize_for_match(text) == normalize_for_match(
-      kept[-1].get("text_raw") or kept[-1].get("text") or ""
-    ) and kept[-1].get("speaker_id") == seg.get("speaker_id"):
+    elif kept and _repeats_previous(kept[-1], seg):
       kept[-1]["end"] = max(float(kept[-1].get("end", 0.0)), float(seg.get("end", 0.0)))
       removed += 1
-      continue
-    kept.append(seg)
+    else:
+      kept.append(seg)
   return kept, removed
 
 
@@ -266,16 +269,15 @@ def accept_llm_text(raw: str, candidate: str, *, max_shrink: float = 0.4) -> boo
   cand_words = _words(candidate)
   if any(w not in raw_words for w in cand_words):
     return False
-  raw_len = len(normalize_for_match(raw))
-  return raw_len == 0 or len(normalize_for_match(candidate)) >= raw_len * (1 - max_shrink)
+  return len(normalize_for_match(candidate)) >= len(normalize_for_match(raw)) * (1 - max_shrink)
 
 
 def _parse_llm_items(text: str) -> dict[str, str]:
-  start, end = text.find("["), text.rfind("]")
-  if start < 0 or end <= start:
+  match = re.search(r"\[.*\]", text, re.DOTALL)
+  if not match:
     return {}
   try:
-    items = json.loads(text[start : end + 1])
+    items = json.loads(match.group(0))
   except json.JSONDecodeError:
     return {}
   result: dict[str, str] = {}
@@ -285,71 +287,78 @@ def _parse_llm_items(text: str) -> dict[str, str]:
   return result
 
 
+def _accept_llm_results(batch: list[dict[str, Any]], cleaned: dict[str, str], stats: CleanupStats) -> None:
+  """Take the LLM text of each segment that passes the checks; the rest keep the rules text."""
+  for seg in batch:
+    candidate = cleaned.get(seg["id"])
+    if candidate is None:
+      continue
+    if accept_llm_text(seg.get("text_raw") or "", candidate):
+      seg["text"], _ = strip_pause_markers(candidate)
+      stats.llm_segments += 1
+    else:
+      stats.llm_rejected += 1
+
+
+async def _llm_clean_batch(batch: list[dict[str, Any]], provider: Any, offset: int, stats: CleanupStats) -> None:
+  payload = [{"id": s["id"], "text": s["text_raw"]} for s in batch if (s.get("text_raw") or "").strip()]
+  if not payload:
+    return
+  request = json.dumps(payload, ensure_ascii=False)
+  messages = [AIMessage(role="system", content=_LLM_SYSTEM), AIMessage(role="user", content=request)]
+  try:
+    res = await provider.complete(messages, max_tokens=4096)
+  except Exception as exc:
+    logger.warning("LLM transcript cleanup failed for batch at %d; keeping rule cleanup: %s", offset, exc)
+    return
+  _accept_llm_results(batch, _parse_llm_items(getattr(res, "text", "") or ""), stats)
+
+
 async def apply_llm(segments: list[dict[str, Any]], provider: Any, stats: CleanupStats) -> list[dict[str, Any]]:
   """Optional LLM pass over rule-cleaned segments; any rejected or failed item keeps the rules text."""
   for offset in range(0, len(segments), _LLM_BATCH):
-    batch = segments[offset : offset + _LLM_BATCH]
-    payload = [{"id": s["id"], "text": s.get("text_raw") or ""} for s in batch if (s.get("text_raw") or "").strip()]
-    if not payload:
-      continue
-    messages = [
-      AIMessage(role="system", content=_LLM_SYSTEM),
-      AIMessage(role="user", content=json.dumps(payload, ensure_ascii=False)),
-    ]
-    try:
-      res = await provider.complete(messages, max_tokens=4096)
-    except Exception as exc:
-      logger.warning("LLM transcript cleanup failed for batch at %d; keeping rule cleanup: %s", offset, exc)
-      continue
-    cleaned = _parse_llm_items(getattr(res, "text", "") or "")
-    for seg in batch:
-      candidate = cleaned.get(seg["id"])
-      if candidate is None:
-        continue
-      if accept_llm_text(seg.get("text_raw") or "", candidate):
-        seg["text"], _ = strip_pause_markers(candidate)
-        stats.llm_segments += 1
-      else:
-        stats.llm_rejected += 1
+    await _llm_clean_batch(segments[offset : offset + _LLM_BATCH], provider, offset, stats)
   return segments
 
 
 # --- turns -------------------------------------------------------------------------------------
 
 
-def group_turns(
-  segments: Sequence[dict[str, Any]],
-  gap_s: float,
-  max_chars: int = 600,
-  *,
-  use_raw: bool = False,
-) -> list[dict[str, Any]]:
+def _turn_text(seg: dict[str, Any], use_raw: bool) -> str:
+  return ((seg.get("text_raw") if use_raw else seg.get("text")) or "").strip()
+
+
+def _continues_turn(last: Optional[dict[str, Any]], speaker_id: str, start: float, text: str, gap_s: float, max_chars: int) -> bool:
+  return (
+    last is not None
+    and last["speaker_id"] == speaker_id
+    and start - last["end"] < gap_s
+    and len(last["text"]) + len(text) + 1 <= max_chars
+  )
+
+
+def group_turns(segments: Sequence[dict[str, Any]], gap_s: float, max_chars: int = 600, *, use_raw: bool = False) -> list[dict[str, Any]]:
   """Consecutive segments of the same speaker separated by less than `gap_s` form one turn."""
   turns: list[dict[str, Any]] = []
   for seg in segments:
-    text = ((seg.get("text_raw") if use_raw else seg.get("text")) or "").strip()
+    text = _turn_text(seg, use_raw)
     if not text:
       continue
     speaker_id = seg.get("speaker_id") or seg.get("speaker") or "S1"
     start = float(seg.get("start", 0.0))
     end = float(seg.get("end", start))
     last = turns[-1] if turns else None
-    if (
-      last is not None
-      and last["speaker_id"] == speaker_id
-      and start - last["end"] < gap_s
-      and len(last["text"]) + len(text) + 1 <= max_chars
-    ):
+    if _continues_turn(last, speaker_id, start, text, gap_s, max_chars):
       last["text"] = f"{last['text']} {text}"
       last["end"] = max(last["end"], end)
       last["segment_ids"].append(seg.get("id"))
-      continue
-    turns.append({
-      "speaker_id": speaker_id,
-      "speaker": seg.get("speaker") or speaker_id,
-      "start": start,
-      "end": end,
-      "text": text,
-      "segment_ids": [seg.get("id")],
-    })
+    else:
+      turns.append({
+        "speaker_id": speaker_id,
+        "speaker": seg.get("speaker") or speaker_id,
+        "start": start,
+        "end": end,
+        "text": text,
+        "segment_ids": [seg.get("id")],
+      })
   return turns

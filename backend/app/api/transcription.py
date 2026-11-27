@@ -22,6 +22,7 @@ from app.features.inventario.xlsx_builder import create_inventario_xlsx
 from app.features.levantamiento.docx_builder import create_levantamiento_docx
 from app.features.transcription import config, metrics, records, segments as seg_ops, service, storage
 from app.features.transcription.errors import TranscriptionJobError
+from app.features.transcription.local_picker import inspect_local_file, open_native_file_dialog_sync
 from app.features.transcription.pipeline import JobOptions
 from app.schemas.transcription import (
   RenameSpeakerRequest,
@@ -119,6 +120,8 @@ def _consent_record(current_user: dict[str, Any]) -> dict[str, Any]:
 
 # --- upload and jobs ---------------------------------------------------------------------------
 
+_CONSENT_NOT_GIVEN = Form(False)  # an upload without the consent field is refused, see `_require_consent`
+
 
 @router.post("/upload")
 async def upload_transcription_media(
@@ -126,7 +129,7 @@ async def upload_transcription_media(
   title: str = Form(""),
   description: str = Form(""),
   transcription_id: Optional[str] = Form(None),
-  consent_confirmed: bool = Form(False),
+  consent_confirmed: bool = _CONSENT_NOT_GIVEN,
   current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
   """Stream the media file to disk (size-limited) and create the transcription record.
@@ -277,19 +280,14 @@ async def get_transcription_stats(limit: int = 500, current_user: dict[str, Any]
 # --- summaries ---------------------------------------------------------------------------------
 
 
+def _summary_template(prompt: dict[str, Any]) -> dict[str, Any]:
+  return {"id": prompt.get("feature"), "title": prompt.get("title") or prompt.get("feature"), "description": prompt.get("description", ""), "tag": prompt.get("tag", "transcript_summary")}
+
+
 @router.get("/summary-templates")
 async def get_summary_templates(tag: Optional[str] = "transcript_summary") -> dict[str, Any]:
   prompts = await list_prompts(tag=tag or "transcript_summary")
-  templates = [
-    {
-      "id": p.get("feature"),
-      "title": p.get("title") or p.get("feature"),
-      "description": p.get("description", ""),
-      "tag": p.get("tag", "transcript_summary"),
-    }
-    for p in prompts
-  ]
-  return {"templates": templates}
+  return {"templates": [_summary_template(p) for p in prompts]}
 
 
 @router.post("/generate-summary/{transcription_id}")
@@ -409,6 +407,17 @@ def _process_audio_extraction(input_path: Path, output_path: Path) -> Path:
   return result[0] if isinstance(result, tuple) else result
 
 
+def _audio_failure(exc: Exception) -> HTTPException:
+  """The HTTP error for a failed extraction; an HTTPException that is not an FFmpeg failure passes through."""
+  if isinstance(exc, FFmpegError):  # before HTTPException: FFmpegError is an HTTPException subclass
+    return HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}")
+  if isinstance(exc, HTTPException):
+    return exc
+  message = str(exc)
+  code = 422 if "ffmpeg" in message.lower() or "audio" in message.lower() else 500
+  return HTTPException(status_code=code, detail=f"Error al procesar archivo: {message}")
+
+
 @router.post("/extract-audio")
 async def extract_audio_endpoint(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> FileResponse:
   """Extract audio from any container to 16 kHz mono WAV (used by the browser path for large files)."""
@@ -421,17 +430,12 @@ async def extract_audio_endpoint(background_tasks: BackgroundTasks, file: Upload
   try:
     await _write_limited(file, temp_input, config.max_upload_bytes())
     result_path = await asyncio.to_thread(_process_audio_extraction, temp_input, temp_output)
-  except FFmpegError as exc:  # before HTTPException: FFmpegError is an HTTPException subclass
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    raise HTTPException(status_code=422, detail=f"Error de FFmpeg al extraer audio: {exc.detail}") from exc
-  except HTTPException:
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    raise
   except Exception as exc:
     shutil.rmtree(temp_dir, ignore_errors=True)
-    err_str = str(exc)
-    code = 422 if "ffmpeg" in err_str.lower() or "audio" in err_str.lower() else 500
-    raise HTTPException(status_code=code, detail=f"Error al procesar archivo: {err_str}") from exc
+    failure = _audio_failure(exc)
+    if failure is exc:
+      raise
+    raise failure from exc
 
   if not result_path.exists() or result_path == temp_input:
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -447,7 +451,7 @@ async def dictate_audio(file: UploadFile = File(...), current_user: dict[str, An
   from app.core.settings import USER_DATA_DIR
   from app.features.transcription.whisper_cloud import transcribe_short_audio
 
-  suffix = Path(file.filename or "audio.webm").suffix or ".webm"
+  suffix = Path(file.filename).suffix or ".webm"
   temp_dir = USER_DATA_DIR / "temp_voice"
   temp_dir.mkdir(parents=True, exist_ok=True)
   temp_file = temp_dir / f"voice_{uuid.uuid4().hex[:8]}{suffix}"
@@ -502,31 +506,34 @@ async def export_levantamiento(req: ExportDocumentRequest) -> Response:
 
 # --- desktop mode only -------------------------------------------------------------------------
 
+
+async def pick_local_file() -> dict[str, Any]:
+  path_str = await asyncio.to_thread(open_native_file_dialog_sync)
+  if not path_str:
+    return {"ok": False, "cancelled": True, "message": "No se seleccionó ningún archivo."}
+  if not storage.is_allowed_local_path(Path(path_str)):
+    raise HTTPException(status_code=403, detail="Ruta local no permitida.")
+  return {"ok": True, "selected": True, **inspect_local_file(path_str)}
+
+
+async def inspect_file(req: InspectFileRequest) -> dict[str, Any]:
+  if not storage.is_allowed_local_path(Path(req.file_path)):
+    raise HTTPException(status_code=403, detail="Ruta local no permitida.")
+  return inspect_local_file(req.file_path)
+
+
+async def register_local_path(req: RegisterLocalPathRequest, current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+  tid = _new_id(req.transcription_id)
+  try:
+    entry = storage.local_media_entry(tid, req.local_path, req.title, req.description)
+  except TranscriptionJobError as exc:
+    raise _http_error(exc) from exc
+  await records.save_record(service.media_entry_for_upload(entry, current_user))
+  return {"ok": True, "media_id": tid, "transcription_id": tid, "size": entry["size_bytes"], "entry": entry,
+          "message": "Archivo local vinculado con éxito."}
+
+
 if config.desktop_mode():
-  from app.features.transcription.local_picker import inspect_local_file, open_native_file_dialog_sync
-
-  @router.post("/pick-local-file")
-  async def pick_local_file() -> dict[str, Any]:
-    path_str = await asyncio.to_thread(open_native_file_dialog_sync)
-    if not path_str:
-      return {"ok": False, "cancelled": True, "message": "No se seleccionó ningún archivo."}
-    if not storage.is_allowed_local_path(Path(path_str)):
-      raise HTTPException(status_code=403, detail="Ruta local no permitida.")
-    return {"ok": True, "selected": True, **inspect_local_file(path_str)}
-
-  @router.post("/inspect-file")
-  async def inspect_file(req: InspectFileRequest) -> dict[str, Any]:
-    if not storage.is_allowed_local_path(Path(req.file_path)):
-      raise HTTPException(status_code=403, detail="Ruta local no permitida.")
-    return inspect_local_file(req.file_path)
-
-  @router.post("/register-local-path")
-  async def register_local_path(req: RegisterLocalPathRequest, current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-    tid = _new_id(req.transcription_id)
-    try:
-      entry = storage.local_media_entry(tid, req.local_path, req.title, req.description)
-    except TranscriptionJobError as exc:
-      raise _http_error(exc) from exc
-    await records.save_record(service.media_entry_for_upload(entry, current_user))
-    return {"ok": True, "media_id": tid, "transcription_id": tid, "size": entry["size_bytes"], "entry": entry,
-            "message": "Archivo local vinculado con éxito."}
+  router.post("/pick-local-file")(pick_local_file)
+  router.post("/inspect-file")(inspect_file)
+  router.post("/register-local-path")(register_local_path)

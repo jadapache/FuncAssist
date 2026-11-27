@@ -83,23 +83,28 @@ def validate_file(filename: str, size: int) -> tuple[bool, Optional[str]]:
   return True, None
 
 
+def _stored_media(folder: Path) -> Optional[Path]:
+  """audio.wav, else the first uploaded media.<ext> with a supported extension."""
+  if not folder.exists():
+    return None
+  audio_wav = folder / "audio.wav"
+  if audio_wav.exists():
+    return audio_wav
+  return next((item for item in sorted(folder.glob("media.*")) if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS), None)
+
+
+def _registered_source(record: Optional[dict[str, Any]]) -> Optional[Path]:
+  """The local file a desktop-mode record points at, when it still exists inside an allowed root."""
+  if not (record and config.desktop_mode()):
+    return None
+  source = (record.get("metadata") or {}).get("source_path")
+  path = Path(source) if source else None
+  return path if path and path.is_file() and is_allowed_local_path(path) else None
+
+
 def find_media_file(transcription_id: str, record: Optional[dict[str, Any]] = None) -> Optional[Path]:
   """audio.wav, else the uploaded media.<ext>, else a registered local source path (desktop mode)."""
-  folder = get_transcription_dir(transcription_id)
-  if folder.exists():
-    audio_wav = folder / "audio.wav"
-    if audio_wav.exists():
-      return audio_wav
-    for item in sorted(folder.glob("media.*")):
-      if item.is_file() and item.suffix.lower() in SUPPORTED_FORMATS:
-        return item
-  if record and config.desktop_mode():
-    src = (record.get("metadata") or {}).get("source_path")
-    if src:
-      path = Path(src)
-      if path.is_file() and is_allowed_local_path(path):
-        return path
-  return None
+  return _stored_media(get_transcription_dir(transcription_id)) or _registered_source(record)
 
 
 def has_media(transcription_id: str, record: Optional[dict[str, Any]] = None) -> bool:
@@ -125,6 +130,22 @@ def _media_entry(transcription_id: str, filename: str, stored: str, path: Path, 
   }
 
 
+async def _stream_to_file(upload: UploadFile, tmp: Path, limit: int) -> tuple[int, str]:
+  """Write the upload in 1 MB blocks; returns its size and SHA-256, refusing anything over `limit` bytes."""
+  digest = hashlib.sha256()
+  size = 0
+  with tmp.open("wb") as fh:
+    while block := await upload.read(UPLOAD_BLOCK):
+      size += len(block)
+      if size > limit:
+        raise TranscriptionJobError("file_too_large", f"El archivo supera el máximo de {limit // (1024 * 1024)} MB.")
+      digest.update(block)
+      fh.write(block)
+  if size == 0:
+    raise TranscriptionJobError("unsupported_format", "El archivo multimedia está vacío.")
+  return size, digest.hexdigest()
+
+
 async def save_upload(upload: UploadFile, transcription_id: str, title: str, description: str = "") -> dict[str, Any]:
   """Stream an upload to disk in 1 MB blocks, enforcing the size limit; returns the media entry."""
   filename = upload.filename or "media.mp3"
@@ -133,41 +154,21 @@ async def save_upload(upload: UploadFile, transcription_id: str, title: str, des
     raise TranscriptionJobError("unsupported_format", err)
   ensure_transcription_dirs()
   folder = get_transcription_dir(transcription_id)
-  folder.mkdir(parents=True, exist_ok=True)
+  folder.mkdir(exist_ok=True)  # ensure_transcription_dirs created its parent
   # Only a known extension from the allow-list reaches the file name, never raw upload text.
-  ext = next((e for e in SUPPORTED_FORMATS if e == Path(filename).suffix.lower()), None)
-  if ext is None:
-    raise TranscriptionJobError("unsupported_format", "Formato de archivo no soportado.")
+  ext = next(e for e in SUPPORTED_FORMATS if e == Path(filename).suffix.lower())
   stored = f"media{ext}"
   dest = folder / stored
   tmp = folder / f".{stored}.part"
-  limit = config.max_upload_bytes()
-  digest = hashlib.sha256()
-  size = 0
   try:
-    with tmp.open("wb") as fh:
-      while True:
-        block = await upload.read(UPLOAD_BLOCK)
-        if not block:
-          break
-        size += len(block)
-        if size > limit:
-          raise TranscriptionJobError(
-            "file_too_large",
-            f"El archivo supera el máximo de {limit // (1024 * 1024)} MB.",
-          )
-        digest.update(block)
-        fh.write(block)
-    if size == 0:
-      raise TranscriptionJobError("unsupported_format", "El archivo multimedia está vacío.")
+    size, digest = await _stream_to_file(upload, tmp, config.max_upload_bytes())
     tmp.replace(dest)
   except BaseException:
     tmp.unlink(missing_ok=True)
     if not any(folder.iterdir()):
       folder.rmdir()
     raise
-  resolved_title = title.strip() or filename
-  return _media_entry(transcription_id, filename, stored, dest, size, digest.hexdigest(), resolved_title, description.strip())
+  return _media_entry(transcription_id, filename, stored, dest, size, digest, title.strip() or filename, description.strip())
 
 
 def match_local_root(raw: str | Path) -> Optional[tuple[str, str]]:
@@ -189,17 +190,20 @@ def is_allowed_local_path(path: str | Path) -> bool:
   return match_local_root(path) is not None
 
 
-def local_media_entry(transcription_id: str, local_path: str, title: str, description: str = "") -> dict[str, Any]:
-  """Desktop mode only: reference a file inside TRANSCRIPTION_LOCAL_ROOTS without copying it."""
+def _allowed_local_file(local_path: str) -> Path:
+  """The existing local file inside TRANSCRIPTION_LOCAL_ROOTS, in desktop mode only."""
   match = match_local_root(local_path) if config.desktop_mode() else None
-  if match is None:
+  if match is None or not match[0].startswith(match[1]):
     raise TranscriptionJobError("bad_request", "Ruta local no permitida.")
-  real_path, root_prefix = match
-  if not real_path.startswith(root_prefix):
-    raise TranscriptionJobError("bad_request", "Ruta local no permitida.")
-  path = Path(real_path)
+  path = Path(match[0])
   if not path.is_file():
     raise TranscriptionJobError("bad_request", f"El archivo local no existe o no es accesible: {local_path}")
+  return path
+
+
+def local_media_entry(transcription_id: str, local_path: str, title: str, description: str = "") -> dict[str, Any]:
+  """Desktop mode only: reference a file inside TRANSCRIPTION_LOCAL_ROOTS without copying it."""
+  path = _allowed_local_file(local_path)
   size = path.stat().st_size
   ok, err = validate_file(path.name, size)
   if not ok:
@@ -212,12 +216,9 @@ def local_media_entry(transcription_id: str, local_path: str, title: str, descri
 
 def initial_record(entry: dict[str, Any], user_id: Optional[str]) -> dict[str, Any]:
   """Record saved right after upload so the user-assigned title survives."""
-  meta: dict[str, Any] = {
-    "title": entry["title"],
-    "description": entry.get("description", ""),
-    "size_bytes": entry.get("size_bytes", 0),
-    "file_size_formatted": entry.get("file_size_formatted"),
-  }
+  meta: dict[str, Any] = {"title": entry["title"], "file_size_formatted": entry.get("file_size_formatted")}
+  meta["description"] = entry.get("description", "")
+  meta["size_bytes"] = entry.get("size_bytes", 0)
   if entry.get("source_path"):
     meta["source_path"] = entry["source_path"]
   return {
@@ -254,9 +255,7 @@ def remove_original_after_extraction(transcription_id: str) -> None:
 
 
 def delete_folder(transcription_id: str) -> None:
-  folder = get_transcription_dir(transcription_id)
-  if folder.exists() and folder.is_dir():
-    shutil.rmtree(folder, ignore_errors=True)
+  shutil.rmtree(get_transcription_dir(transcription_id), ignore_errors=True)
 
 
 def delete_chunks(transcription_id: str) -> None:
