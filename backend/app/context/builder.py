@@ -116,31 +116,24 @@ class ContextBuilder:
         )
 
     @staticmethod
-    def _format_system(prompt: str, reserve: int, truncated: List[str]) -> str:
-        if estimate_tokens(prompt) > reserve:
-            truncated.append("system_prompt")
-            return truncate_to_budget(prompt, reserve)
-        return prompt
+    def _fit(text: str, reserve: int, section: str, truncated: List[str]) -> str:
+        """The text itself, or its truncation to the budget, noting which section was cut."""
+        if estimate_tokens(text) > reserve:
+            truncated.append(section)
+            return truncate_to_budget(text, reserve)
+        return text
 
-    @staticmethod
-    def _format_project(project: Optional[ProjectKnowledge], reserve: int, truncated: List[str]) -> str:
-        if not project:
-            return ""
-        raw_text = project.to_context_block()
-        if estimate_tokens(raw_text) > reserve:
-            truncated.append("project_context")
-            return truncate_to_budget(raw_text, reserve)
-        return raw_text
+    @classmethod
+    def _format_system(cls, prompt: str, reserve: int, truncated: List[str]) -> str:
+        return cls._fit(prompt, reserve, "system_prompt", truncated)
 
-    @staticmethod
-    def _format_conversation(conv: Optional[ConversationMemory], reserve: int, truncated: List[str]) -> str:
-        if not conv:
-            return ""
-        raw_text = conv.to_context_block()
-        if estimate_tokens(raw_text) > reserve:
-            truncated.append("conversation_context")
-            return truncate_to_budget(raw_text, reserve)
-        return raw_text
+    @classmethod
+    def _format_project(cls, project: Optional[ProjectKnowledge], reserve: int, truncated: List[str]) -> str:
+        return cls._fit(project.to_context_block(), reserve, "project_context", truncated) if project else ""
+
+    @classmethod
+    def _format_conversation(cls, conv: Optional[ConversationMemory], reserve: int, truncated: List[str]) -> str:
+        return cls._fit(conv.to_context_block(), reserve, "conversation_context", truncated) if conv else ""
 
     @classmethod
     def _format_rag(cls, chunks: List[ContextChunk], reserve: int, truncated: List[str]) -> str:

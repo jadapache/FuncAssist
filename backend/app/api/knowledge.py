@@ -46,6 +46,18 @@ async def get_documents() -> dict[str, Any]:
   return {"documents": list_documents()}
 
 
+def _split_tags(tags: str) -> list[str]:
+  return [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+
+def _ingest_or_reason(file: UploadFile, raw: bytes, tags: list[str]) -> tuple[dict[str, Any] | None, str | None]:
+  """The ingested document, or the reason it was rejected."""
+  try:
+    return ingest_document(filename=file.filename, raw=raw, tags=tags), None
+  except ValueError as exc:
+    return None, str(exc)
+
+
 @router.post("/documents")
 async def upload_document(
   file: UploadFile = File(...),
@@ -54,11 +66,9 @@ async def upload_document(
   raw = await file.read()
   if not raw:
     raise HTTPException(status_code=400, detail="Empty file")
-  tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-  try:
-    entry = ingest_document(filename=file.filename or "upload.txt", raw=raw, tags=tag_list)
-  except ValueError as exc:
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  entry, error = _ingest_or_reason(file, raw, _split_tags(tags))
+  if error:
+    raise HTTPException(status_code=400, detail=error)
   return {"document": entry}
 
 
@@ -69,19 +79,16 @@ async def upload_documents_batch(
 ) -> dict[str, Any]:
   if not files:
     raise HTTPException(status_code=400, detail="At least one file is required.")
-  tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+  tag_list = _split_tags(tags)
   uploaded: list[dict[str, Any]] = []
   errors: list[str] = []
   for file in files:
     raw = await file.read()
-    if not raw:
-      errors.append(f"{file.filename or 'file'}: empty")
-      continue
-    try:
-      entry = ingest_document(filename=file.filename or "upload.txt", raw=raw, tags=tag_list)
+    entry, error = _ingest_or_reason(file, raw, tag_list) if raw else (None, "empty")
+    if error:
+      errors.append(f"{file.filename}: {error}")
+    else:
       uploaded.append(entry)
-    except ValueError as exc:
-      errors.append(f"{file.filename or 'file'}: {exc}")
   if not uploaded:
     raise HTTPException(status_code=400, detail="; ".join(errors) or "Upload failed")
   return {"documents": uploaded, "errors": errors}

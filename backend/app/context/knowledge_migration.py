@@ -33,102 +33,96 @@ def migrate_knowledge_if_needed() -> None:
     migrate_json_to_postgres_if_needed()
 
 
-def migrate_json_to_postgres_if_needed() -> None:
-  """Migrates legacy JSON files to PostgreSQL if present and sentinel absent."""
-  chunks_path = KNOWLEDGE_DIR / "chunks.json"
-  manifest_path = KNOWLEDGE_DIR / "manifest.json"
+_SENTINEL = "json_migration_done"
 
-  if not chunks_path.exists() and not manifest_path.exists():
-    return
 
+def _already_migrated() -> bool:
   try:
     with _db() as conn:
       cur = conn.cursor()
-      cur.execute("SELECT value FROM db_meta WHERE key = 'json_migration_done'")
-      row = cur.fetchone()
-      if row:
-        return
+      cur.execute("SELECT value FROM db_meta WHERE key = %s", (_SENTINEL,))
+      return bool(cur.fetchone())
   except Exception:
-    pass
+    return False
 
-  logger.info("Starting knowledge base migration: JSON → PostgreSQL")
 
-  manifest: list[dict[str, Any]] = []
-  chunks: list[dict[str, Any]] = []
+def _read_legacy_list(path: Path) -> list[dict[str, Any]]:
+  if not path.exists():
+    return []
+  try:
+    return json.loads(path.read_text(encoding="utf-8"))
+  except Exception as e:
+    logger.error("Could not read %s: %s", path.name, e)
+    return []
 
-  if manifest_path.exists():
-    try:
-      manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception as e:
-      logger.error("Could not read manifest.json: %s", e)
 
-  if chunks_path.exists():
-    try:
-      chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
-    except Exception as e:
-      logger.error("Could not read chunks.json: %s", e)
+_INSERT_DOCUMENT = """INSERT INTO documents (id, filename, stored_as, tags, chunk_count, char_count, uploaded_at)
+  VALUES (%s, %s, %s, %s, %s, %s, %s)
+  ON CONFLICT (id) DO NOTHING"""
 
-  if not manifest and not chunks:
-    _mark_migration_done("json_migration_done")
-    return
+_INSERT_CHUNK = """INSERT INTO chunks (chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at)
+  VALUES (%s, %s, %s, %s, %s, %s, %s)
+  ON CONFLICT (chunk_id) DO NOTHING"""
 
+
+def _insert_document(cur, doc: dict[str, Any], doc_chunks: list[dict[str, Any]]) -> None:
+  doc_id = doc.get("id", "")
+  filename = doc.get("filename", "")
+  uploaded_at = doc.get("uploaded_at", "")
+  chunk_count = doc.get("chunk_count", len(doc_chunks))
+  char_count = doc.get("char_count", 0)
+  tags_json = json.dumps(doc.get("tags") or [])
+  cur.execute(_INSERT_DOCUMENT, (doc_id, filename, doc.get("stored_as", ""), tags_json, chunk_count, char_count, uploaded_at))
+  for i, chunk in enumerate(doc_chunks):
+    index = chunk.get("index", i)
+    chunk_id = chunk.get("id", f"{doc_id}:{index}")
+    values = (chunk_id, doc_id, chunk.get("filename", filename), tags_json, index, chunk.get("text", ""), chunk.get("uploaded_at", uploaded_at))
+    cur.execute(_INSERT_CHUNK, values)
+
+
+def _insert_legacy(manifest: list[dict[str, Any]], chunks: list[dict[str, Any]]) -> None:
   chunks_by_doc: dict[str, list[dict[str, Any]]] = {}
   for chunk in chunks:
-    doc_id = chunk.get("document_id", "")
-    chunks_by_doc.setdefault(doc_id, []).append(chunk)
-
+    chunks_by_doc.setdefault(chunk.get("document_id", ""), []).append(chunk)
   try:
     with _db() as conn:
       cur = conn.cursor()
       for doc in manifest:
-        doc_id = doc.get("id", "")
-        doc_chunks = chunks_by_doc.get(doc_id, [])
-        tags_json = json.dumps(doc.get("tags") or [])
-
-        cur.execute(
-          """INSERT INTO documents
-                 (id, filename, stored_as, tags, chunk_count, char_count, uploaded_at)
-                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-                 ON CONFLICT (id) DO NOTHING""",
-          (
-            doc_id,
-            doc.get("filename", ""),
-            doc.get("stored_as", ""),
-            tags_json,
-            doc.get("chunk_count", len(doc_chunks)),
-            doc.get("char_count", 0),
-            doc.get("uploaded_at", ""),
-          ),
-        )
-        for i, chunk in enumerate(doc_chunks):
-          cur.execute(
-            """INSERT INTO chunks
-                   (chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (chunk_id) DO NOTHING""",
-            (
-              chunk.get("id", f"{doc_id}:{chunk.get('index', i)}"),
-              doc_id,
-              chunk.get("filename", doc.get("filename", "")),
-              tags_json,
-              chunk.get("index", i),
-              chunk.get("text", ""),
-              chunk.get("uploaded_at", doc.get("uploaded_at", "")),
-            ),
-          )
-
-      _mark_migration_done("json_migration_done")
+        _insert_document(cur, doc, chunks_by_doc.get(doc.get("id", ""), []))
+      _mark_migration_done(_SENTINEL)
       logger.info("JSON Migration complete: %d documents, %d chunks", len(manifest), len(chunks))
   except Exception as e:
     logger.error("JSON Migration failed: %s", e)
     raise
 
+
+def _retire_legacy_file(path: Path) -> None:
+  try:
+    if path.exists():
+      path.rename(path.with_suffix(".json.migrated"))
+  except Exception as e:
+    logger.warning("Could not rename %s to .migrated: %s", path, e)
+
+
+def migrate_json_to_postgres_if_needed() -> None:
+  """Migrates legacy JSON files to PostgreSQL if present and sentinel absent."""
+  chunks_path = KNOWLEDGE_DIR / "chunks.json"
+  manifest_path = KNOWLEDGE_DIR / "manifest.json"
+  if not chunks_path.exists() and not manifest_path.exists():
+    return
+  if _already_migrated():
+    return
+
+  logger.info("Starting knowledge base migration: JSON → PostgreSQL")
+  manifest = _read_legacy_list(manifest_path)
+  chunks = _read_legacy_list(chunks_path)
+  if not manifest and not chunks:
+    _mark_migration_done(_SENTINEL)
+    return
+
+  _insert_legacy(manifest, chunks)
   for path in (chunks_path, manifest_path):
-    try:
-      if path.exists():
-        path.rename(path.with_suffix(".json.migrated"))
-    except Exception as e:
-      logger.warning("Could not rename %s to .migrated: %s", path, e)
+    _retire_legacy_file(path)
 
 
 def _mark_migration_done(key: str) -> None:
@@ -181,14 +175,13 @@ def verify_integrity() -> dict[str, Any]:
   """Runs PostgreSQL database integrity checks, validates counts and schema health."""
   status = get_db_status()
   result: dict[str, Any] = {
-    "ok": status.get("connected", False),
+    "ok": status["connected"],
     "details": [],
     "engine": "postgresql",
     "pgvector_enabled": status.get("pgvector_enabled"),
   }
 
-  if not status.get("connected"):
-    result["ok"] = False
+  if not status["connected"]:
     result["details"].append(f"Error de conexión a PostgreSQL: {status.get('error', 'No se pudo conectar')}")
     return result
 

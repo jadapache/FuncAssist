@@ -61,11 +61,7 @@ _PGVECTOR_AVAILABLE: bool | None = None
 
 
 def is_postgres_configured() -> bool:
-  settings = get_settings()
-  params = settings.get_knowledge_db_params()
-  if params["host"] or params["database"]:
-    return True
-  url = settings.get_knowledge_db_url()
+  url = get_settings().get_knowledge_db_url()
   return bool(url and url.strip())
 
 
@@ -276,22 +272,30 @@ def ensure_knowledge_dirs() -> None:
 # ---------------------------------------------------------------------------
 
 
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+_HTML_SUFFIXES = (".html", ".htm")
+
+
+def _decode_text(raw: bytes) -> str:
+  for encoding in ("utf-8", "utf-16"):
+    try:
+      return raw.decode(encoding)
+    except UnicodeDecodeError:
+      continue
+  return raw.decode("latin-1")
+
+
 def extract_text(filename: str, raw: bytes) -> str:
   lower = filename.lower()
-  if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")):
+  if lower.endswith(_IMAGE_SUFFIXES):
     return f"[Asset Imagen: {filename} ({len(raw)} bytes)]"
   if lower.endswith(".pdf"):
     return _extract_pdf(raw)
   if lower.endswith(".docx"):
     return _extract_docx(raw)
-  if lower.endswith((".html", ".htm")):
+  if lower.endswith(_HTML_SUFFIXES):
     return _extract_html(raw)
-  for encoding in ("utf-8", "utf-16", "latin-1"):
-    try:
-      return raw.decode(encoding)
-    except UnicodeDecodeError:
-      continue
-  return raw.decode("utf-8", errors="ignore")
+  return _decode_text(raw)
 
 
 def _extract_pdf(raw: bytes) -> str:
@@ -305,46 +309,33 @@ def _extract_pdf(raw: bytes) -> str:
     raise ValueError(f"Failed to read PDF: {exc}") from exc
 
 
+def _table_as_markdown(table) -> str:
+  """A Word table as a Markdown table, with a separator under the header when it is missing."""
+  lines = []
+  for row in table.rows:
+    cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+    if any(cells):
+      lines.append("| " + " | ".join(cells) + " |")
+  if len(lines) > 1 and "---" not in lines[1]:
+    lines.insert(1, "| " + " | ".join(["---"] * len(table.columns)) + " |")
+  return "\n".join(lines)
+
+
 def _extract_docx(raw: bytes) -> str:
   try:
     from io import BytesIO
     from docx import Document
 
     document = Document(BytesIO(raw))
-    sections: list[str] = []
-
-    for p in document.paragraphs:
-      cleaned = p.text.strip()
-      if cleaned:
-        sections.append(cleaned)
-
-    for table in document.tables:
-      table_rows: list[str] = []
-      for row in table.rows:
-        cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
-        if any(cells):
-          table_rows.append("| " + " | ".join(cells) + " |")
-      if table_rows:
-        if len(table_rows) > 1 and "---" not in table_rows[1]:
-          header_cols = len(table.rows[0].cells)
-          separator = "| " + " | ".join(["---"] * header_cols) + " |"
-          table_rows.insert(1, separator)
-        sections.append("\n".join(table_rows))
-
-    return "\n\n".join(sections)
+    paragraphs = [p.text.strip() for p in document.paragraphs if p.text.strip()]
+    tables = [markdown for markdown in map(_table_as_markdown, document.tables) if markdown]
+    return "\n\n".join(paragraphs + tables)
   except Exception as exc:
     raise ValueError(f"Failed to read DOCX: {exc}") from exc
 
 
 def _extract_html(raw: bytes) -> str:
-  for encoding in ("utf-8", "utf-16", "latin-1"):
-    try:
-      html = raw.decode(encoding)
-      break
-    except UnicodeDecodeError:
-      continue
-  else:
-    html = raw.decode("utf-8", errors="ignore")
+  html = _decode_text(raw)
   html = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
   html = re.sub(r"(?is)<(br|p|div|li|h[1-6]|tr)[^>]*>", "\n", html)
   text = re.sub(r"(?s)<[^>]+>", " ", html)
@@ -360,17 +351,14 @@ def chunk_text(text: str) -> list[str]:
   cleaned = re.sub(r"\s+", " ", text).strip()
   if not cleaned:
     return []
-  if len(cleaned) <= CHUNK_SIZE:
-    return [cleaned]
   chunks: list[str] = []
   start = 0
-  while start < len(cleaned):
+  while True:
     end = min(start + CHUNK_SIZE, len(cleaned))
     chunks.append(cleaned[start:end])
     if end >= len(cleaned):
-      break
-    start = max(0, end - CHUNK_OVERLAP)
-  return chunks
+      return chunks
+    start = end - CHUNK_OVERLAP
 
 
 # ---------------------------------------------------------------------------
@@ -455,13 +443,46 @@ def delete_document(document_id: str) -> bool:
     row = cur.fetchone()
     if not row:
       return False
-    stored = get_knowledge_documents_dir() / row["stored_as"]
-    if stored.exists():
-      stored.unlink(missing_ok=True)
+    (get_knowledge_documents_dir() / row["stored_as"]).unlink(missing_ok=True)
     cur.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
     cur.execute("DELETE FROM documents WHERE id = %s", (document_id,))
 
   return True
+
+
+def _tags_of(raw: Any) -> list[Any]:
+  return raw if isinstance(raw, list) else json.loads(raw or "[]")
+
+
+def _timestamp(value: Any) -> str:
+  return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _chunk_dict(row: dict[str, Any], *, scored: bool = False) -> dict[str, Any]:
+  chunk = {
+    "id": row["chunk_id"],
+    "document_id": row["document_id"],
+    "filename": row["filename"],
+    "tags": _tags_of(row["tags"]),
+    "index": row["chunk_index"],
+    "text": row["text"],
+    "uploaded_at": _timestamp(row["uploaded_at"]),
+  }
+  if scored:
+    chunk["score"] = float(row["score"])
+  return chunk
+
+
+def _document_dict(row: dict[str, Any]) -> dict[str, Any]:
+  return {
+    "id": row["id"],
+    "filename": row["filename"],
+    "stored_as": row["stored_as"],
+    "tags": _tags_of(row["tags"]),
+    "chunk_count": row["chunk_count"],
+    "char_count": row["char_count"],
+    "uploaded_at": _timestamp(row["uploaded_at"]),
+  }
 
 
 def list_documents() -> list[dict[str, Any]]:
@@ -470,287 +491,133 @@ def list_documents() -> list[dict[str, Any]]:
     cur = conn.cursor()
     cur.execute("SELECT * FROM documents ORDER BY uploaded_at DESC")
     rows = cur.fetchall()
+  return [_document_dict(row) for row in rows]
 
-  result = []
-  for row in rows:
-    raw_tags = row["tags"]
-    tags = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
-    up_at = row["uploaded_at"]
-    uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
-    result.append({
-      "id": row["id"],
-      "filename": row["filename"],
-      "stored_as": row["stored_as"],
-      "tags": tags,
-      "chunk_count": row["chunk_count"],
-      "char_count": row["char_count"],
-      "uploaded_at": uploaded_at_str,
-    })
-  return result
+
+_CHUNK_COLUMNS = "chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at"
 
 
 def load_chunks() -> list[dict[str, Any]]:
   ensure_knowledge_dirs()
   with _db() as conn:
     cur = conn.cursor()
-    cur.execute(
-      "SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at FROM chunks ORDER BY document_id, chunk_index"
-    )
+    cur.execute(f"SELECT {_CHUNK_COLUMNS} FROM chunks ORDER BY document_id, chunk_index")
     rows = cur.fetchall()
-
-  result = []
-  for row in rows:
-    raw_tags = row["tags"]
-    tags = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
-    up_at = row["uploaded_at"]
-    uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
-    result.append({
-      "id": row["chunk_id"],
-      "document_id": row["document_id"],
-      "filename": row["filename"],
-      "tags": tags,
-      "index": row["chunk_index"],
-      "text": row["text"],
-      "uploaded_at": uploaded_at_str,
-    })
-  return result
+  return [_chunk_dict(row) for row in rows]
 
 
-def get_chunks_for_documents(
-  document_ids: list[str],
-  *,
-  max_chunks: int = 48,
-) -> list[dict[str, Any]]:
+def get_chunks_for_documents(document_ids: list[str], *, max_chunks: int = 48) -> list[dict[str, Any]]:
   if not document_ids:
     return []
   ensure_knowledge_dirs()
   with _db() as conn:
     cur = conn.cursor()
     cur.execute(
-      """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at
-         FROM chunks
-         WHERE document_id = ANY(%s)
-         ORDER BY document_id, chunk_index
-         LIMIT %s""",
+      f"SELECT {_CHUNK_COLUMNS} FROM chunks WHERE document_id = ANY(%s) ORDER BY document_id, chunk_index LIMIT %s",
       (document_ids, max_chunks),
     )
     rows = cur.fetchall()
-
-  result = []
-  for row in rows:
-    raw_tags = row["tags"]
-    tags = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
-    up_at = row["uploaded_at"]
-    uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
-    result.append({
-      "id": row["chunk_id"],
-      "document_id": row["document_id"],
-      "filename": row["filename"],
-      "tags": tags,
-      "index": row["chunk_index"],
-      "text": row["text"],
-      "uploaded_at": uploaded_at_str,
-    })
-  return result
+  return [_chunk_dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
-# Search: Full-Text Search (Spanish) & Vector Similarity Search
+# Search: Full-Text Search (Spanish), vector similarity and trigram similarity
 # ---------------------------------------------------------------------------
 
 
-def search_chunks_fts(
-  query: str,
-  *,
-  top_k: int = 8,
-  tags: list[str] | None = None,
-) -> list[dict[str, Any]]:
+def _search_limit(top_k: int, tags: list[str] | None) -> int:
+  """Over-fetch when tags will filter the rows afterwards, so top_k survivors remain likely."""
+  return top_k * 3 if tags else top_k
+
+
+def _with_any_tag(rows: list[dict[str, Any]], tags: list[str] | None, top_k: int) -> list[dict[str, Any]]:
+  if not tags:
+    return rows[:top_k]
+  wanted = {tag.lower() for tag in tags}
+  return [row for row in rows if wanted & {str(tag).lower() for tag in _tags_of(row["tags"])}][:top_k]
+
+
+def _search_chunks(fetch, *, top_k: int, tags: list[str] | None, failure: str, needs_vector: bool = False) -> list[dict[str, Any]]:
+  """Run `fetch(cursor)` and return the chunks carrying one of the tags; a failing query yields no results."""
+  with _db() as conn:
+    if needs_vector and not _PGVECTOR_AVAILABLE:
+      return []
+    try:
+      rows = fetch(conn.cursor())
+    except Exception as exc:
+      logger.warning(failure, exc)
+      return []
+  return [_chunk_dict(row, scored=True) for row in _with_any_tag(rows, tags, top_k)]
+
+
+_FTS_SQL = """SELECT {columns}, ts_rank_cd(tsv, {tsquery}('spanish', %(query)s)) AS score
+  FROM chunks
+  WHERE tsv @@ {tsquery}('spanish', %(query)s)
+  ORDER BY score DESC
+  LIMIT %(limit)s"""
+
+
+def _fts_rows(cur, query: str, limit: int) -> list[dict[str, Any]]:
+  """Web-style syntax first; a plain query when that matches nothing (e.g. a lone negated term)."""
+  for tsquery in ("websearch_to_tsquery", "plainto_tsquery"):
+    cur.execute(_FTS_SQL.format(columns=_CHUNK_COLUMNS, tsquery=tsquery), {"query": query, "limit": limit})
+    rows = cur.fetchall()
+    if rows:
+      return rows
+  return []
+
+
+def search_chunks_fts(query: str, *, top_k: int = 8, tags: list[str] | None = None) -> list[dict[str, Any]]:
   """Full-Text Search with ranking and Spanish diacritics support via PostgreSQL tsvector."""
   ensure_knowledge_dirs()
   if not query.strip():
-    all_chunks = load_chunks()
-    if tags:
-      tag_set = {t.lower() for t in tags}
-      all_chunks = [
-        c
-        for c in all_chunks
-        if tag_set.intersection({str(t).lower() for t in c.get("tags") or []})
-      ]
-    return all_chunks[:top_k]
-
-  with _db() as conn:
-    cur = conn.cursor()
-    try:
-      cur.execute(
-        """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
-                  ts_rank_cd(tsv, websearch_to_tsquery('spanish', %(query)s)) AS score
-           FROM chunks
-           WHERE tsv @@ websearch_to_tsquery('spanish', %(query)s)
-           ORDER BY score DESC
-           LIMIT %(limit)s""",
-        {"query": query, "limit": top_k * 3 if tags else top_k},
-      )
-      rows = cur.fetchall()
-      if not rows:
-        cur.execute(
-          """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
-                    ts_rank_cd(tsv, plainto_tsquery('spanish', %(query)s)) AS score
-             FROM chunks
-             WHERE tsv @@ plainto_tsquery('spanish', %(query)s)
-             ORDER BY score DESC
-             LIMIT %(limit)s""",
-          {"query": query, "limit": top_k * 3 if tags else top_k},
-        )
-        rows = cur.fetchall()
-    except Exception as err:
-      logger.warning("PostgreSQL FTS error: %s", err)
-      return []
-
-    if tags:
-      tag_set = {t.lower() for t in tags}
-      filtered = []
-      for row in rows:
-        rt = row["tags"]
-        row_tags = rt if isinstance(rt, list) else json.loads(rt or "[]")
-        if tag_set.intersection({str(t).lower() for t in row_tags}):
-          filtered.append(row)
-      rows = filtered[:top_k]
-
-    result = []
-    for row in rows:
-      raw_tags = row["tags"]
-      tags_list = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
-      up_at = row["uploaded_at"]
-      uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
-      result.append({
-        "id": row["chunk_id"],
-        "document_id": row["document_id"],
-        "filename": row["filename"],
-        "tags": tags_list,
-        "index": row["chunk_index"],
-        "text": row["text"],
-        "uploaded_at": uploaded_at_str,
-        "score": float(row["score"]),
-      })
-    return result
+    return _with_any_tag(load_chunks(), tags, top_k)
+  limit = _search_limit(top_k, tags)
+  return _search_chunks(lambda cur: _fts_rows(cur, query, limit), top_k=top_k, tags=tags, failure="PostgreSQL FTS error: %s")
 
 
-def search_chunks_vector(
-  query_vector: list[float],
-  *,
-  top_k: int = 8,
-  tags: list[str] | None = None,
-) -> list[dict[str, Any]]:
+_VECTOR_SQL = f"""SELECT {_CHUNK_COLUMNS}, 1 - (embedding <=> %(vector)s::vector) AS score
+  FROM chunks
+  WHERE embedding IS NOT NULL
+  ORDER BY embedding <=> %(vector)s::vector ASC
+  LIMIT %(limit)s"""
+
+
+def _query_rows(cur, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+  cur.execute(sql, params)
+  return cur.fetchall()
+
+
+def search_chunks_vector(query_vector: list[float], *, top_k: int = 8, tags: list[str] | None = None) -> list[dict[str, Any]]:
   """Vector similarity search (cosine distance) using PostgreSQL pgvector."""
   if not is_postgres_configured() or not query_vector:
     return []
-
-  with _db() as conn:
-    if not _PGVECTOR_AVAILABLE:
-      return []
-    cur = conn.cursor()
-    try:
-      cur.execute(
-        """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
-                  1 - (embedding <=> %(vector)s) AS score
-           FROM chunks
-           WHERE embedding IS NOT NULL
-           ORDER BY embedding <=> %(vector)s ASC
-           LIMIT %(limit)s""",
-        {"vector": query_vector, "limit": top_k * 3 if tags else top_k},
-      )
-      rows = cur.fetchall()
-    except Exception as exc:
-      logger.warning("Vector search query failed: %s", exc)
-      return []
-
-    if tags:
-      tag_set = {t.lower() for t in tags}
-      filtered = []
-      for row in rows:
-        rt = row["tags"]
-        row_tags = rt if isinstance(rt, list) else json.loads(rt or "[]")
-        if tag_set.intersection({str(t).lower() for t in row_tags}):
-          filtered.append(row)
-      rows = filtered[:top_k]
-
-    result = []
-    for row in rows:
-      raw_tags = row["tags"]
-      tags_list = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
-      up_at = row["uploaded_at"]
-      uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
-      result.append({
-        "id": row["chunk_id"],
-        "document_id": row["document_id"],
-        "filename": row["filename"],
-        "tags": tags_list,
-        "index": row["chunk_index"],
-        "text": row["text"],
-        "uploaded_at": uploaded_at_str,
-        "score": float(row["score"]),
-      })
-    return result
+  params = {"vector": query_vector, "limit": _search_limit(top_k, tags)}
+  return _search_chunks(
+    lambda cur: _query_rows(cur, _VECTOR_SQL, params),
+    top_k=top_k, tags=tags, failure="Vector search query failed: %s", needs_vector=True,
+  )
 
 
-def search_chunks_trigram(
-  query: str,
-  *,
-  top_k: int = 8,
-  tags: list[str] | None = None,
-) -> list[dict[str, Any]]:
+_TRIGRAM_SQL = f"""SELECT {_CHUNK_COLUMNS}, word_similarity(%(query)s, text) AS score
+  FROM chunks
+  WHERE %(query)s <%% text
+  ORDER BY score DESC
+  LIMIT %(limit)s"""
+
+
+def search_chunks_trigram(query: str, *, top_k: int = 8, tags: list[str] | None = None) -> list[dict[str, Any]]:
   """Fuzzy lexical search via pg_trgm word similarity.
 
   Catches terms the Spanish tsvector misses, such as acronyms, IDs and English words.
   """
   if not is_postgres_configured() or not query.strip():
     return []
-
-  limit = top_k * 3 if tags else top_k
-  with _db() as conn:
-    cur = conn.cursor()
-    try:
-      cur.execute(
-        """SELECT chunk_id, document_id, filename, tags, chunk_index, text, uploaded_at,
-                  word_similarity(%(query)s, text) AS score
-           FROM chunks
-           WHERE %(query)s <%% text
-           ORDER BY score DESC
-           LIMIT %(limit)s""",
-        {"query": query, "limit": limit},
-      )
-      rows = cur.fetchall()
-    except Exception as exc:
-      logger.warning("Trigram search query failed: %s", exc)
-      return []
-
-    if tags:
-      tag_set = {t.lower() for t in tags}
-      filtered = []
-      for row in rows:
-        rt = row["tags"]
-        row_tags = rt if isinstance(rt, list) else json.loads(rt or "[]")
-        if tag_set.intersection({str(t).lower() for t in row_tags}):
-          filtered.append(row)
-      rows = filtered[:top_k]
-
-    result = []
-    for row in rows:
-      raw_tags = row["tags"]
-      tags_list = raw_tags if isinstance(raw_tags, list) else json.loads(raw_tags or "[]")
-      up_at = row["uploaded_at"]
-      uploaded_at_str = up_at.isoformat() if hasattr(up_at, "isoformat") else str(up_at)
-      result.append({
-        "id": row["chunk_id"],
-        "document_id": row["document_id"],
-        "filename": row["filename"],
-        "tags": tags_list,
-        "index": row["chunk_index"],
-        "text": row["text"],
-        "uploaded_at": uploaded_at_str,
-        "score": float(row["score"]),
-      })
-    return result
+  params = {"query": query, "limit": _search_limit(top_k, tags)}
+  return _search_chunks(
+    lambda cur: _query_rows(cur, _TRIGRAM_SQL, params),
+    top_k=top_k, tags=tags, failure="Trigram search query failed: %s",
+  )
 
 
 # ---------------------------------------------------------------------------
@@ -758,11 +625,8 @@ def search_chunks_trigram(
 # ---------------------------------------------------------------------------
 
 
-def get_db_status() -> dict[str, Any]:
-  """Return current PostgreSQL database engine and capabilities status."""
-  pg_configured = is_postgres_configured()
-  params = get_settings().get_knowledge_db_params()
-  status: dict[str, Any] = {
+def _empty_status(params: dict[str, Any]) -> dict[str, Any]:
+  return {
     "engine": "postgresql",
     "is_postgres": True,
     "pgvector_enabled": bool(_PGVECTOR_AVAILABLE),
@@ -775,24 +639,34 @@ def get_db_status() -> dict[str, Any]:
     "chunk_count": 0,
   }
 
-  if not pg_configured:
+
+def _count(cur, table: str) -> int:
+  cur.execute(f"SELECT COUNT(*) AS c FROM {table}")
+  return cur.fetchone()["c"]
+
+
+def _fill_live_status(status: dict[str, Any], params: dict[str, Any]) -> None:
+  with _db() as conn:
+    cur = conn.cursor()
+    status["doc_count"] = _count(cur, "documents")
+    status["chunk_count"] = _count(cur, "chunks")
+    status["host"] = params["host"] or conn.info.host
+    status["database"] = params["database"] or conn.info.dbname
+    status["pgvector_enabled"] = bool(_PGVECTOR_AVAILABLE)
+    status["connected"] = True
+
+
+def get_db_status() -> dict[str, Any]:
+  """Return current PostgreSQL database engine and capabilities status."""
+  params = get_settings().get_knowledge_db_params()
+  status = _empty_status(params)
+  if not is_postgres_configured():
     status["error"] = "PostgreSQL no está configurado en las variables de entorno."
     return status
-
   try:
-    with _db() as conn:
-      cur = conn.cursor()
-      cur.execute("SELECT COUNT(*) AS c FROM documents")
-      status["doc_count"] = cur.fetchone()["c"]
-      cur.execute("SELECT COUNT(*) AS c FROM chunks")
-      status["chunk_count"] = cur.fetchone()["c"]
-      status["host"] = params["host"] or (conn.info.host if hasattr(conn.info, "host") else "remote")
-      status["database"] = params["database"] or (conn.info.dbname if hasattr(conn.info, "dbname") else "")
-      status["pgvector_enabled"] = bool(_PGVECTOR_AVAILABLE)
-      status["connected"] = True
+    _fill_live_status(status, params)
   except Exception as exc:
     logger.exception("Error al consultar el estado de la base de datos de conocimiento: %s", exc)
     status["connected"] = False
     status["error"] = "Error al conectar o consultar la base de datos de conocimiento."
-
   return status
